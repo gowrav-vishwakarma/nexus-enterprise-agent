@@ -2,7 +2,7 @@
 
 import pytest
 
-from nexus.config import AgentConfig, LLMProviderConfig
+from nexus.config import AgentConfig, LLMProviderConfig, DEFAULT_RCS_SYSTEM_BLOCK
 from nexus.config.rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
 from nexus.context.builder import ContextWindowBuilder
 from nexus.context.rcs_injector import RCSSystemPromptInjector
@@ -18,11 +18,11 @@ def test_system_prompt_injector():
     # Non-empty system message
     prompt = RCSSystemPromptInjector.inject("You are an assistant.", rcs_config)
     assert "You are an assistant." in prompt
-    assert "## Context Management Protocol" in prompt
+    assert DEFAULT_RCS_SYSTEM_BLOCK.strip() in prompt
 
     # Empty system message
     prompt_empty = RCSSystemPromptInjector.inject("", rcs_config)
-    assert "## Context Management Protocol" in prompt_empty
+    assert DEFAULT_RCS_SYSTEM_BLOCK.strip() in prompt_empty
 
 
 @pytest.mark.asyncio

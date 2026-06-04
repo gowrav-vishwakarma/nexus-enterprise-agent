@@ -75,14 +75,6 @@ class RuntimeContextSummarizerConfig(BaseModel):
         description="Fallback compactor settings",
     )
 
-    # Context window budget
-    max_context_tokens: int = Field(
-        default=128000, ge=1000, description="Max tokens for context window"
-    )
-    min_turns_to_keep: int = Field(
-        default=2, ge=1, description="Minimum recent turns to always keep full"
-    )
-
     def get_rcs_system_block(self) -> str:
         """Return the RCS system block, using default if not overridden."""
         from nexus.config.defaults import DEFAULT_RCS_SYSTEM_BLOCK

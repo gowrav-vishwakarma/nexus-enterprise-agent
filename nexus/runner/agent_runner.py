@@ -26,6 +26,8 @@ from nexus.llm.proxy import LLMProxy
 from nexus.llm.response import LLMResponse, ToolCallRequest
 from nexus.llm.tool_format import tool_calls_to_openai_messages
 from nexus.llm.token_counter import TokenCounter
+from nexus.memory.curator import MemoryCurator
+from nexus.memory.user_store import UserMemoryStore, resolve_user_namespace
 from nexus.rcs.compactor import ServerCompactor
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
 from nexus.session.manager import SessionManager
@@ -47,6 +49,7 @@ class AgentRunner:
         storage_config: Optional[Union[SessionStorageConfig, SessionManager]] = None,
         run_context: Optional[RunContext] = None,
         event_emitter: Optional[NexusEventEmitter] = None,
+        user_memory_store: Optional[UserMemoryStore] = None,
     ):
         self.config = config
         self.tool_registry = tool_registry
@@ -64,7 +67,9 @@ class AgentRunner:
                 self.session_manager = SessionManager()
 
         self.run_context = run_context or RunContext()
-        
+        self.user_memory_store = user_memory_store
+        self._user_entity_memory: dict[str, str] = {}
+
         # Initialize Event System
         self.event_emitter = event_emitter or NexusEventEmitter()
         if self.config.trace_enabled and not self.event_emitter._sinks:
@@ -85,6 +90,39 @@ class AgentRunner:
             event_emitter=self.event_emitter,
         )
 
+        # Memory curator (gated; no-op when memory is disabled)
+        self.memory_curator = MemoryCurator(
+            config=self.config.memory,
+            llm_proxy=self.llm_proxy,
+            session_manager=self.session_manager,
+            tool_registry=self.tool_registry,
+            run_context=self.run_context,
+            event_emitter=self.event_emitter,
+            user_memory_store=self.user_memory_store,
+            agent_name=self.config.name,
+        )
+
+    async def _load_user_entity_memory(self) -> dict[str, str]:
+        """Load cross-session user facts for injection into the system prompt."""
+        user_cfg = self.config.memory.user
+        if not user_cfg.enabled or not self.user_memory_store:
+            return {}
+        if not self.run_context.user_id:
+            return {}
+
+        namespace = resolve_user_namespace(user_cfg.namespace, self.config.name)
+        try:
+            record = await self.user_memory_store.load(
+                self.run_context.tenant_id,
+                self.run_context.user_id,
+                namespace,
+            )
+            if record and record.entity_memory:
+                return dict(record.entity_memory)
+        except Exception as exc:
+            logger.warning("AgentRunner: failed to load user memory: %s", exc)
+        return {}
+
     async def _get_or_create_session(self, session_id: Optional[str]) -> AgentSession:
         """Fetch existing session or create a new one."""
         sid = session_id or self.run_context.session_id
@@ -104,6 +142,18 @@ class AgentRunner:
             
         return session
 
+    async def _maybe_curate_after_turn(
+        self, session: AgentSession, turn_index: int
+    ) -> AgentSession:
+        """Run memory curator after a turn if configured; reload session."""
+        if self.memory_curator.should_trigger(turn_index, at_end=False):
+            await self.memory_curator.curate(session, turn_index)
+            reloaded = await self.session_manager.load_session(session.session_id)
+            if reloaded is not None:
+                session = reloaded
+            self._user_entity_memory = await self._load_user_entity_memory()
+        return session
+
     async def run(
         self,
         user_message: str,
@@ -112,7 +162,8 @@ class AgentRunner:
     ) -> AgentRunResult:
         """Run the single agent turn-loop synchronously (awaiting entire flow)."""
         session = await self._get_or_create_session(session_id)
-        
+        self._user_entity_memory = await self._load_user_entity_memory()
+
         # Set initial metadata if provided
         if initial_context:
             session.metadata.update(initial_context)
@@ -148,6 +199,7 @@ class AgentRunner:
                     agent_config=self.config,
                     current_user_message=current_user_message if turn_index == 0 else None,
                     token_budget=self.config.llm.context_window_tokens,
+                    user_entity_memory=self._user_entity_memory,
                 )
                 current_tokens = TokenCounter.count_messages(messages, self.config.llm.model)
 
@@ -237,6 +289,8 @@ class AgentRunner:
                         status="completed",
                     )
                     await self.session_manager.append_turn(session.session_id, final_turn)
+                    session = await self.session_manager.load_session(session.session_id)
+                    session = await self._maybe_curate_after_turn(session, turn_index)
                     turn_index += 1
                     break
 
@@ -356,6 +410,8 @@ class AgentRunner:
                 # Fetch fresh session state from persistence to reflect append
                 session = await self.session_manager.load_session(session.session_id)
 
+                session = await self._maybe_curate_after_turn(session, turn_index)
+
                 await self.event_emitter.emit(
                     TurnCompletedEvent(
                         session_id=session.session_id,
@@ -385,6 +441,20 @@ class AgentRunner:
                     error=error_msg,
                 )
             )
+
+        # End-of-run memory curation (gated). Reload first so the curator sees the
+        # final turn, then guard against double-curating the same turn.
+        if status != "error" and self.memory_curator.active:
+            try:
+                refreshed = await self.session_manager.load_session(session.session_id)
+                if refreshed is not None:
+                    session = refreshed
+                final_turn_idx = max(turn_index - 1, 0)
+                if self.memory_curator.should_trigger(final_turn_idx, at_end=True):
+                    await self.memory_curator.curate(session, final_turn_idx)
+                    self._user_entity_memory = await self._load_user_entity_memory()
+            except Exception as e:
+                logger.warning("AgentRunner: end-of-run memory curation failed: %s", e)
 
         duration_ms = int((time.time() - start_time) * 1000)
 

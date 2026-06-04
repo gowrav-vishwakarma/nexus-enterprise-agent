@@ -84,23 +84,9 @@ class ServerCompactor:
         tcs_compacted = []
         tokens_saved = 0
 
-        # Define default compactor prompt if not configured
-        default_prompt_template = (
-            "A tool call was made during an AI agent run and returned the result below.\n"
-            "The agent has not yet compressed this result and the context window is at risk of overflowing.\n\n"
-            "Your job: Write a 1-3 sentence factual summary of the most important information "
-            "in the result. Focus on facts that an agent would need to reference later.\n"
-            "If the result contains nothing useful (errors, empty responses, irrelevant data), "
-            "output exactly: []\n\n"
-            "Tool: {tool_name}\n"
-            "Input: {tool_input}\n"
-            "Result:\n"
-            "---\n"
-            "{raw_response}\n"
-            "---\n\n"
-            "Compact summary (or []):"
-        )
-        prompt_tmpl = self.config.prompt_template or default_prompt_template
+        from nexus.config.defaults import DEFAULT_COMPACTOR_PROMPT
+
+        prompt_tmpl = self.config.prompt_template or DEFAULT_COMPACTOR_PROMPT
 
         for tc, turn_idx in target_tcs:
             prompt = prompt_tmpl.format(

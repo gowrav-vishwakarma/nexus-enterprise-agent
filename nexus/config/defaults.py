@@ -41,15 +41,21 @@ This compression is done IN-LINE with your tool call - no extra API calls needed
 """
 
 # Compact prompt - used by ServerCompactor fallback (separate LLM call)
-DEFAULT_COMPACTOR_PROMPT = """You are a context compression assistant. Summarize the following tool result concisely.
-Preserve: key numbers, names, URLs, code snippets, critical findings.
-Omit: verbose output, repeated information, formatting artifacts.
-Keep it under 100 words unless the result is extremely dense with important information.
+DEFAULT_COMPACTOR_PROMPT = """A tool call was made during an AI agent run and returned the result below.
+The agent has not yet compressed this result and the context window is at risk of overflowing.
 
-Tool result to summarize:
+Your job: Write a 1-3 sentence factual summary of the most important information in the result.
+Focus on facts that an agent would need to reference later.
+If the result contains nothing useful (errors, empty responses, irrelevant data), output exactly: []
+
+Tool: {tool_name}
+Input: {tool_input}
+Result:
+---
 {raw_response}
+---
 
-Return ONLY the summary text, nothing else."""
+Compact summary (or []):"""
 
 # Default system prompt template (Jinja2)
 DEFAULT_SYSTEM_TEMPLATE = """You are {{ persona.role }}.
@@ -60,13 +66,20 @@ Goal: {{ persona.goal }}
 Background: {{ persona.backstory }}
 {% endif %}
 
+{% if user_entity_memory %}
+## About this user (across conversations)
+{% for key, value in user_entity_memory.items() %}
+- {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+
 {% if working_memory %}
 ## Your Working Notes
 {{ working_memory }}
 {% endif %}
 
 {% if entity_memory %}
-## Known Facts
+## Known Facts (this conversation)
 {% for key, value in entity_memory.items() %}
 - {{ key }}: {{ value }}
 {% endfor %}
@@ -82,6 +95,31 @@ Conversation:
 
 Extract: names, numbers, dates, URLs, key findings, decisions made.
 Return ONLY valid JSON, no markdown formatting."""
+
+# Memory curator prompt - used by MemoryCurator (separate LLM call).
+# Placeholders {existing_entities}, {existing_working}, {conversation} are filled via
+# str.replace (NOT str.format), so literal JSON braces below are safe.
+DEFAULT_MEMORY_CURATOR_PROMPT = """You are a memory curator for an AI agent. Read the recent conversation and decide what durable information is worth remembering for future turns. Keep memory MINIMAL and high-signal.
+
+Return ONLY a JSON object with this exact shape (no markdown fences, no commentary):
+{"entities": {"fact_key": "concise fact value"}, "working_memory": "short notes for the current task (or empty string)"}
+
+Rules:
+- entities: durable, stable facts (names, ids, preferences, decisions). Use short, stable keys so updates overwrite cleanly. Omit ephemeral details.
+- working_memory: a brief scratchpad for the ACTIVE task. Return the full updated value, not a diff. Keep it short. Return "" to leave it unchanged.
+- If nothing is worth remembering, return {"entities": {}, "working_memory": ""}.
+- Prefer updating existing keys over adding near-duplicates.
+
+Existing entities (JSON, may be empty):
+{existing_entities}
+
+Existing working memory (may be empty):
+{existing_working}
+
+Recent conversation:
+{conversation}
+
+JSON:"""
 
 # Default tool call schema description for RCS
 DEFAULT_CONTEXT_UPDATES_PARAM_DESC = """_context_updates (list of dict, optional): Context compression updates for previous tool call results.

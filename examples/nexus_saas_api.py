@@ -31,7 +31,8 @@ from pydantic import BaseModel, SecretStr, Field
 # ── NEXUS imports (validated against codebase) ────────────────────────────────
 from nexus.config.agent import AgentConfig, AgentPersonaConfig, TurnConfig, AgentGroupConfig
 from nexus.config.llm import LLMProviderConfig
-from nexus.config.memory import MemoryConfig
+from nexus.config.memory import EntityMemoryConfig, MemoryConfig, UserMemoryConfig, WorkingMemoryConfig
+from nexus.memory.user_store import SQLiteUserMemoryStore
 from nexus.config.rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
 from nexus.config.storage import SessionStorageConfig
 from nexus.runner.agent_runner import AgentRunner
@@ -102,7 +103,6 @@ class PlanLimits(BaseModel):
 
     # Memory features
     entity_memory: bool
-    vector_memory: bool
     working_memory: bool
 
     # Tools
@@ -128,7 +128,6 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         context_window_tokens=4000,
         storage_adapter="memory",
         entity_memory=False,
-        vector_memory=False,
         working_memory=False,
         allowed_tool_plugins=[],
         use_tenant_llm_key=False,
@@ -148,7 +147,6 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         context_window_tokens=8000,
         storage_adapter="sqlite",
         entity_memory=True,
-        vector_memory=False,
         working_memory=False,
         allowed_tool_plugins=["web_search"],
         use_tenant_llm_key=False,
@@ -168,7 +166,6 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         context_window_tokens=32000,
         storage_adapter="postgresql",
         entity_memory=True,
-        vector_memory=True,
         working_memory=True,
         allowed_tool_plugins=["web_search", "database", "calendar"],
         use_tenant_llm_key=True,
@@ -188,7 +185,6 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         context_window_tokens=128000,
         storage_adapter="postgresql",
         entity_memory=True,
-        vector_memory=True,
         working_memory=True,
         allowed_tool_plugins=["web_search", "database", "calendar", "custom"],
         use_tenant_llm_key=True,
@@ -397,9 +393,10 @@ class NexusTenantConfigFactory:
             turns=TurnConfig(max_turns=limits.max_turns, max_tool_calls_per_turn=limits.max_tool_calls_per_turn),
             rcs=cls.build_rcs_config(tenant, limits, llm),
             memory=MemoryConfig(
-                entity_memory_enabled=limits.entity_memory,
-                vector_memory_enabled=limits.vector_memory,
-                working_memory_enabled=limits.working_memory,
+                enabled=limits.entity_memory or limits.working_memory,
+                entity=EntityMemoryConfig(enabled=limits.entity_memory),
+                working=WorkingMemoryConfig(enabled=limits.working_memory),
+                user=UserMemoryConfig(enabled=limits.entity_memory),
             ),
             storage=storage,
             tool_plugins=allowed_tools,
@@ -454,6 +451,8 @@ SHARED_TOOL_REGISTRY.register_plugin(WebSearchPlugin())
 SHARED_TOOL_REGISTRY.register_plugin(DatabasePlugin())
 SHARED_TOOL_REGISTRY.register_plugin(CalendarPlugin())
 
+SHARED_USER_MEMORY_STORE = SQLiteUserMemoryStore(db_path="./shared_user_memory.db")
+
 
 # ── Request / Response schemas ───────────────────────────────────────────────
 
@@ -466,6 +465,7 @@ class ChatRequest(BaseModel):
 async def chat(
     body: ChatRequest,
     tenant_ctx: ResolvedTenant = Depends(get_resolved_tenant),
+    x_user_id: str = Header(default="demo-user", alias="X-User-ID"),
 ):
     # Fetch database record for detailed options
     tenant_rec = MOCK_TENANTS_DB[tenant_ctx.tenant_id]
@@ -481,6 +481,7 @@ async def chat(
 
     run_context = RunContext(
         tenant_id=tenant_ctx.tenant_id,
+        user_id=x_user_id,
         session_id=body.session_id or str(uuid4()),
     )
 
@@ -489,6 +490,7 @@ async def chat(
         tool_registry=SHARED_TOOL_REGISTRY,
         storage_config=tenant_ctx.storage_config,
         run_context=run_context,
+        user_memory_store=SHARED_USER_MEMORY_STORE,
     )
 
     result = await runner.run(
@@ -502,6 +504,7 @@ async def chat(
         "turns_used": result.turns_used,
         "tokens_saved_by_rcs": result.total_tokens_saved_by_rcs,
         "plan": tenant_ctx.plan,
+        "user_id": x_user_id,
     }
 
 
@@ -509,6 +512,7 @@ async def chat(
 async def run_multi_agent_group(
     body: ChatRequest,
     tenant_ctx: ResolvedTenant = Depends(get_resolved_tenant),
+    x_user_id: str = Header(default="demo-user", alias="X-User-ID"),
 ):
     if tenant_ctx.plan not in (Plan.PRO, Plan.ENTERPRISE):
         raise HTTPException(
@@ -549,6 +553,7 @@ async def run_multi_agent_group(
 
     run_context = RunContext(
         tenant_id=tenant_ctx.tenant_id,
+        user_id=x_user_id,
         session_id=body.session_id or str(uuid4()),
     )
 
@@ -557,6 +562,7 @@ async def run_multi_agent_group(
         tool_registry=SHARED_TOOL_REGISTRY,
         storage_config=tenant_ctx.storage_config,
         run_context=run_context,
+        user_memory_store=SHARED_USER_MEMORY_STORE,
     )
 
     result = await orchestrator.run(

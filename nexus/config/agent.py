@@ -133,3 +133,7 @@ MemberConfig = Union[AgentConfig, AgentGroupConfig]
 # Forward reference resolution for recursive type
 AgentGroupConfig.model_rebuild()
 
+# Resolve MemoryConfig.curator_agent forward reference now that AgentConfig exists.
+# model_rebuild() captures this module's namespace (which includes AgentConfig).
+MemoryConfig.model_rebuild()
+

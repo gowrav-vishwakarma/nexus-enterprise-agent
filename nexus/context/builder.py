@@ -55,6 +55,7 @@ class ContextWindowBuilder:
         agent_config: AgentConfig,
         current_user_message: Optional[str] = None,
         token_budget: int = 100000,
+        user_entity_memory: Optional[dict[str, str]] = None,
     ) -> list[dict[str, Any]]:
         """Assemble the complete messages array for the LLM call.
 
@@ -66,10 +67,18 @@ class ContextWindowBuilder:
 
         # 1. Build and render System Prompt
         persona_dict = agent_config.persona.model_dump()
+        inject_memory = getattr(agent_config.memory, "inject_into_prompt", True)
+        user_cfg = getattr(agent_config.memory, "user", None)
+        inject_user = bool(
+            user_cfg
+            and user_cfg.enabled
+            and user_entity_memory
+        )
         system_content = render_system_prompt(
             persona=persona_dict,
-            working_memory=session.working_memory,
-            entity_memory=session.entity_memory,
+            working_memory=session.working_memory if inject_memory else "",
+            entity_memory=session.entity_memory if inject_memory else {},
+            user_entity_memory=user_entity_memory if inject_user else {},
             current_date=datetime.now().strftime("%Y-%m-%d"),
             template=agent_config.persona.system_prompt or agent_config.persona.system_prompt_template,
         )
