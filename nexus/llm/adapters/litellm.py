@@ -94,13 +94,21 @@ class LiteLLMAdapter(LLMAdapter):
         stream: bool = False,
     ) -> dict[str, Any]:
         """Assemble the common kwargs dict passed to litellm.acompletion."""
-        kw: dict[str, Any] = {"model": self._model}
+        kw: dict[str, Any] = {}
 
         api_key = self.config.get_api_key()
         if api_key:
             kw["api_key"] = api_key
         if self.config.base_url:
             kw["api_base"] = self.config.base_url
+            # When using a custom api_base (e.g. LiteLLM proxy), pass the model
+            # string EXACTLY as configured without letting LiteLLM strip provider
+            # prefixes.  Force the OpenAI client so the full model name
+            # (e.g. "openai/qwen") is sent unchanged to the endpoint.
+            kw["model"] = self.config.model  # raw model, no prefix processing
+            kw["custom_llm_provider"] = "openai"
+        else:
+            kw["model"] = self._model
         if self.config.api_version:
             kw["api_version"] = self.config.api_version
         if self.config.extra_headers:

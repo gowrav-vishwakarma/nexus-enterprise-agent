@@ -43,11 +43,12 @@ class SessionManager:
             from nexus.session.adapters.sqlite import SQLiteStorageAdapter
             return SQLiteStorageAdapter(**adapter_config)
         elif adapter_type == "postgresql":
-            from nexus.session.adapters.postgresql import PostgreSQLStorageAdapter
-            return PostgreSQLStorageAdapter(**adapter_config)
+            logger.warning("PostgreSQL adapter not yet implemented, falling back to sqlite")
+            from nexus.session.adapters.sqlite import SQLiteStorageAdapter
+            return SQLiteStorageAdapter(db_path="./postgresql_fallback.db")
         elif adapter_type == "redis":
-            from nexus.session.adapters.redis import RedisStorageAdapter
-            return RedisStorageAdapter(**adapter_config)
+            logger.warning("Redis adapter not yet implemented, falling back to memory")
+            return MemoryStorageAdapter()
         else:
             logger.warning("Unknown adapter type '%s', falling back to memory", adapter_type)
             return MemoryStorageAdapter()

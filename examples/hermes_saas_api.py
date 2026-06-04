@@ -12,6 +12,17 @@ from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
 
+# Load .env file so env vars are available for LLM config
+try:
+    from dotenv import load_dotenv
+    import pathlib
+    # Load .env from project root (parent of examples/)
+    env_path = pathlib.Path(__file__).parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path)
+except ImportError:
+    pass  # python-dotenv not installed, skip
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, SecretStr, Field
@@ -105,7 +116,7 @@ class PlanLimits(BaseModel):
 PLAN_LIMITS: dict[Plan, PlanLimits] = {
     Plan.FREE: PlanLimits(
         max_turns=3,
-        max_tool_calls_per_turn=0,
+        max_tool_calls_per_turn=1,
         max_sessions=5,
         session_ttl_days=1,
         max_agents_in_group=1,
@@ -234,28 +245,42 @@ class NexusTenantConfigFactory:
     SHARED_SQLITE_PATH: str = "./shared_sessions.db"
     SHARED_PG_DSN: SecretStr = SecretStr("postgresql://user:pass@localhost:5432/shared_db")
 
+    # LM Studio / LiteLLM defaults (read from env)
+    LM_STUDIO_BASE_URL: str = os.getenv("LM_STUDIO_BASE_URL", "")
+    LM_STUDIO_API_KEY: str = os.getenv("LM_STUDIO_API_KEY", "")
+    LM_STUDIO_MODEL: str = os.getenv("LM_STUDIO_MODEL", "openai/qwen")
+
     @classmethod
     def build_llm_config(cls, tenant: TenantRecord, limits: PlanLimits) -> LLMProviderConfig:
-        provider = "openai"
-        model = limits.default_model
-        api_key = cls.PLATFORM_OPENAI_KEY
-
+        # Priority: tenant-specific LLM config > LM Studio env vars > plan defaults
         if limits.use_tenant_llm_key and limits.allow_model_override:
             if tenant.preferred_provider == "anthropic" and tenant.anthropic_api_key:
-                provider = "anthropic"
-                api_key = tenant.anthropic_api_key
-                model = tenant.preferred_model or limits.default_model
+                return LLMProviderConfig(
+                    provider="anthropic",
+                    model=tenant.preferred_model or limits.default_model,
+                    api_key=tenant.anthropic_api_key,
+                )
             elif tenant.openai_api_key:
-                provider = "openai"
-                api_key = tenant.openai_api_key
-                model = tenant.preferred_model or limits.default_model
-        elif limits.use_tenant_llm_key and tenant.openai_api_key:
-            api_key = tenant.openai_api_key
+                return LLMProviderConfig(
+                    provider="openai",
+                    model=tenant.preferred_model or limits.default_model,
+                    api_key=tenant.openai_api_key,
+                )
 
+        # Fall back to LM Studio if configured via env vars
+        if cls.LM_STUDIO_BASE_URL:
+            return LLMProviderConfig(
+                provider="openai",
+                model=cls.LM_STUDIO_MODEL,
+                api_key=SecretStr(cls.LM_STUDIO_API_KEY) if cls.LM_STUDIO_API_KEY else SecretStr("not-needed"),
+                base_url=cls.LM_STUDIO_BASE_URL,
+            )
+
+        # Ultimate fallback: use plan defaults with platform key
         return LLMProviderConfig(
-            provider=provider,
-            model=model,
-            api_key=api_key,
+            provider="openai",
+            model=limits.default_model,
+            api_key=cls.PLATFORM_OPENAI_KEY,
         )
 
     @classmethod
@@ -371,9 +396,7 @@ MOCK_TENANTS_DB: dict[str, TenantRecord] = {
         tenant_id="pro_tenant_1",
         name="Pro Analytics Inc",
         plan=Plan.PRO,
-        openai_api_key=SecretStr("sk-pro-test-key-12345"),
-        preferred_provider="openai",
-        preferred_model="gpt-4o",
+        # No fake API key — falls through to LM_STUDIO env vars (LiteLLM)
         isolation_mode="dedicated_schema",
         schema_name="co_pro_tenant_1",
     )
