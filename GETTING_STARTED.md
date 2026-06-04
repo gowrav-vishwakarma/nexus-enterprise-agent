@@ -1,42 +1,19 @@
 # Getting Started — Assemble and Run a Nexus Agent
 
-Nexus is built around one idea: **describe an agent in config, hand that config to a runner, call `run()`**. No global LLM settings, no shared agent singleton. Each `AgentConfig` carries its own provider, model, tools, storage, and limits.
+Nexus is built around one idea: **describe an agent in config, wire runtime dependencies on the runner, call `run()`**. No global LLM settings, no shared agent singleton.
 
-For a full multi-tenant SaaS layout (plans, tenants, FastAPI), see [saas_integration_guide.md](saas_integration_guide.md) and [examples/nexus_saas_api.py](examples/nexus_saas_api.py).
-
----
-
-## The three pieces
-
-| Piece | What it is | You create it when… |
-|-------|------------|---------------------|
-| **Agent config** | `AgentConfig` — name, persona, **LLM provider**, turns, tools, memory, storage | You define *what* the agent is |
-| **Tool registry** | `ToolRegistry` — registered `@tool` functions or `@tool_plugin` classes | The agent can call tools |
-| **Runner** | `AgentRunner` — runs the turn loop (LLM → tools → repeat) | You are ready to execute |
-
-```
-  AgentConfig          ToolRegistry (optional)
-       │                      │
-       └──────────┬───────────┘
-                  ▼
-            AgentRunner
-                  │
-                  ▼
-         await runner.run("user message")
-```
-
-Each config can use a **different** `LLMProviderConfig` (OpenAI, Anthropic, LiteLLM proxy, LM Studio, etc.). That is how you give one agent GPT-4o and another Claude on the same app — two configs, two runners (or one group — see below).
+For a full multi-tenant SaaS layout (plans, tenants, FastAPI), see [examples/nexus_saas_api.py](examples/nexus_saas_api.py).
 
 ---
 
-## Minimal single-agent system
+## Quick start — runnable in 5 minutes
 
 ### 1. Install
 
 ```bash
 uv pip install -e .
 # For the SaaS API example only:
-uv pip install fastapi uvicorn python-dotenv
+uv pip install fastapi uvicorn python-dotenv aiosqlite
 ```
 
 ### 2. Set LLM credentials (your app reads env; Nexus does not)
@@ -85,10 +62,6 @@ def build_my_agent() -> AgentConfig:
             goal="Answer clearly and use tools when useful.",
         ),
         turns=TurnConfig(max_turns=10, max_tool_calls_per_turn=5),
-        storage=SessionStorageConfig(
-            adapter="memory",  # or "sqlite" / "postgresql" for persistence
-            adapter_config={"max_sessions": 100},
-        ),
         tool_plugins=[],  # use registry below; list plugin *names* if using @tool_plugin
     )
 
@@ -101,13 +74,15 @@ async def main():
     runner = AgentRunner(
         config=config,
         tool_registry=registry,
-        run_context=RunContext(tenant_id="demo", session_id="sess-1"),
+        storage_config=SessionStorageConfig(
+            adapter="sqlite",  # use "memory" for throwaway local runs (lost on exit)
+            adapter_config={"db_path": "./sessions.db"},
+        ),
+        run_context=RunContext(tenant_id="demo", user_id="demo-user", session_id="sess-1"),
     )
 
-    result = await runner.run(
-        user_message="Echo hello",
-        session_id="sess-1",
-    )
+    # session_id is already on RunContext; pass session_id= on run() only to override this call
+    result = await runner.run(user_message="Echo hello")
     print(result.final_response)
     print("turns:", result.turns_used)
 
@@ -117,14 +92,187 @@ if __name__ == "__main__":
 
 **Assembly checklist**
 
-1. Build `AgentConfig` (include `llm=LLMProviderConfig(...)` per agent).
-2. Optionally build `ToolRegistry` and register tools.
-3. `AgentRunner(config=..., tool_registry=..., run_context=...)`.
-4. `await runner.run(user_message=..., session_id=...)`.
+1. Build `AgentConfig` (LLM, persona, turns, tools — see [What goes where](#what-goes-where)).
+2. Build `ToolRegistry` and register tools.
+3. `AgentRunner(config=..., tool_registry=..., storage_config=..., run_context=...)`.
+4. `await runner.run(user_message=...)`.
 
 ---
 
-## Per-config providers (the simple rule)
+## What goes where
+
+Nexus splits **what the agent is** from **who is calling and where data lives**. Use this table as the anchor for everything below.
+
+| Concern | Put it on | Notes |
+|---------|-----------|-------|
+| LLM, persona, turns, tools, memory, RCS | `AgentConfig` | Per agent; built once or from a factory |
+| Tenant, user, default chat id, tool metadata | `RunContext` | Per HTTP request / job |
+| Session persistence backend | `storage_config` on **Runner / Orchestrator** | **Preferred**; one backend per tenant for joinable history |
+| Session persistence fallback | `AgentConfig.storage` | Only when runner gets no `storage_config` (minimal local scripts) |
+| Cross-session user profile | `user_memory_store` on runner + `RunContext.user_id` | Separate store from session JSON |
+
+```mermaid
+flowchart TB
+  subgraph configLayer [AgentConfig - what the agent is]
+    name[name persona llm turns]
+    tools[tool_plugins memory rcs]
+  end
+
+  subgraph runtimeLayer [Runtime wiring - per request]
+    rc[RunContext: tenant_id user_id session_id metadata]
+    storage[storage_config on Runner or Orchestrator]
+    registry[ToolRegistry instance]
+    userStore[user_memory_store optional]
+  end
+
+  subgraph persistLayer [Persisted data]
+    sessions[AgentSession JSON per agent session_id]
+    userMem[UserMemoryStore separate]
+  end
+
+  configLayer --> Runner
+  runtimeLayer --> Runner
+  Runner --> sessions
+  userStore --> userMem
+  Orchestrator --> Runner
+```
+
+**One rule:** `AgentConfig` = behavior. Everything about *who*, *where stored*, and *which chat* = runner/orchestrator args + `RunContext`.
+
+### Storage priority
+
+1. `AgentRunner(storage_config=…)` / `AgentOrchestrator(storage_config=…)` — **wins**
+2. else `AgentConfig.storage` (fallback)
+3. else in-memory — **isolated per runner instance** (not shared across group members)
+
+### Session ID priority (single agent)
+
+1. `run(session_id=…)` — override for this call
+2. else `RunContext.session_id`
+3. else auto-generated UUID
+
+After resolution, the runner syncs the chosen id back onto `RunContext`.
+
+| | `AgentConfig` | `RunContext` |
+|---|---------------|--------------|
+| Lifetime | Built once (or per tenant template) | New per HTTP request / job |
+| Holds | LLM, persona, tools, limits, memory, RCS | `tenant_id`, `user_id`, `session_id`, `metadata` |
+| Defines the agent? | Yes | No — defines the **call** |
+
+---
+
+## Storage and session history
+
+### Adapters
+
+| Adapter | Where data lives |
+|---------|------------------|
+| `memory` | In-process only; lost on exit |
+| `file` | One JSON file per session: `{session_id}.json` |
+| `sqlite` | One row per session; full session in a `data` JSON column |
+
+Configure via `SessionStorageConfig` on the runner/orchestrator (see [What goes where](#what-goes-where)).
+
+### What is in each session JSON
+
+Each persisted `AgentSession` includes:
+
+- `turns[]` — user message, LLM messages, token counts per turn
+- `tool_calls[]` per turn — `tool_name`, `tool_input`, **`raw_response`**, **`summarized_response`** (RCS), `is_dropped`
+- `context_updates_received` per turn — raw `_context_updates` from the LLM
+- `entity_memory`, `working_memory` — session-scoped facts (when memory curator is enabled)
+- `total_tokens_saved_by_rcs` — cumulative RCS savings
+- `tenant_id`, `user_id`, `agent_id`, timestamps
+
+You can load a session and render a full timeline (user → tools → RCS summaries) from this JSON.
+
+### Multi-agent: one JSON per member, not one group blob
+
+The orchestrator does **not** write a merged group transcript. Each member gets its own session:
+
+```text
+group-sess-1_researcher   →  own session JSON
+group-sess-1_analyst      →  own session JSON
+```
+
+Member ids are derived at orchestrator init: `{session_id_prefix}{group_session_id}_{member.name}`.
+
+**Pipeline handoff:** member N+1 receives member N's **`final_response` string** as its `user_message` — not the full chat log.
+
+### Joining history for a UI
+
+To show all sub-agents in one timeline:
+
+1. Use **one** `storage_config` for the whole group (pass it once on `AgentOrchestrator`).
+2. Keep the same `tenant_id` / `user_id` on `RunContext`.
+3. Load sessions by prefix, e.g. all rows where `session_id` starts with `group-sess-1_`.
+4. Merge/sort by timestamp in your API layer.
+
+Do **not** give different storage backends to group members — history will be fragmented across stores.
+
+---
+
+## Sessions and identity (`RunContext`)
+
+`RunContext` is **per request / per run**, not part of `AgentConfig`. It carries who this execution belongs to and optional bag-of-data for tools.
+
+```python
+RunContext(
+    tenant_id="acme",      # stored on new sessions; used for multi-tenant storage filters
+    user_id="user-42",     # required for user memory; stored on sessions
+    session_id="sess-1",   # default chat id if you omit session_id on run()
+    request_id="req-9",    # tracing / correlation (your choice)
+    metadata={"plan": "pro"},  # arbitrary; tools can read via ctx.get("plan")
+)
+```
+
+### When it is required
+
+**No** — both `AgentRunner` and `AgentOrchestrator` default to an empty `RunContext()` if you omit it.
+
+Use an explicit `RunContext` when you have **multi-tenancy**, **per-user sessions**, **user memory**, or **tools that need request-scoped data** (DB handle, API client, plan flags).
+
+For a local script with one user, you can skip it and pass `session_id=` only on `run()`.
+
+### Tool dependency injection
+
+If a tool declares a `RunContext` parameter, the registry injects the same context on every tool call:
+
+```python
+@tool(name="tenant_settings")
+def tenant_settings(ctx: RunContext) -> str:
+    return f"Settings for tenant {ctx.tenant_id}"
+```
+
+### Multi-agent: what is shared vs not
+
+| Kind | Shared across group by default? | How to share intentionally |
+|------|----------------------------------|----------------------------|
+| `RunContext.tenant_id` / `user_id` | Yes (copied from orchestrator) | Pass one `RunContext` into `AgentOrchestrator` |
+| `RunContext.metadata` | Yes (same values on member contexts) | Set on group `RunContext` before `run()` |
+| Tool registry | No (you choose) | Pass same `ToolRegistry` instance |
+| Session / turn history | No — separate JSON per member | Pipeline handoff text; or load by session id prefix for UI |
+| LLM provider config | No | Each `AgentConfig.llm` is independent |
+
+You pass **one** `RunContext` into `AgentOrchestrator`; member runners get derived session ids (`{group_session_id}_{member.name}`). There is no single merged group session object today.
+
+**Orchestrator gotcha:** member session ids are computed in `AgentOrchestrator.__init__` from `RunContext.session_id` at construction time. Set the group `session_id` on `RunContext` **before** creating the orchestrator. Changing `session_id` only in `orchestrator.run()` updates the orchestrator's context but **does not** rewire member runners.
+
+### Optional session metadata on `run()`
+
+```python
+await runner.run(
+    user_message="Hello",
+    session_id="sess-1",  # optional override
+    initial_context={"deal_id": "D-99"},  # merged into session.metadata once
+)
+```
+
+`initial_context` is **per runner / per session**, not propagated across group members. To pass structured state through a pipeline, embed it in the handoff message or put it in `RunContext.metadata`.
+
+---
+
+## Per-agent LLM providers
 
 Put the provider on **each** `AgentConfig`, not in a global setting:
 
@@ -142,11 +290,13 @@ writer = AgentConfig(
 )
 ```
 
-In production, a small **config factory** (like `NexusTenantConfigFactory` in the SaaS example) maps tenant/plan → `LLMProviderConfig` + storage + tool allow-list, then returns `AgentConfig`.
+In production, a **config factory** (like `NexusTenantConfigFactory` in the SaaS example) maps tenant/plan → `LLMProviderConfig` + tool allow-list + memory flags, then returns `AgentConfig`. **Storage** resolves at the tenant/request layer on the runner, not on `AgentConfig`.
+
+Each config can use a **different** `LLMProviderConfig` (OpenAI, Anthropic, LiteLLM proxy, LM Studio, etc.). That is how you give one agent GPT-4o and another Claude on the same app — two configs, two runners (or one group — see below).
 
 ---
 
-## Multi-agent groups: each member brings its own provider
+## Multi-agent groups
 
 `AgentGroupConfig` does **not** define an LLM for the whole group. It only defines orchestration: `pattern`, `members`, `max_turns`, group-level `rcs`, etc.
 
@@ -156,8 +306,18 @@ In production, a small **config factory** (like `NexusTenantConfigFactory` in th
 from pydantic import SecretStr
 from nexus.config.agent import AgentConfig, AgentGroupConfig, AgentPersonaConfig
 from nexus.config.llm import LLMProviderConfig
+from nexus.config.storage import SessionStorageConfig
 from nexus.multiagent.orchestrator import AgentOrchestrator
 from nexus.tools.context import RunContext
+from nexus.tools.registry import ToolRegistry
+
+registry = ToolRegistry()
+# registry.register_plugin(WebSearchPlugin())  # register your plugins
+
+storage_config = SessionStorageConfig(
+    adapter="sqlite",
+    adapter_config={"db_path": "./sessions.db"},
+)
 
 # Member 1: OpenAI for search-heavy work
 researcher_cfg = AgentConfig(
@@ -183,95 +343,33 @@ analyst_cfg = AgentConfig(
     tool_plugins=["database"],
 )
 
-# Group = list of AgentConfigs (or nested AgentGroupConfigs), not a shared LLM block
 group = AgentGroupConfig(
     name="research_pipeline",
     pattern="pipeline",
-    members=[researcher_cfg, analyst_cfg],  # each member keeps its own llm
+    members=[researcher_cfg, analyst_cfg],
     max_turns=20,
-    # Optional: group-level RCS may reference an LLM for compaction only (see rcs docs)
 )
 
 orchestrator = AgentOrchestrator(
     config=group,
     tool_registry=registry,
-    storage_config=storage_config,
-    run_context=RunContext(tenant_id="acme", session_id="group-sess-1"),
+    storage_config=storage_config,  # once — all members inherit the same store
+    run_context=RunContext(tenant_id="acme", user_id="user-1", session_id="group-sess-1"),
 )
 
-result = await orchestrator.run(
-    user_message="Analyze Q4 revenue",
-    session_id="group-sess-1",
-)
+result = await orchestrator.run(user_message="Analyze Q4 revenue")
 ```
 
-The orchestrator creates one `AgentRunner` per member; each runner uses **that member’s** `config.llm` (see `AgentOrchestrator._init_members` in the codebase). Member session IDs are derived from the group `RunContext` (e.g. `{prefix}{session_id}_researcher`).
-
-Same tenant, different models per role (SaaS example style): call your factory twice with different `build_llm_config` / model overrides — still two `AgentConfig` objects in `members`, as in `examples/nexus_saas_api.py` (`researcher_cfg` vs `analyst_cfg`).
+The orchestrator creates one `AgentRunner` per member; each runner uses **that member's** `config.llm`. Member session IDs are `{prefix}{group_session_id}_{member.name}` (e.g. `group-sess-1_researcher`, `group-sess-1_analyst`). See [Storage and session history](#storage-and-session-history) for loading joined history.
 
 | Config type | Has `llm`? | Role |
 |-------------|------------|------|
-| `AgentConfig` | Yes — **this agent’s** provider/model/key | Runnable agent |
+| `AgentConfig` | Yes — **this agent's** provider/model/key | Runnable agent |
 | `AgentGroupConfig` | No (only optional group `rcs` compactor LLM) | Wires `members` + `pattern` |
 
 ---
 
-## `RunContext`: what it is and when you need it
-
-`RunContext` is **per request / per run**, not part of `AgentConfig`. It carries who and which conversation this execution belongs to, and optional bag-of-data for tools.
-
-```python
-RunContext(
-    tenant_id="acme",      # stored on new sessions; used for multi-tenant storage filters
-    user_id="user-42",     # same
-    session_id="sess-1",   # default session if you omit session_id on run()
-    request_id="req-9",    # tracing / correlation (your choice)
-    metadata={"plan": "pro"},  # arbitrary; tools can read via ctx.get("plan")
-)
-```
-
-### What the framework uses it for
-
-1. **Sessions** — When creating a session, `AgentRunner` passes `tenant_id` and `user_id` from `RunContext` into storage (see `create_session` in `agent_runner.py`). Shared DB adapters can scope rows by tenant.
-2. **Session ID default** — If you call `run()` without `session_id`, the runner uses `run_context.session_id` (and writes the resolved id back onto the context).
-3. **Tool dependency injection** — If a tool declares a `RunContext` parameter, the registry injects the same context on every tool call:
-
-```python
-@tool(name="tenant_settings")
-def tenant_settings(ctx: RunContext) -> str:
-    return f"Settings for tenant {ctx.tenant_id}"
-```
-
-4. **Multi-agent** — You pass one group-level `RunContext` into `AgentOrchestrator`; it clones it per member (same `tenant_id` / `user_id`, distinct `session_id` suffix per agent name).
-
-### Is it required?
-
-**No.** Both `AgentRunner` and `AgentOrchestrator` default to an empty `RunContext()` if you omit it:
-
-```python
-runner = AgentRunner(config=config, tool_registry=registry)  # valid
-```
-
-Use an explicit `RunContext` when you have **multi-tenancy**, **per-user sessions**, or **tools that need request-scoped data** (DB handle, API client, plan flags). For a local script with one user and in-memory storage, you can skip it and pass `session_id=` only on `run()`.
-
-### Why the minimal example still shows `RunContext`
-
-The single-agent snippet includes `RunContext(tenant_id="demo", session_id="sess-1")` to mirror production (SaaS API) and to show the usual pattern: **config = what the agent is; run context = who is calling right now**. For a quick local test you can remove it:
-
-```python
-runner = AgentRunner(config=config, tool_registry=registry)
-result = await runner.run(user_message="Echo hello", session_id="sess-1")
-```
-
-| | `AgentConfig` | `RunContext` |
-|---|---------------|--------------|
-| Lifetime | Built once (or per tenant template) | New per HTTP request / job |
-| Holds | LLM, persona, tools, limits | tenant_id, user_id, session_id, metadata |
-| Defines the agent? | Yes | No — defines the **call** |
-
----
-
-## Tool registry: what it is, and standalone `@tool` functions
+## Tool registry
 
 The LLM never calls Python functions directly. Nexus needs a **`ToolRegistry`**: a catalog of callables with JSON schemas that get sent to the model, then executed when the model requests a tool.
 
@@ -285,11 +383,9 @@ The LLM never calls Python functions directly. Nexus needs a **`ToolRegistry`**:
   AgentRunner asks registry for schemas → LLM picks a tool → registry.execute(...)
 ```
 
-`AgentRunner` **requires** a `tool_registry` argument. There is no “pass a list of raw functions into the runner” API — you decorate, then register.
+`AgentRunner` **requires** a `tool_registry` argument. There is no "pass a list of raw functions into the runner" API — you decorate, then register.
 
-### Can I use plain functions?
-
-**Yes**, as long as they use the `@tool` decorator and you register them:
+### Standalone `@tool` functions
 
 ```python
 from nexus.tools.decorators import tool
@@ -308,7 +404,7 @@ Standalone functions live under the **`global`** plugin namespace unless you pas
 registry.register_tool(echo, plugin_name="utilities")  # → "utilities.echo"
 ```
 
-### When to use `register_plugin` (`@tool_plugin`)
+### `@tool_plugin` classes
 
 Use a **plugin class** when you have several related tools, shared state, or a clear namespace (matches `AgentConfig.tool_plugins`):
 
@@ -352,7 +448,7 @@ The SaaS example registers all plugins once (`SHARED_TOOL_REGISTRY`) and each ag
 
 ### One registry, many agents
 
-Typical pattern: build **one** `ToolRegistry` at app startup, pass the **same instance** into every `AgentRunner` / `AgentOrchestrator`. Per-agent differences come from `tool_plugins` on each `AgentConfig`, not from separate registries.
+Build **one** `ToolRegistry` at app startup, pass the **same instance** into every `AgentRunner` / `AgentOrchestrator`. Per-agent differences come from `tool_plugins` on each `AgentConfig`, not from separate registries.
 
 ```python
 SHARED = ToolRegistry()
@@ -365,72 +461,17 @@ runner_b = AgentRunner(config=cfg_b, tool_registry=SHARED)  # cfg_b.tool_plugins
 
 ---
 
-## Shared context: groups, multiple agents, and what is *not* shared
+## Memory
 
-“Context” means different things in Nexus. Defaults differ for each.
+Nexus has **three** memory channels (session entity, session working, user profile). The easy mistake is treating "entity memory" and "user memory" as the same thing — they are both key/value facts, but scoped differently.
 
-### 1. `RunContext` (request / tenant scope)
-
-| Behavior | Default |
-|----------|---------|
-| Group → members | **Same** `tenant_id` and `user_id` copied from the orchestrator’s `RunContext` |
-| Per-member `session_id` | **Different** — orchestrator sets `{group_session_id}_{member.name}` (e.g. `sess-1_researcher`, `sess-1_analyst`) |
-
-You **pass** one `RunContext` into `AgentOrchestrator`; you do not need one per member. Members do not share one session id unless you customize orchestration.
-
-### 2. Tool registry
-
-**Not automatic** — you pass the same `ToolRegistry` instance if you want shared tools (recommended). Each agent still filters via its own `tool_plugins`.
-
-### 3. Session / conversation history (LLM memory)
-
-**Not shared by default.** Each agent has its **own** persisted session (separate turn history, tool results, RCS summaries). Agent A’s prior turns are **not** injected into Agent B’s context window automatically.
-
-**Pipeline pattern** (default handoff): member N+1 receives member N’s **`final_response` string** as its `user_message` — that is the built-in shared *workflow* context, not full chat logs:
-
-```
-User message ──► Researcher (own session) ──► final text ──► Analyst (own session) ──► ...
-```
-
-So for groups: **shared outcome text in pipeline; separate session stores per agent.**
-
-### 4. `initial_context` on `run()` (optional session metadata)
-
-```python
-await runner.run(
-    user_message="Hello",
-    session_id="sess-1",
-    initial_context={"deal_id": "D-99"},  # merged into session.metadata once
-)
-```
-
-This is **per runner / per session**, not propagated across group members. To pass structured state through a pipeline, either embed it in the handoff message or put it in `RunContext.metadata` (visible to all tools on that request).
-
-### Summary table
-
-| Kind of context | Shared across group by default? | How to share intentionally |
-|-----------------|----------------------------------|----------------------------|
-| `RunContext.tenant_id` / `user_id` | Yes (from parent orchestrator) | Pass one `RunContext` into `AgentOrchestrator` |
-| `RunContext.metadata` | Yes (same values on member contexts) | Set on group `RunContext` before `run()` |
-| Tool registry | No (you choose) | Pass same `ToolRegistry` instance |
-| Session / turn history | No | Pipeline handoff text; or custom orchestration / same `session_id` if you control runners yourself |
-| LLM provider config | No | Each `AgentConfig.llm` is independent |
-
-There is **no** single global “group session” object that merges all agents’ transcripts today. If you need one shared chat thread for every agent, use one `AgentRunner` or extend the orchestrator to reuse one `session_id` for all members (not the current default).
-
----
-
-## Memory (user and session)
-
-Nexus has **three** memory channels (session entity, session working, user profile). The easy mistake is treating “entity memory” and “user memory” as the same thing — they are both key/value facts, but scoped differently.
-
-### Mental model (read this first)
+### Overview — three channels
 
 | Question | Use this | Config / wiring |
 |----------|----------|-----------------|
-| “Remember this **for the rest of this chat**?” | **Session memory** | `memory.entity` + `memory.working` on `AgentSession` (same `session_id`) |
-| “Remember this **for this user next time they open a new chat**?” | **User memory** | `memory.user` + `UserMemoryStore` + `RunContext.user_id` |
-| “Search a large document corpus?” | **Your RAG tool** | Custom tool + vector DB (Pinecone, pgvector, etc.) — not built into Nexus |
+| "Remember this **for the rest of this chat**?" | **Session memory** | `memory.entity` + `memory.working` on `AgentSession` (same `session_id`) |
+| "Remember this **for this user next time they open a new chat**?" | **User memory** | `memory.user` + `UserMemoryStore` + `RunContext.user_id` |
+| "Search a large document corpus?" | **Your RAG tool** | Custom tool + vector DB (Pinecone, pgvector, etc.) — not built into Nexus |
 
 ```text
 Same user, new session_id
@@ -444,15 +485,17 @@ Same session_id, next turn
   User memory               →  also updated when curator saves (if user.enabled)
 ```
 
-**Session memory** lives on the conversation record (`AgentSession`). **User memory** lives in a separate store keyed by `tenant_id` + `user_id` + namespace (default namespace = agent name). The curator still writes **session** facts first; if `memory.user.persist_from_curator` is on, those facts are **copied/merged** into the user store — there is no second extraction LLM call for user memory.
+**Session memory** lives on the conversation record (`AgentSession` JSON). **User memory** lives in a separate store keyed by `tenant_id` + `user_id` + namespace (default namespace = agent name). See [What goes where](#what-goes-where).
 
-### Comparison table
+### Session memory vs user memory
 
 | Channel | Plain name | Stored on | Survives new `session_id`? | In system prompt? |
 |---------|------------|-----------|----------------------------|-------------------|
-| **User memory** | User profile facts | `UserMemoryStore` (sqlite, or **your own** backend) | **Yes** (with a persistent store) | Yes — “About this user (across conversations)” |
-| **Session entity memory** | This-chat facts | `session.entity_memory` | No — tied to one chat | Yes — “Known Facts (this conversation)” |
-| **Session working memory** | This-chat scratchpad | `session.working_memory` | No | Yes — “Your Working Notes” |
+| **User memory** | User profile facts | `UserMemoryStore` (sqlite, or **your own** backend) | **Yes** (with a persistent store) | Yes — "About this user (across conversations)" |
+| **Session entity memory** | This-chat facts | `session.entity_memory` | No — tied to one chat | Yes — "Known Facts (this conversation)" |
+| **Session working memory** | This-chat scratchpad | `session.working_memory` | No | Yes — "Your Working Notes" |
+
+The curator writes **session** facts first; if `memory.user.persist_from_curator` is on, those facts are **copied/merged** into the user store — there is no second extraction LLM call for user memory.
 
 ### When to use which
 
@@ -468,7 +511,7 @@ Session memory is **fully opt-out**: set `memory.enabled=False`, or leave both `
 
 Use session entity/working memory when you want **structured, capped, reliably-injectable** facts in dedicated prompt blocks, without depending on compactor summary quality.
 
-### Enable per agent (not global)
+### Enable on `AgentConfig`
 
 **Session curator** (writes session memory) requires:
 
@@ -478,7 +521,7 @@ Use session entity/working memory when you want **structured, capped, reliably-i
 **User memory** (read + persist across sessions) additionally requires:
 
 - `memory.user.enabled=True`
-- A **`user_memory_store`** passed into `AgentRunner` (built-in or custom — see below)
+- A **`user_memory_store`** passed into `AgentRunner` / `AgentOrchestrator`
 - **`RunContext.user_id`** set on every run (and usually `tenant_id`)
 
 If `user.enabled` is true but `user_id` or `user_memory_store` is missing, user memory is silently skipped; session memory still works.
@@ -505,8 +548,9 @@ AgentConfig(
 runner = AgentRunner(
     config=...,
     tool_registry=registry,
+    storage_config=...,  # session JSON lives here — see What goes where
     user_memory_store=USER_MEMORY,  # required when user.enabled
-    run_context=RunContext(tenant_id="acme", user_id="user-42"),  # user_id required
+    run_context=RunContext(tenant_id="acme", user_id="user-42"),
 )
 ```
 
@@ -569,7 +613,7 @@ Caps keep memory small:
 - **Session:** `memory.entity.max_entities`, `memory.working.max_length`
 - **User:** `memory.user.max_entities` (separate cap on the profile store)
 
-**Curator timing (defaults):** runs **after each completed turn**, so the *next* turn’s system prompt includes updated session memory. User store is updated in the same pass when `memory.user.enabled`. Set `extract_after_each_turn=False` and `extraction_interval=N` to curate less often (cheaper).
+**Curator timing (defaults):** runs **after each completed turn**, so the *next* turn's system prompt includes updated session memory. User store is updated in the same pass when `memory.user.enabled`. Set `extract_after_each_turn=False` and `extraction_interval=N` to curate less often (cheaper).
 
 ### Memory curator (writer)
 
@@ -618,11 +662,13 @@ curl -X POST http://localhost:8000/v1/multi-agent/run \
   -d '{"message": "Research and analyze our churn"}'
 ```
 
-That example’s flow matches the diagram above: resolve tenant → **build `AgentConfig`** → **`AgentRunner` / `AgentOrchestrator`** → return JSON.
+That example's flow: resolve tenant → build `AgentConfig` → **`storage_config` on runner/orchestrator** (per tenant) → run → return JSON.
 
 ---
 
-## What goes on `AgentConfig` (quick reference)
+## Quick reference
+
+### `AgentConfig` fields
 
 | Field | Purpose |
 |-------|---------|
@@ -630,15 +676,24 @@ That example’s flow matches the diagram above: resolve tenant → **build `Age
 | `llm` | **Provider + model + key** for this agent only |
 | `persona` | `role` / `goal` system framing |
 | `turns` | `max_turns`, `max_tool_calls_per_turn` |
-| `tool_plugins` | Allow-list of plugin namespaces (see Tool registry section) |
-| `storage` | Where conversation sessions live |
+| `tool_plugins` | Allow-list of plugin namespaces (see Tool registry) |
 | `memory` | Curator + session (`entity`/`working`) + cross-session `user`; see Memory section |
 | `rcs` | Long-context summarization (optional) |
+| `storage` | Optional fallback when runner has no `storage_config` — prefer runner-level storage in production |
+
+### `AgentRunner` / `AgentOrchestrator` constructor args
+
+| Arg | Purpose |
+|-----|---------|
+| `config` | `AgentConfig` or `AgentGroupConfig` |
+| `tool_registry` | Registered tools (required for runner) |
+| `storage_config` | **Preferred** — session persistence backend (`SessionStorageConfig` or `SessionManager`) |
+| `run_context` | `tenant_id`, `user_id`, `session_id`, `metadata` for this request |
+| `user_memory_store` | Cross-session user profile store (when `memory.user.enabled`) |
 
 ---
 
 ## Next reads
 
-- [saas_integration_guide.md](saas_integration_guide.md) — tenants, plans, storage isolation
-- [nexus_framework_walkthrough.md](nexus_framework_walkthrough.md) — LiteLLM routing and SQLite storage
+- [examples/nexus_saas_api.py](examples/nexus_saas_api.py) — multi-tenant FastAPI, plan gating, per-tenant storage
 - [NEXUS_AGENT_PRD.md](NEXUS_AGENT_PRD.md) — full product/design spec

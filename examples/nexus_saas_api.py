@@ -379,7 +379,6 @@ class NexusTenantConfigFactory:
     ) -> AgentConfig:
         limits = PLAN_LIMITS[tenant.plan]
         llm = cls.build_llm_config(tenant, limits)
-        storage = cls.build_storage_config(tenant, limits)
 
         allowed_tools = [p for p in tool_plugins if p in limits.allowed_tool_plugins]
 
@@ -398,7 +397,6 @@ class NexusTenantConfigFactory:
                 working=WorkingMemoryConfig(enabled=limits.working_memory),
                 user=UserMemoryConfig(enabled=limits.entity_memory),
             ),
-            storage=storage,
             tool_plugins=allowed_tools,
         )
 
@@ -459,6 +457,9 @@ SHARED_USER_MEMORY_STORE = SQLiteUserMemoryStore(db_path="./shared_user_memory.d
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+
+
+# Storage is per-tenant runtime wiring on the runner/orchestrator, not AgentConfig.
 
 
 @app.post("/v1/chat")
