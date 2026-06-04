@@ -11,10 +11,14 @@ For a full multi-tenant SaaS layout (plans, tenants, FastAPI), see [examples/nex
 ### 1. Install
 
 ```bash
-uv pip install -e .
-# For the SaaS API example only:
-uv pip install fastapi uvicorn python-dotenv aiosqlite
+# Library only (scripts, tests — add extras as needed)
+uv sync --extra dev --extra sqlite --extra file
+
+# SaaS API example (FastAPI + session/cross-session SQLite stores)
+uv sync --extra fastapi --extra sqlite
 ```
+
+Optional: `uv pip install python-dotenv` so the example loads `.env` from the repo root.
 
 ### 2. Set LLM credentials (your app reads env; Nexus does not)
 
@@ -644,9 +648,10 @@ Set **`inject_into_prompt=False`** if you only want the curator to write storage
 
 ## Run the bundled SaaS API example
 
-From the repo root:
+From the repo root (install **`fastapi`** and **`sqlite`** extras first — the example uses `SQLiteCrossSessionMemoryStore`, which needs `aiosqlite` from the `sqlite` extra):
 
 ```bash
+uv sync --extra fastapi --extra sqlite
 uv run uvicorn examples.nexus_saas_api:app --host 0.0.0.0 --port 8000
 ```
 
