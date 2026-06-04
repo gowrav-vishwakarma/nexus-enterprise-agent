@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nexus-agent"
+version = "0.1.0"
+description = "A SaaS-ready, context-efficient Python multi-agent framework"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Nexus Team"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "httpx>=0.27",
+    "tiktoken>=0.7",
+    "jinja2>=3.1",
+    "anyio>=4.0",
+    "tenacity>=8.0",
+]
+
+[project.optional-dependencies]
+# Storage adapters
+sqlite = ["aiosqlite>=0.20", "filelock>=3.13"]
+postgres = ["asyncpg>=0.29", "alembic>=1.13"]
+redis = ['redis>=5.0', 'hiredis']
+file = ["filelock>=3.13"]
+
+# LLM provider clients
+openai = ["openai>=1.30"]
+anthropic = ["anthropic>=0.28"]
+gemini = ["google-genai>=1.0"]
+litellm = ["litellm>=1.40"]
+groq = ["groq>=0.9"]
+ollama = ["ollama>=0.2"]
+
+# Observability
+otel = [
+    "opentelemetry-api>=1.24",
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-exporter-otlp>=1.24",
+]
+
+# FastAPI integration
+fastapi = [
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "sse-starlette>=2.1",
+]
+
+# All dependencies
+all = [
+    "nexus-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi]",
+]
+
+# Dev dependencies
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.14",
+    "respx>=0.21",
+    "faker>=25.0",
+    "coverage>=7.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["nexus"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
