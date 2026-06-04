@@ -1,7 +1,7 @@
 # Multi-Tenant SaaS Integration Blueprint
 ### Nexus Agent Framework Architecture & Plan-Based Gating
 
-This document serves as the implementation guide for developers building high-scale, multi-tenant SaaS applications (like the *Hermes* AI platform) on top of the **Nexus Agent Framework**.
+This document serves as the implementation guide for developers building high-scale, multi-tenant SaaS applications on top of the **Nexus Agent Framework**.
 
 ---
 
@@ -95,7 +95,7 @@ Nexus offers pluggable session storage adapters configured via `SessionStorageCo
 
 To see these multi-tenant SaaS integration design patterns fully implemented in code, refer to the verified FastAPI example:
 
-👉 [hermes_saas_api.py](file:///home/gowrav/Development/agent-framework/examples/hermes_saas_api.py)
+👉 [nexus_saas_api.py](examples/nexus_saas_api.py)
 
 ### How to Run and Verify:
 1. Ensure the required FastAPI and security dependencies are present in your workspace:
@@ -104,7 +104,7 @@ To see these multi-tenant SaaS integration design patterns fully implemented in 
    ```
 2. You can launch the server using `uvicorn`:
    ```bash
-   uvicorn examples.hermes_saas_api:app --host 0.0.0.0 --port 8000
+   uv run uvicorn examples.nexus_saas_api:app --host 0.0.0.0 --port 8000
    ```
 3. Test a plan-restricted tool call (e.g., attempting tools on a `FREE` tier compared to a `PRO` tier) by sending the header:
    - `X-Tenant-ID: free_tenant_1`

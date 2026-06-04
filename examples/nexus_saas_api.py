@@ -1,4 +1,4 @@
-"""NEXUS Framework — Hermes-Style Multi-Tenant SaaS Example.
+"""NEXUS Framework — Multi-Tenant SaaS Example.
 
 Demonstrates plan-based feature gating, per-tenant storage,
 memory, RCS, and agent group configurations in a FastAPI environment.
@@ -410,7 +410,7 @@ class NexusTenantConfigFactory:
 # 5. FASTAPI APP & RESOLVERS
 # =============================================================================
 
-app = FastAPI(title="Hermes SaaS API - Powered by Nexus")
+app = FastAPI(title="Nexus SaaS API")
 
 # InMemory DB mock for tenants
 MOCK_TENANTS_DB: dict[str, TenantRecord] = {
