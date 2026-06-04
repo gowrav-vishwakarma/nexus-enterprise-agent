@@ -31,8 +31,29 @@ from typing import Any, AsyncIterator, Optional
 from nexus.config.llm import LLMProviderConfig, ProviderType
 from nexus.llm.adapters.base import LLMAdapter
 from nexus.llm.response import LLMResponse, LLMStreamChunk, TokenUsage, ToolCallRequest
+from nexus.llm.tool_format import format_openai_tools
 
 logger = logging.getLogger(__name__)
+
+# Known provider prefixes that LiteLLM understands
+_PROVIDER_PREFIXES = (
+    "openai/", "azure_openai/", "anthropic/", "gemini/",
+    "ollama/", "groq/", "openrouter/", "bedrock/",
+)
+
+
+def has_provider_prefix(model: str) -> bool:
+    """Check if model string starts with a known provider prefix."""
+    return any(model.startswith(prefix) for prefix in _PROVIDER_PREFIXES)
+
+
+def strip_provider_prefix(model: str) -> str:
+    """Strip provider prefix from model string. E.g., 'openai/qwen' -> 'qwen'."""
+    for prefix in _PROVIDER_PREFIXES:
+        if model.startswith(prefix):
+            return model[len(prefix):]
+    return model
+
 
 # Providers that LiteLLM handles natively with a prefix in the model string
 _LITELLM_PREFIX_MAP: dict[str, str] = {
@@ -101,11 +122,12 @@ class LiteLLMAdapter(LLMAdapter):
             kw["api_key"] = api_key
         if self.config.base_url:
             kw["api_base"] = self.config.base_url
-            # When using a custom api_base (e.g. LiteLLM proxy), pass the model
-            # string EXACTLY as configured without letting LiteLLM strip provider
-            # prefixes.  Force the OpenAI client so the full model name
-            # (e.g. "openai/qwen") is sent unchanged to the endpoint.
-            kw["model"] = self.config.model  # raw model, no prefix processing
+            # When using a custom api_base (e.g. LM Studio, LiteLLM proxy),
+            # pass the model string EXACTLY as configured. Do NOT strip provider
+            # prefixes — the upstream server may require them (e.g. LM Studio keys
+            # that only allow 'openai/qwen'). Force the OpenAI client so the full
+            # model name is sent unchanged to the endpoint.
+            kw["model"] = self.config.model
             kw["custom_llm_provider"] = "openai"
         else:
             kw["model"] = self._model
@@ -122,7 +144,7 @@ class LiteLLMAdapter(LLMAdapter):
         if stop_sequences:
             kw["stop"] = stop_sequences
         if tools:
-            kw["tools"] = tools
+            kw["tools"] = format_openai_tools(tools)
             kw["tool_choice"] = "auto"
         if stream:
             kw["stream"] = True

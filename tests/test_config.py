@@ -29,6 +29,15 @@ def test_llm_provider_config_validation():
     # providers can be used without an explicit key in code.
     config_no_key = LLMProviderConfig(provider="openai", model="gpt-4o")
     assert config_no_key.get_api_key() == ""
+    assert config_no_key.context_window_tokens == 128000
+
+    config_budget = LLMProviderConfig(
+        provider="openai",
+        model="gpt-4o",
+        api_key="sk-test-key",
+        context_window_tokens=8000,
+    )
+    assert config_budget.context_window_tokens == 8000
 
 
 def test_agent_config_defaults():

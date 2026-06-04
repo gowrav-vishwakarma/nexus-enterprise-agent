@@ -2,7 +2,7 @@
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, Field, SecretStr
 
 
 ProviderType = Literal[
@@ -30,6 +30,11 @@ class LLMProviderConfig(BaseModel):
     api_key: SecretStr = SecretStr("")
     base_url: Optional[str] = None
     api_version: Optional[str] = None
+    context_window_tokens: int = Field(
+        default=128000,
+        ge=1,
+        description="Max tokens for context window budgeting (history pruning)",
+    )
     timeout: int = 60
     max_retries: int = 3
     retry_delay: float = 1.0

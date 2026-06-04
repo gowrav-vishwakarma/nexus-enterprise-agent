@@ -7,6 +7,7 @@ memory, RCS, and agent group configurations in a FastAPI environment.
 from __future__ import annotations
 
 import os
+import warnings
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
@@ -245,35 +246,60 @@ class NexusTenantConfigFactory:
     SHARED_SQLITE_PATH: str = "./shared_sessions.db"
     SHARED_PG_DSN: SecretStr = SecretStr("postgresql://user:pass@localhost:5432/shared_db")
 
-    # LM Studio / LiteLLM defaults (read from env)
-    LM_STUDIO_BASE_URL: str = os.getenv("LM_STUDIO_BASE_URL", "")
-    LM_STUDIO_API_KEY: str = os.getenv("LM_STUDIO_API_KEY", "")
-    LM_STUDIO_MODEL: str = os.getenv("LM_STUDIO_MODEL", "openai/qwen")
+    # Custom LLM endpoint (LiteLLM proxy, LM Studio, or any OpenAI-compatible server)
+    NEXUS_LLM_PROVIDER: str = os.getenv("NEXUS_LLM_PROVIDER", "openai")
+    NEXUS_LLM_BASE_URL: str = os.getenv("NEXUS_LLM_BASE_URL", "")
+    NEXUS_LLM_API_KEY: str = os.getenv("NEXUS_LLM_API_KEY", "")
+    NEXUS_LLM_MODEL: str = os.getenv("NEXUS_LLM_MODEL", "gpt-4o-mini")
+
+    @classmethod
+    def _resolve_custom_llm_env(cls) -> tuple[str, str, str, str]:
+        """Return (provider, base_url, api_key, model) from NEXUS_LLM_* or legacy LM_STUDIO_*."""
+        base_url = cls.NEXUS_LLM_BASE_URL
+        api_key = cls.NEXUS_LLM_API_KEY
+        model = cls.NEXUS_LLM_MODEL
+        provider = cls.NEXUS_LLM_PROVIDER
+
+        legacy_base = os.getenv("LM_STUDIO_BASE_URL", "")
+        if not base_url and legacy_base:
+            warnings.warn(
+                "LM_STUDIO_BASE_URL is deprecated; use NEXUS_LLM_BASE_URL instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            base_url = legacy_base
+            api_key = api_key or os.getenv("LM_STUDIO_API_KEY", "")
+            model = os.getenv("LM_STUDIO_MODEL", model) if os.getenv("LM_STUDIO_MODEL") else model
+
+        return provider, base_url, api_key, model
 
     @classmethod
     def build_llm_config(cls, tenant: TenantRecord, limits: PlanLimits) -> LLMProviderConfig:
-        # Priority: tenant-specific LLM config > LM Studio env vars > plan defaults
+        # Priority: tenant-specific LLM config > custom endpoint env vars > plan defaults
         if limits.use_tenant_llm_key and limits.allow_model_override:
             if tenant.preferred_provider == "anthropic" and tenant.anthropic_api_key:
                 return LLMProviderConfig(
                     provider="anthropic",
                     model=tenant.preferred_model or limits.default_model,
                     api_key=tenant.anthropic_api_key,
+                    context_window_tokens=limits.context_window_tokens,
                 )
             elif tenant.openai_api_key:
                 return LLMProviderConfig(
                     provider="openai",
                     model=tenant.preferred_model or limits.default_model,
                     api_key=tenant.openai_api_key,
+                    context_window_tokens=limits.context_window_tokens,
                 )
 
-        # Fall back to LM Studio if configured via env vars
-        if cls.LM_STUDIO_BASE_URL:
+        provider, base_url, api_key, model = cls._resolve_custom_llm_env()
+        if base_url:
             return LLMProviderConfig(
-                provider="openai",
-                model=cls.LM_STUDIO_MODEL,
-                api_key=SecretStr(cls.LM_STUDIO_API_KEY) if cls.LM_STUDIO_API_KEY else SecretStr("not-needed"),
-                base_url=cls.LM_STUDIO_BASE_URL,
+                provider=provider,  # type: ignore[arg-type]
+                model=model,
+                api_key=SecretStr(api_key) if api_key else SecretStr("not-needed"),
+                base_url=base_url,
+                context_window_tokens=limits.context_window_tokens,
             )
 
         # Ultimate fallback: use plan defaults with platform key
@@ -281,6 +307,7 @@ class NexusTenantConfigFactory:
             provider="openai",
             model=limits.default_model,
             api_key=cls.PLATFORM_OPENAI_KEY,
+            context_window_tokens=limits.context_window_tokens,
         )
 
     @classmethod
@@ -396,7 +423,7 @@ MOCK_TENANTS_DB: dict[str, TenantRecord] = {
         tenant_id="pro_tenant_1",
         name="Pro Analytics Inc",
         plan=Plan.PRO,
-        # No fake API key — falls through to LM_STUDIO env vars (LiteLLM)
+        # No fake API key — falls through to NEXUS_LLM_* env vars (custom endpoint)
         isolation_mode="dedicated_schema",
         schema_name="co_pro_tenant_1",
     )

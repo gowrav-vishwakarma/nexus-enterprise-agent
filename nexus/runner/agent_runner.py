@@ -24,6 +24,7 @@ from nexus.events.models import (
 )
 from nexus.llm.proxy import LLMProxy
 from nexus.llm.response import LLMResponse, ToolCallRequest
+from nexus.llm.tool_format import tool_calls_to_openai_messages
 from nexus.llm.token_counter import TokenCounter
 from nexus.rcs.compactor import ServerCompactor
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
@@ -146,7 +147,7 @@ class AgentRunner:
                     session=session,
                     agent_config=self.config,
                     current_user_message=current_user_message if turn_index == 0 else None,
-                    token_budget=self.config.llm.timeout or 100000,
+                    token_budget=self.config.llm.context_window_tokens,
                 )
                 current_tokens = TokenCounter.count_messages(messages, self.config.llm.model)
 
@@ -328,7 +329,11 @@ class AgentRunner:
                     {
                         "role": "assistant",
                         "content": llm_response.content,
-                        "tool_calls": [t.model_dump() for t in llm_response.tool_calls] if llm_response.tool_calls else None
+                        "tool_calls": (
+                            tool_calls_to_openai_messages(llm_response.tool_calls)
+                            if llm_response.tool_calls
+                            else None
+                        ),
                     }
                 ]
 

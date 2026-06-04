@@ -161,3 +161,7 @@ docs/_build/
 
 # Generated type stubs
 *.pyi
+
+
+# Local databases
+*.db

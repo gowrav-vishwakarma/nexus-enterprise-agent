@@ -7,7 +7,8 @@ import pytest
 from nexus.config.llm import LLMProviderConfig
 from nexus.llm.adapters.litellm import LiteLLMAdapter, build_litellm_model_string
 from nexus.llm.proxy import LLMProxy
-from nexus.llm.response import LLMResponse, TokenUsage, ToolCallRequest
+from nexus.llm.response import LLMResponse, ToolCallRequest
+from nexus.llm.tool_format import format_openai_tools, tool_calls_to_openai_messages
 
 
 # ── Model string builder ──────────────────────────────────────────────────────
@@ -61,6 +62,20 @@ def test_proxy_routes_gemini_to_litellm():
     assert isinstance(proxy._adapter, LiteLLMAdapter)
     # Model string should be auto-prefixed
     assert proxy._adapter._model == "gemini/gemini-2.0-flash-exp"
+
+
+def test_proxy_routes_base_url_before_prefix():
+    """Custom base_url with prefixed model should use OpenAIAdapter, not LiteLLM."""
+    config = LLMProviderConfig(
+        provider="openai",
+        model="openai/qwen",
+        api_key="sk-test",
+        base_url="http://localhost:4000",
+    )
+    with patch("nexus.llm.adapters.openai.OpenAIAdapter.__init__", return_value=None):
+        proxy = LLMProxy(config)
+    from nexus.llm.adapters.openai import OpenAIAdapter
+    assert isinstance(proxy._adapter, OpenAIAdapter)
 
 
 def test_proxy_routes_litellm_provider_to_litellm():
@@ -141,3 +156,50 @@ async def test_litellm_adapter_chat_with_tool_calls():
     assert result.tool_calls[0].id == "call_abc123"
     assert result.tool_calls[0].tool_name == "web_search"
     assert result.tool_calls[0].tool_input == {"query": "Nexus agent framework"}
+
+
+@pytest.mark.asyncio
+async def test_litellm_adapter_wraps_tools():
+    """LiteLLMAdapter must pass OpenAI-shaped tools to acompletion."""
+    config = LLMProviderConfig(provider="gemini", model="gemini-2.0-flash-exp", api_key="gm-key")
+    adapter = LiteLLMAdapter(config)
+
+    mock_choice = MagicMock()
+    mock_choice.finish_reason = "stop"
+    mock_choice.message.content = "ok"
+    mock_choice.message.tool_calls = None
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    mock_response.usage = None
+
+    adapter._litellm = MagicMock()
+    adapter._litellm.acompletion = AsyncMock(return_value=mock_response)
+
+    registry_tools = [
+        {
+            "name": "calendar.get_events",
+            "description": "Get events",
+            "parameters": {"type": "object", "properties": {}},
+        }
+    ]
+    await adapter.chat(messages=[{"role": "user", "content": "Hi"}], tools=registry_tools)
+
+    call_kwargs = adapter._litellm.acompletion.call_args.kwargs
+    assert call_kwargs["tools"] == format_openai_tools(registry_tools)
+    assert call_kwargs["tools"][0]["type"] == "function"
+    assert call_kwargs["tools"][0]["function"]["name"] == "calendar.get_events"
+
+
+def test_tool_calls_openai_serialization():
+    """ToolCallRequest list serializes to OpenAI assistant tool_calls shape."""
+    tcs = [
+        ToolCallRequest(
+            id="call_1",
+            tool_name="calendar.get_events",
+            tool_input={},
+        )
+    ]
+    serialized = tool_calls_to_openai_messages(tcs)
+    assert serialized[0]["type"] == "function"
+    assert serialized[0]["function"]["name"] == "calendar.get_events"
+    assert serialized[0]["function"]["arguments"] == "{}"

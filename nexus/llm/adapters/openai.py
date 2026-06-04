@@ -6,6 +6,7 @@ from typing import Any, Optional
 from nexus.config.llm import LLMProviderConfig
 from nexus.llm.adapters.base import LLMAdapter
 from nexus.llm.response import LLMResponse, TokenUsage, ToolCallRequest, LLMStreamChunk
+from nexus.llm.tool_format import format_openai_tools
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +81,7 @@ class OpenAIAdapter(LLMAdapter):
             params["stop"] = stop_sequences
         
         if tools:
-            # Map tools schema format
-            params["tools"] = [
-                {"type": "function", "function": t} for t in tools
-            ]
+            params["tools"] = format_openai_tools(tools)
 
         # Merge extra params from config and kwargs
         params.update(self.config.extra_headers)
@@ -157,10 +155,7 @@ class OpenAIAdapter(LLMAdapter):
             params["max_tokens"] = max_tokens
         
         if tools:
-            # Map tools schema format
-            params["tools"] = [
-                {"type": "function", "function": t} for t in tools
-            ]
+            params["tools"] = format_openai_tools(tools)
 
         # Merge extra params from config and kwargs
         params.update(kwargs)

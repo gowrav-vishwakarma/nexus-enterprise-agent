@@ -9,9 +9,12 @@ This walkthrough details the setup, configuration, and execution patterns for th
 The LiteLLM Adapter (`LiteLLMAdapter`) serves as a unified routing layer. This allows the framework to connect with 100+ LLM backends (OpenAI, Anthropic, Gemini, Groq, Ollama, OpenRouter, Bedrock, etc.) using a single OpenAI-compatible interface.
 
 ### Routing Logic
-1. **Direct Native Adapters**: `openai` and `anthropic` bypass LiteLLM to use their respective optimized libraries (`httpx` for OpenAI and the Anthropic SDK).
-2. **LiteLLM Catch-All**: All other provider identifiers (e.g., `gemini`, `groq`, `ollama`, `litellm`, etc.) automatically route through `LiteLLMAdapter`. 
-3. **Model String Prepending**: If the model name is not already prefixed with the provider name (e.g., `gemini-2.0-flash-exp`), the adapter prepends the provider name automatically (yielding `gemini/gemini-2.0-flash-exp`).
+1. **Custom endpoint (`base_url`)**: LiteLLM proxy, LM Studio, or any OpenAI-compatible server uses the native `OpenAIAdapter` (model string sent as-is, including prefixed names like `openai/qwen`).
+2. **Direct Native Adapters**: `openai` and `anthropic` without `base_url` bypass LiteLLM for their SDKs.
+3. **LiteLLM Catch-All**: Other providers (e.g., `gemini`, `groq`, `ollama`) and prefixed models without `base_url` route through `LiteLLMAdapter`.
+4. **Model String Prepending**: Non-native providers auto-prefix the model when needed (e.g., `gemini/gemini-2.0-flash-exp`).
+
+Configure a custom endpoint via `NEXUS_LLM_BASE_URL`, `NEXUS_LLM_API_KEY`, `NEXUS_LLM_MODEL`, and `NEXUS_LLM_PROVIDER` (see `.env.example`).
 
 ### Configuration Example
 ```python
