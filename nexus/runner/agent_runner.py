@@ -27,7 +27,10 @@ from nexus.llm.response import LLMResponse, ToolCallRequest
 from nexus.llm.tool_format import tool_calls_to_openai_messages
 from nexus.llm.token_counter import TokenCounter
 from nexus.memory.curator import MemoryCurator
-from nexus.memory.user_store import UserMemoryStore, resolve_user_namespace
+from nexus.memory.cross_session_store import (
+    CrossSessionMemoryStore,
+    resolve_cross_session_namespace,
+)
 from nexus.rcs.compactor import ServerCompactor
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
 from nexus.session.manager import SessionManager
@@ -49,7 +52,7 @@ class AgentRunner:
         storage_config: Optional[Union[SessionStorageConfig, SessionManager]] = None,
         run_context: Optional[RunContext] = None,
         event_emitter: Optional[NexusEventEmitter] = None,
-        user_memory_store: Optional[UserMemoryStore] = None,
+        cross_session_memory_store: Optional[CrossSessionMemoryStore] = None,
     ):
         self.config = config
         self.tool_registry = tool_registry
@@ -67,8 +70,8 @@ class AgentRunner:
                 self.session_manager = SessionManager()
 
         self.run_context = run_context or RunContext()
-        self.user_memory_store = user_memory_store
-        self._user_entity_memory: dict[str, str] = {}
+        self.cross_session_memory_store = cross_session_memory_store
+        self._cross_session_entity_memory: dict[str, str] = {}
 
         # Initialize Event System
         self.event_emitter = event_emitter or NexusEventEmitter()
@@ -92,27 +95,27 @@ class AgentRunner:
 
         # Memory curator (gated; no-op when memory is disabled)
         self.memory_curator = MemoryCurator(
-            config=self.config.memory,
+            config=self.config.session_memory,
             llm_proxy=self.llm_proxy,
             session_manager=self.session_manager,
             tool_registry=self.tool_registry,
             run_context=self.run_context,
             event_emitter=self.event_emitter,
-            user_memory_store=self.user_memory_store,
+            cross_session_memory_store=self.cross_session_memory_store,
             agent_name=self.config.name,
         )
 
-    async def _load_user_entity_memory(self) -> dict[str, str]:
-        """Load cross-session user facts for injection into the system prompt."""
-        user_cfg = self.config.memory.user
-        if not user_cfg.enabled or not self.user_memory_store:
+    async def _load_cross_session_entity_memory(self) -> dict[str, str]:
+        """Load cross-session facts for injection into the system prompt."""
+        cross_cfg = self.config.session_memory.cross_session
+        if not cross_cfg.enabled or not self.cross_session_memory_store:
             return {}
         if not self.run_context.user_id:
             return {}
 
-        namespace = resolve_user_namespace(user_cfg.namespace, self.config.name)
+        namespace = resolve_cross_session_namespace(cross_cfg.namespace, self.config.name)
         try:
-            record = await self.user_memory_store.load(
+            record = await self.cross_session_memory_store.load(
                 self.run_context.tenant_id,
                 self.run_context.user_id,
                 namespace,
@@ -120,7 +123,7 @@ class AgentRunner:
             if record and record.entity_memory:
                 return dict(record.entity_memory)
         except Exception as exc:
-            logger.warning("AgentRunner: failed to load user memory: %s", exc)
+            logger.warning("AgentRunner: failed to load cross-session memory: %s", exc)
         return {}
 
     async def _get_or_create_session(self, session_id: Optional[str]) -> AgentSession:
@@ -151,7 +154,7 @@ class AgentRunner:
             reloaded = await self.session_manager.load_session(session.session_id)
             if reloaded is not None:
                 session = reloaded
-            self._user_entity_memory = await self._load_user_entity_memory()
+            self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
         return session
 
     async def run(
@@ -162,7 +165,7 @@ class AgentRunner:
     ) -> AgentRunResult:
         """Run the single agent turn-loop synchronously (awaiting entire flow)."""
         session = await self._get_or_create_session(session_id)
-        self._user_entity_memory = await self._load_user_entity_memory()
+        self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
 
         # Set initial metadata if provided
         if initial_context:
@@ -199,7 +202,7 @@ class AgentRunner:
                     agent_config=self.config,
                     current_user_message=current_user_message if turn_index == 0 else None,
                     token_budget=self.config.llm.context_window_tokens,
-                    user_entity_memory=self._user_entity_memory,
+                    cross_session_entity_memory=self._cross_session_entity_memory,
                 )
                 current_tokens = TokenCounter.count_messages(messages, self.config.llm.model)
 
@@ -452,7 +455,7 @@ class AgentRunner:
                 final_turn_idx = max(turn_index - 1, 0)
                 if self.memory_curator.should_trigger(final_turn_idx, at_end=True):
                     await self.memory_curator.curate(session, final_turn_idx)
-                    self._user_entity_memory = await self._load_user_entity_memory()
+                    self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
             except Exception as e:
                 logger.warning("AgentRunner: end-of-run memory curation failed: %s", e)
 

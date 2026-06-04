@@ -1,4 +1,4 @@
-"""Tests for cross-session user memory."""
+"""Tests for cross-session memory."""
 
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -6,10 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nexus.config import AgentConfig, LLMProviderConfig
-from nexus.config.memory import EntityMemoryConfig, MemoryConfig, UserMemoryConfig
+from nexus.config.memory import (
+    CrossSessionMemoryConfig,
+    EntityMemoryConfig,
+    SessionMemoryConfig,
+)
 from nexus.context.builder import ContextWindowBuilder
 from nexus.llm.response import LLMResponse, TokenUsage
-from nexus.memory.user_store import InMemoryUserMemoryStore
+from nexus.memory.cross_session_store import InMemoryCrossSessionMemoryStore
 from nexus.runner.agent_runner import AgentRunner
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, TurnRecord
@@ -18,8 +22,8 @@ from nexus.tools.registry import ToolRegistry
 
 
 @pytest.mark.asyncio
-async def test_user_store_merge_and_cap():
-    store = InMemoryUserMemoryStore()
+async def test_cross_session_store_merge_and_cap():
+    store = InMemoryCrossSessionMemoryStore()
     for i in range(5):
         await store.merge_entities(
             "tenant-a",
@@ -36,7 +40,7 @@ async def test_user_store_merge_and_cap():
 
 @pytest.mark.asyncio
 async def test_cross_session_inject_in_system_prompt():
-    store = InMemoryUserMemoryStore()
+    store = InMemoryCrossSessionMemoryStore()
     await store.merge_entities(
         "t1",
         "alice",
@@ -50,25 +54,25 @@ async def test_cross_session_inject_in_system_prompt():
     agent = AgentConfig(
         name="support",
         llm=llm,
-        memory=MemoryConfig(
+        session_memory=SessionMemoryConfig(
             enabled=True,
             entity=EntityMemoryConfig(enabled=True),
-            user=UserMemoryConfig(enabled=True),
+            cross_session=CrossSessionMemoryConfig(enabled=True),
         ),
     )
     messages = ContextWindowBuilder().build(
         session,
         agent,
         current_user_message="hi",
-        user_entity_memory={"preference": "dark mode"},
+        cross_session_entity_memory={"preference": "dark mode"},
     )
     assert "About this user" in messages[0]["content"]
     assert "dark mode" in messages[0]["content"]
 
 
 @pytest.mark.asyncio
-async def test_user_isolation_between_users():
-    store = InMemoryUserMemoryStore()
+async def test_cross_session_isolation_between_users():
+    store = InMemoryCrossSessionMemoryStore()
     await store.merge_entities("t", "user-a", "a", {"x": "1"}, max_entities=10)
     await store.merge_entities("t", "user-b", "a", {"y": "2"}, max_entities=10)
 
@@ -79,8 +83,8 @@ async def test_user_isolation_between_users():
 
 
 @pytest.mark.asyncio
-async def test_runner_loads_user_memory_on_new_session():
-    store = InMemoryUserMemoryStore()
+async def test_runner_loads_cross_session_memory_on_new_session():
+    store = InMemoryCrossSessionMemoryStore()
     await store.merge_entities(
         "tenant",
         "u1",
@@ -93,10 +97,10 @@ async def test_runner_loads_user_memory_on_new_session():
     agent_config = AgentConfig(
         name="bot",
         llm=llm_config,
-        memory=MemoryConfig(
+        session_memory=SessionMemoryConfig(
             enabled=True,
             entity=EntityMemoryConfig(enabled=True),
-            user=UserMemoryConfig(enabled=True),
+            cross_session=CrossSessionMemoryConfig(enabled=True),
         ),
     )
     registry = ToolRegistry()
@@ -106,7 +110,7 @@ async def test_runner_loads_user_memory_on_new_session():
         tool_registry=registry,
         storage_config=manager,
         run_context=RunContext(tenant_id="tenant", user_id="u1"),
-        user_memory_store=store,
+        cross_session_memory_store=store,
     )
 
     response = LLMResponse(
@@ -122,12 +126,12 @@ async def test_runner_loads_user_memory_on_new_session():
         with patch.object(runner.memory_curator, "curate", mock_curate):
             await runner.run(user_message="Hello", session_id="brand-new-session")
 
-    assert runner._user_entity_memory.get("language") == "Spanish"
+    assert runner._cross_session_entity_memory.get("language") == "Spanish"
 
 
 @pytest.mark.asyncio
-async def test_curator_promotes_to_user_store():
-    store = InMemoryUserMemoryStore()
+async def test_curator_promotes_to_cross_session_store():
+    store = InMemoryCrossSessionMemoryStore()
     manager = SessionManager()
     session = await manager.create_session(
         agent_id="bot",
@@ -159,15 +163,15 @@ async def test_curator_promotes_to_user_store():
         )
     )
     curator = MemoryCurator(
-        MemoryConfig(
+        SessionMemoryConfig(
             enabled=True,
             entity=EntityMemoryConfig(enabled=True),
-            user=UserMemoryConfig(enabled=True),
+            cross_session=CrossSessionMemoryConfig(enabled=True),
         ),
         llm,
         manager,
         run_context=RunContext(tenant_id="t", user_id="u1"),
-        user_memory_store=store,
+        cross_session_memory_store=store,
         agent_name="bot",
     )
     await curator.curate(session, 0)

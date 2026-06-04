@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from nexus.config.defaults import DEFAULT_SYSTEM_TEMPLATE
 from nexus.config.llm import LLMProviderConfig
-from nexus.config.memory import MemoryConfig
+from nexus.config.memory import SessionMemoryConfig
 from nexus.config.rcs import RuntimeContextSummarizerConfig
 from nexus.config.storage import SessionStorageConfig
 
@@ -70,9 +70,9 @@ class AgentConfig(BaseModel):
         default_factory=RuntimeContextSummarizerConfig,
         description="Runtime Context Summarization configuration",
     )
-    memory: MemoryConfig = Field(
-        default_factory=MemoryConfig,
-        description="Memory configuration (entity, working)",
+    session_memory: SessionMemoryConfig = Field(
+        default_factory=SessionMemoryConfig,
+        description="Per-session memory configuration (entity, working, cross-session promotion)",
     )
     storage: Optional[SessionStorageConfig] = Field(
         None, description="Session storage configuration"
@@ -133,7 +133,7 @@ MemberConfig = Union[AgentConfig, AgentGroupConfig]
 # Forward reference resolution for recursive type
 AgentGroupConfig.model_rebuild()
 
-# Resolve MemoryConfig.curator_agent forward reference now that AgentConfig exists.
+# Resolve SessionMemoryConfig.curator_agent forward reference now that AgentConfig exists.
 # model_rebuild() captures this module's namespace (which includes AgentConfig).
-MemoryConfig.model_rebuild()
+SessionMemoryConfig.model_rebuild()
 

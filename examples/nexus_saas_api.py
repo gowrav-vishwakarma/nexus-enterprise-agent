@@ -31,8 +31,13 @@ from pydantic import BaseModel, SecretStr, Field
 # ── NEXUS imports (validated against codebase) ────────────────────────────────
 from nexus.config.agent import AgentConfig, AgentPersonaConfig, TurnConfig, AgentGroupConfig
 from nexus.config.llm import LLMProviderConfig
-from nexus.config.memory import EntityMemoryConfig, MemoryConfig, UserMemoryConfig, WorkingMemoryConfig
-from nexus.memory.user_store import SQLiteUserMemoryStore
+from nexus.config.memory import (
+    CrossSessionMemoryConfig,
+    EntityMemoryConfig,
+    SessionMemoryConfig,
+    WorkingMemoryConfig,
+)
+from nexus.memory.cross_session_store import SQLiteCrossSessionMemoryStore
 from nexus.config.rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
 from nexus.config.storage import SessionStorageConfig
 from nexus.runner.agent_runner import AgentRunner
@@ -391,11 +396,11 @@ class NexusTenantConfigFactory:
             persona=AgentPersonaConfig(role=role, goal=goal),
             turns=TurnConfig(max_turns=limits.max_turns, max_tool_calls_per_turn=limits.max_tool_calls_per_turn),
             rcs=cls.build_rcs_config(tenant, limits, llm),
-            memory=MemoryConfig(
+            session_memory=SessionMemoryConfig(
                 enabled=limits.entity_memory or limits.working_memory,
                 entity=EntityMemoryConfig(enabled=limits.entity_memory),
                 working=WorkingMemoryConfig(enabled=limits.working_memory),
-                user=UserMemoryConfig(enabled=limits.entity_memory),
+                cross_session=CrossSessionMemoryConfig(enabled=limits.entity_memory),
             ),
             tool_plugins=allowed_tools,
         )
@@ -449,7 +454,9 @@ SHARED_TOOL_REGISTRY.register_plugin(WebSearchPlugin())
 SHARED_TOOL_REGISTRY.register_plugin(DatabasePlugin())
 SHARED_TOOL_REGISTRY.register_plugin(CalendarPlugin())
 
-SHARED_USER_MEMORY_STORE = SQLiteUserMemoryStore(db_path="./shared_user_memory.db")
+SHARED_CROSS_SESSION_MEMORY_STORE = SQLiteCrossSessionMemoryStore(
+    db_path="./shared_user_memory.db"
+)
 
 
 # ── Request / Response schemas ───────────────────────────────────────────────
@@ -491,7 +498,7 @@ async def chat(
         tool_registry=SHARED_TOOL_REGISTRY,
         storage_config=tenant_ctx.storage_config,
         run_context=run_context,
-        user_memory_store=SHARED_USER_MEMORY_STORE,
+        cross_session_memory_store=SHARED_CROSS_SESSION_MEMORY_STORE,
     )
 
     result = await runner.run(
@@ -563,7 +570,7 @@ async def run_multi_agent_group(
         tool_registry=SHARED_TOOL_REGISTRY,
         storage_config=tenant_ctx.storage_config,
         run_context=run_context,
-        user_memory_store=SHARED_USER_MEMORY_STORE,
+        cross_session_memory_store=SHARED_CROSS_SESSION_MEMORY_STORE,
     )
 
     result = await orchestrator.run(

@@ -66,9 +66,9 @@ Goal: {{ persona.goal }}
 Background: {{ persona.backstory }}
 {% endif %}
 
-{% if user_entity_memory %}
+{% if cross_session_entity_memory %}
 ## About this user (across conversations)
-{% for key, value in user_entity_memory.items() %}
+{% for key, value in cross_session_entity_memory.items() %}
 - {{ key }}: {{ value }}
 {% endfor %}
 {% endif %}
@@ -99,7 +99,7 @@ Return ONLY valid JSON, no markdown formatting."""
 # Memory curator prompt - used by MemoryCurator (separate LLM call).
 # Placeholders {existing_entities}, {existing_working}, {conversation} are filled via
 # str.replace (NOT str.format), so literal JSON braces below are safe.
-DEFAULT_MEMORY_CURATOR_PROMPT = """You are a memory curator for an AI agent. Read the recent conversation and decide what durable information is worth remembering for future turns. Keep memory MINIMAL and high-signal.
+DEFAULT_SESSION_MEMORY_CURATOR_PROMPT = """You are a memory curator for an AI agent. Read the recent conversation and decide what durable information is worth remembering for future turns. Keep memory MINIMAL and high-signal.
 
 Return ONLY a JSON object with this exact shape (no markdown fences, no commentary):
 {"entities": {"fact_key": "concise fact value"}, "working_memory": "short notes for the current task (or empty string)"}

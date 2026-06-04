@@ -2,7 +2,7 @@
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 StorageAdapterType = Literal["memory", "file", "sqlite", "postgresql", "redis"]
@@ -50,10 +50,16 @@ class SQLiteStorageConfig(BaseModel):
 class PostgreSQLStorageConfig(BaseModel):
     """PostgreSQL storage configuration."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     dsn: SecretStr = Field(..., description="Database connection string")
     pool_size: int = Field(default=10, ge=1, description="Connection pool size")
     max_overflow: int = Field(default=20, ge=0, description="Max overflow connections")
-    schema: str = Field(default="public", description="Database schema")
+    db_schema: str = Field(
+        default="public",
+        description="Database schema",
+        alias="schema",
+    )
     table_prefix: str = Field(default="nexus_", description="Table name prefix")
     auto_migrate: bool = Field(default=True, description="Auto-create tables")
 

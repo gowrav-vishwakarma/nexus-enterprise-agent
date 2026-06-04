@@ -8,7 +8,7 @@ def render_system_prompt(
     persona: dict[str, Any],
     working_memory: str = "",
     entity_memory: Optional[dict[str, str]] = None,
-    user_entity_memory: Optional[dict[str, str]] = None,
+    cross_session_entity_memory: Optional[dict[str, str]] = None,
     current_date: str = "",
     template: Optional[str] = None,
 ) -> str:
@@ -18,7 +18,7 @@ def render_system_prompt(
         persona: Dict with keys: role, goal, backstory, system_prompt_template
         working_memory: Current working memory content
         entity_memory: Dict of known facts/entities (this session)
-        user_entity_memory: Dict of durable user facts (cross-session)
+        cross_session_entity_memory: Dict of durable facts (cross-session)
         current_date: Current date string
         template: Optional custom template override
 
@@ -27,8 +27,8 @@ def render_system_prompt(
     """
     if entity_memory is None:
         entity_memory = {}
-    if user_entity_memory is None:
-        user_entity_memory = {}
+    if cross_session_entity_memory is None:
+        cross_session_entity_memory = {}
 
     env = Environment(loader=BaseLoader(), autoescape=select_autoescape())
     tmpl_str = template or persona.get("system_prompt_template", "")
@@ -38,6 +38,6 @@ def render_system_prompt(
         persona=persona,
         working_memory=working_memory,
         entity_memory=entity_memory,
-        user_entity_memory=user_entity_memory,
+        cross_session_entity_memory=cross_session_entity_memory,
         current_date=current_date,
     )

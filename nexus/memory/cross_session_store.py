@@ -1,4 +1,4 @@
-"""Cross-session user memory store (tenant + user + namespace)."""
+"""Cross-session memory store (tenant + user + namespace)."""
 
 from __future__ import annotations
 
@@ -25,22 +25,22 @@ CREATE INDEX IF NOT EXISTS idx_user_memory_user   ON nexus_user_memory (user_id)
 """
 
 
-def make_user_memory_key(
+def make_cross_session_memory_key(
     tenant_id: Optional[str],
     user_id: str,
     namespace: str,
 ) -> str:
-    """Build a stable storage key for a user memory record."""
+    """Build a stable storage key for a cross-session memory record."""
     tenant_part = tenant_id or "_"
     return f"{tenant_part}:{user_id}:{namespace}"
 
 
-def resolve_user_namespace(configured: str, agent_name: str) -> str:
-    """Return the namespace for user memory (defaults to agent name)."""
+def resolve_cross_session_namespace(configured: str, agent_name: str) -> str:
+    """Return the namespace for cross-session memory (defaults to agent name)."""
     return configured.strip() or agent_name
 
 
-class UserMemoryRecord(BaseModel):
+class CrossSessionMemoryRecord(BaseModel):
     """Durable facts for one user within a tenant/namespace scope."""
 
     tenant_id: Optional[str] = None
@@ -54,17 +54,17 @@ class UserMemoryRecord(BaseModel):
 
 
 @runtime_checkable
-class UserMemoryStore(Protocol):
-    """Protocol for cross-session user memory persistence."""
+class CrossSessionMemoryStore(Protocol):
+    """Protocol for cross-session memory persistence."""
 
     async def load(
         self,
         tenant_id: Optional[str],
         user_id: str,
         namespace: str,
-    ) -> Optional[UserMemoryRecord]: ...
+    ) -> Optional[CrossSessionMemoryRecord]: ...
 
-    async def save(self, record: UserMemoryRecord) -> None: ...
+    async def save(self, record: CrossSessionMemoryRecord) -> None: ...
 
     async def merge_entities(
         self,
@@ -74,8 +74,8 @@ class UserMemoryStore(Protocol):
         entities: dict[str, str],
         *,
         max_entities: int,
-    ) -> UserMemoryRecord:
-        """Merge entities into the user record, enforcing max_entities cap."""
+    ) -> CrossSessionMemoryRecord:
+        """Merge entities into the record, enforcing max_entities cap."""
         ...
 
 
@@ -85,23 +85,23 @@ def _cap_entities(entities: dict[str, str], max_entities: int) -> dict[str, str]
     return dict(list(entities.items())[-max_entities:])
 
 
-class InMemoryUserMemoryStore:
-    """In-process user memory store for tests and dev."""
+class InMemoryCrossSessionMemoryStore:
+    """In-process cross-session memory store for tests and dev."""
 
     def __init__(self) -> None:
-        self._records: dict[str, UserMemoryRecord] = {}
+        self._records: dict[str, CrossSessionMemoryRecord] = {}
 
     async def load(
         self,
         tenant_id: Optional[str],
         user_id: str,
         namespace: str,
-    ) -> Optional[UserMemoryRecord]:
-        key = make_user_memory_key(tenant_id, user_id, namespace)
+    ) -> Optional[CrossSessionMemoryRecord]:
+        key = make_cross_session_memory_key(tenant_id, user_id, namespace)
         return self._records.get(key)
 
-    async def save(self, record: UserMemoryRecord) -> None:
-        key = make_user_memory_key(record.tenant_id, record.user_id, record.namespace)
+    async def save(self, record: CrossSessionMemoryRecord) -> None:
+        key = make_cross_session_memory_key(record.tenant_id, record.user_id, record.namespace)
         record.touch()
         self._records[key] = record
 
@@ -113,10 +113,10 @@ class InMemoryUserMemoryStore:
         entities: dict[str, str],
         *,
         max_entities: int,
-    ) -> UserMemoryRecord:
+    ) -> CrossSessionMemoryRecord:
         existing = await self.load(tenant_id, user_id, namespace)
         if existing is None:
-            existing = UserMemoryRecord(
+            existing = CrossSessionMemoryRecord(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 namespace=namespace,
@@ -128,15 +128,15 @@ class InMemoryUserMemoryStore:
         return existing
 
 
-class SQLiteUserMemoryStore:
-    """SQLite-backed user memory store."""
+class SQLiteCrossSessionMemoryStore:
+    """SQLite-backed cross-session memory store."""
 
     def __init__(self, db_path: str = "./nexus_user_memory.db") -> None:
         try:
             import aiosqlite  # noqa: F401
         except ImportError as exc:
             raise ImportError(
-                "aiosqlite is required for SQLiteUserMemoryStore. "
+                "aiosqlite is required for SQLiteCrossSessionMemoryStore. "
                 "Install it with: uv pip install aiosqlite"
             ) from exc
         self.db_path = db_path
@@ -153,10 +153,10 @@ class SQLiteUserMemoryStore:
         tenant_id: Optional[str],
         user_id: str,
         namespace: str,
-    ) -> Optional[UserMemoryRecord]:
+    ) -> Optional[CrossSessionMemoryRecord]:
         import aiosqlite
 
-        key = make_user_memory_key(tenant_id, user_id, namespace)
+        key = make_cross_session_memory_key(tenant_id, user_id, namespace)
         async with aiosqlite.connect(self.db_path) as db:
             await self._ensure_schema(db)
             async with db.execute(
@@ -166,13 +166,13 @@ class SQLiteUserMemoryStore:
                 row = await cursor.fetchone()
         if not row:
             return None
-        return UserMemoryRecord(**json.loads(row[0]))
+        return CrossSessionMemoryRecord(**json.loads(row[0]))
 
-    async def save(self, record: UserMemoryRecord) -> None:
+    async def save(self, record: CrossSessionMemoryRecord) -> None:
         import aiosqlite
 
         record.touch()
-        key = make_user_memory_key(record.tenant_id, record.user_id, record.namespace)
+        key = make_cross_session_memory_key(record.tenant_id, record.user_id, record.namespace)
         data = record.model_dump_json()
         async with aiosqlite.connect(self.db_path) as db:
             await self._ensure_schema(db)
@@ -207,10 +207,10 @@ class SQLiteUserMemoryStore:
         entities: dict[str, str],
         *,
         max_entities: int,
-    ) -> UserMemoryRecord:
+    ) -> CrossSessionMemoryRecord:
         existing = await self.load(tenant_id, user_id, namespace)
         if existing is None:
-            existing = UserMemoryRecord(
+            existing = CrossSessionMemoryRecord(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 namespace=namespace,

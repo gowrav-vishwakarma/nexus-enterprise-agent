@@ -1,4 +1,4 @@
-"""Memory configuration models."""
+"""Session and cross-session memory configuration models."""
 
 from typing import TYPE_CHECKING, Optional
 
@@ -28,7 +28,7 @@ class WorkingMemoryConfig(BaseModel):
     )
 
 
-class UserMemoryConfig(BaseModel):
+class CrossSessionMemoryConfig(BaseModel):
     """Cross-session memory keyed by tenant + user (+ namespace)."""
 
     enabled: bool = Field(
@@ -42,16 +42,16 @@ class UserMemoryConfig(BaseModel):
     max_entities: int = Field(
         default=100,
         ge=1,
-        description="Hard cap on user-level entities (oldest dropped beyond cap)",
+        description="Hard cap on cross-session entities (oldest dropped beyond cap)",
     )
     persist_from_curator: bool = Field(
         default=True,
-        description="Promote session entity_memory to user store after each curation",
+        description="Promote session entity_memory to cross-session store after each curation",
     )
 
 
-class MemoryConfig(BaseModel):
-    """Combined memory configuration.
+class SessionMemoryConfig(BaseModel):
+    """Per-session memory configuration (entity + working within one chat).
 
     Memory is written by an optional "memory curator" - a separate, gated LLM call
     (or a full agent) that extracts durable facts/notes from the conversation. It is
@@ -69,9 +69,9 @@ class MemoryConfig(BaseModel):
     working: WorkingMemoryConfig = Field(
         default_factory=WorkingMemoryConfig, description="Working memory settings"
     )
-    user: UserMemoryConfig = Field(
-        default_factory=UserMemoryConfig,
-        description="Cross-session user memory (requires RunContext.user_id)",
+    cross_session: CrossSessionMemoryConfig = Field(
+        default_factory=CrossSessionMemoryConfig,
+        description="Cross-session memory (requires RunContext.user_id)",
     )
 
     # Triggers
@@ -108,7 +108,7 @@ class MemoryConfig(BaseModel):
     )
     curator_prompt: str = Field(
         default="",
-        description="Custom curator prompt (empty = DEFAULT_MEMORY_CURATOR_PROMPT)",
+        description="Custom curator prompt (empty = DEFAULT_SESSION_MEMORY_CURATOR_PROMPT)",
     )
     curator_agent: Optional["AgentConfig"] = Field(
         default=None,
@@ -125,6 +125,6 @@ class MemoryConfig(BaseModel):
 
     def get_curator_prompt(self) -> str:
         """Return the curator prompt, using the default if not overridden."""
-        from nexus.config.defaults import DEFAULT_MEMORY_CURATOR_PROMPT
+        from nexus.config.defaults import DEFAULT_SESSION_MEMORY_CURATOR_PROMPT
 
-        return self.curator_prompt or DEFAULT_MEMORY_CURATOR_PROMPT
+        return self.curator_prompt or DEFAULT_SESSION_MEMORY_CURATOR_PROMPT

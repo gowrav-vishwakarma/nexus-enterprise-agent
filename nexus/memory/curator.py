@@ -18,8 +18,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from nexus.config.memory import EntityMemoryConfig, MemoryConfig, WorkingMemoryConfig
-from nexus.memory.user_store import UserMemoryStore, resolve_user_namespace
+from nexus.config.memory import EntityMemoryConfig, SessionMemoryConfig, WorkingMemoryConfig
+from nexus.memory.cross_session_store import (
+    CrossSessionMemoryStore,
+    resolve_cross_session_namespace,
+)
 from nexus.llm.proxy import LLMProxy
 from nexus.session.models import AgentSession
 
@@ -127,22 +130,22 @@ class MemoryCurator:
 
     def __init__(
         self,
-        config: Optional[MemoryConfig],
+        config: Optional[SessionMemoryConfig],
         llm_proxy: LLMProxy,
         session_manager: Any,
         tool_registry: Any = None,
         run_context: Any = None,
         event_emitter: Any = None,
-        user_memory_store: Optional[UserMemoryStore] = None,
+        cross_session_memory_store: Optional[CrossSessionMemoryStore] = None,
         agent_name: str = "",
     ):
-        self.config = config or MemoryConfig()
+        self.config = config or SessionMemoryConfig()
         self.llm_proxy = llm_proxy
         self.session_manager = session_manager
         self.tool_registry = tool_registry
         self.run_context = run_context
         self.event_emitter = event_emitter
-        self.user_memory_store = user_memory_store
+        self.cross_session_memory_store = cross_session_memory_store
         self.agent_name = agent_name
         self._last_curated_turn: Optional[int] = None
 
@@ -204,34 +207,34 @@ class MemoryCurator:
             )
 
         if session.entity_memory:
-            await self._persist_user_memory(session, turn_index)
+            await self._persist_cross_session_memory(session, turn_index)
 
         return update
 
-    async def _persist_user_memory(
+    async def _persist_cross_session_memory(
         self, session: AgentSession, turn_index: int
     ) -> None:
-        """Promote session entity facts to cross-session user memory."""
-        user_cfg = self.config.user
-        if not user_cfg.enabled or not user_cfg.persist_from_curator:
+        """Promote session entity facts to cross-session memory store."""
+        cross_cfg = self.config.cross_session
+        if not cross_cfg.enabled or not cross_cfg.persist_from_curator:
             return
-        if not self.user_memory_store:
+        if not self.cross_session_memory_store:
             return
         ctx = self.run_context
         if not ctx or not getattr(ctx, "user_id", None):
             logger.debug(
-                "MemoryCurator: skipping user memory persist (no user_id on RunContext)"
+                "MemoryCurator: skipping cross-session persist (no user_id on RunContext)"
             )
             return
 
-        namespace = resolve_user_namespace(user_cfg.namespace, self.agent_name)
+        namespace = resolve_cross_session_namespace(cross_cfg.namespace, self.agent_name)
         try:
-            record = await self.user_memory_store.merge_entities(
+            record = await self.cross_session_memory_store.merge_entities(
                 getattr(ctx, "tenant_id", None),
                 ctx.user_id,
                 namespace,
                 session.entity_memory,
-                max_entities=user_cfg.max_entities,
+                max_entities=cross_cfg.max_entities,
             )
             if self.event_emitter and record.entity_memory:
                 from nexus.events.models import NexusEvent, NexusEventType
@@ -243,14 +246,14 @@ class MemoryCurator:
                         agent_id=session.agent_id,
                         turn_index=turn_index,
                         data={
-                            "scope": "user",
+                            "scope": "cross_session",
                             "entity_count": len(record.entity_memory),
                             "namespace": namespace,
                         },
                     )
                 )
         except Exception as exc:
-            logger.warning("MemoryCurator: user memory persist failed: %s", exc)
+            logger.warning("MemoryCurator: cross-session memory persist failed: %s", exc)
 
     def _build_conversation_digest(self, session: AgentSession) -> str:
         """Compact recent user/assistant exchanges, bounded by char budget."""
@@ -299,7 +302,7 @@ class MemoryCurator:
 
         curator_cfg = self.config.curator_agent.model_copy(deep=True)
         # Recursion guard: the curator must not itself curate.
-        curator_cfg.memory = MemoryConfig(enabled=False)
+        curator_cfg.session_memory = SessionMemoryConfig(enabled=False)
 
         sub_session_id = f"{session.session_id}__memcurator"
         sub_runner = AgentRunner(

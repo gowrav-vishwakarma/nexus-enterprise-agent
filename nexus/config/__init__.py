@@ -3,14 +3,19 @@
 from .agent import AgentConfig, AgentGroupConfig, AgentPersonaConfig
 from .llm import LLMProviderConfig
 from .rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
-from .memory import MemoryConfig, EntityMemoryConfig, WorkingMemoryConfig, UserMemoryConfig
+from .memory import (
+    SessionMemoryConfig,
+    EntityMemoryConfig,
+    WorkingMemoryConfig,
+    CrossSessionMemoryConfig,
+)
 from .storage import SessionStorageConfig
 from .defaults import (
     DEFAULT_RCS_SYSTEM_BLOCK,
     DEFAULT_COMPACTOR_PROMPT,
     DEFAULT_SYSTEM_TEMPLATE,
     DEFAULT_ENTITY_EXTRACTION_PROMPT,
-    DEFAULT_MEMORY_CURATOR_PROMPT,
+    DEFAULT_SESSION_MEMORY_CURATOR_PROMPT,
 )
 
 __all__ = [
@@ -20,14 +25,14 @@ __all__ = [
     "LLMProviderConfig",
     "RuntimeContextSummarizerConfig",
     "ServerCompactorConfig",
-    "MemoryConfig",
+    "SessionMemoryConfig",
     "EntityMemoryConfig",
     "WorkingMemoryConfig",
-    "UserMemoryConfig",
+    "CrossSessionMemoryConfig",
     "SessionStorageConfig",
     "DEFAULT_RCS_SYSTEM_BLOCK",
     "DEFAULT_COMPACTOR_PROMPT",
     "DEFAULT_SYSTEM_TEMPLATE",
     "DEFAULT_ENTITY_EXTRACTION_PROMPT",
-    "DEFAULT_MEMORY_CURATOR_PROMPT",
+    "DEFAULT_SESSION_MEMORY_CURATOR_PROMPT",
 ]

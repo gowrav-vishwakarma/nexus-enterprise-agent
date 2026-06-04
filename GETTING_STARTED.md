@@ -105,35 +105,35 @@ Nexus splits **what the agent is** from **who is calling and where data lives**.
 
 | Concern | Put it on | Notes |
 |---------|-----------|-------|
-| LLM, persona, turns, tools, memory, RCS | `AgentConfig` | Per agent; built once or from a factory |
+| LLM, persona, turns, tools, session_memory, RCS | `AgentConfig` | Per agent; built once or from a factory |
 | Tenant, user, default chat id, tool metadata | `RunContext` | Per HTTP request / job |
 | Session persistence backend | `storage_config` on **Runner / Orchestrator** | **Preferred**; one backend per tenant for joinable history |
 | Session persistence fallback | `AgentConfig.storage` | Only when runner gets no `storage_config` (minimal local scripts) |
-| Cross-session user profile | `user_memory_store` on runner + `RunContext.user_id` | Separate store from session JSON |
+| Cross-session user profile | `cross_session_memory_store` on runner + `RunContext.user_id` | Separate store from session JSON |
 
 ```mermaid
 flowchart TB
   subgraph configLayer [AgentConfig - what the agent is]
     name[name persona llm turns]
-    tools[tool_plugins memory rcs]
+    tools[tool_plugins session_memory rcs]
   end
 
   subgraph runtimeLayer [Runtime wiring - per request]
     rc[RunContext: tenant_id user_id session_id metadata]
     storage[storage_config on Runner or Orchestrator]
     registry[ToolRegistry instance]
-    userStore[user_memory_store optional]
+    crossStore[cross_session_memory_store optional]
   end
 
   subgraph persistLayer [Persisted data]
     sessions[AgentSession JSON per agent session_id]
-    userMem[UserMemoryStore separate]
+    crossMem[CrossSessionMemoryStore separate]
   end
 
   configLayer --> Runner
   runtimeLayer --> Runner
   Runner --> sessions
-  userStore --> userMem
+  crossStore --> crossMem
   Orchestrator --> Runner
 ```
 
@@ -156,7 +156,7 @@ After resolution, the runner syncs the chosen id back onto `RunContext`.
 | | `AgentConfig` | `RunContext` |
 |---|---------------|--------------|
 | Lifetime | Built once (or per tenant template) | New per HTTP request / job |
-| Holds | LLM, persona, tools, limits, memory, RCS | `tenant_id`, `user_id`, `session_id`, `metadata` |
+| Holds | LLM, persona, tools, limits, session_memory, RCS | `tenant_id`, `user_id`, `session_id`, `metadata` |
 | Defines the agent? | Yes | No — defines the **call** |
 
 ---
@@ -219,7 +219,7 @@ Do **not** give different storage backends to group members — history will be 
 ```python
 RunContext(
     tenant_id="acme",      # stored on new sessions; used for multi-tenant storage filters
-    user_id="user-42",     # required for user memory; stored on sessions
+    user_id="user-42",     # required for cross-session memory; stored on sessions
     session_id="sess-1",   # default chat id if you omit session_id on run()
     request_id="req-9",    # tracing / correlation (your choice)
     metadata={"plan": "pro"},  # arbitrary; tools can read via ctx.get("plan")
@@ -230,7 +230,7 @@ RunContext(
 
 **No** — both `AgentRunner` and `AgentOrchestrator` default to an empty `RunContext()` if you omit it.
 
-Use an explicit `RunContext` when you have **multi-tenancy**, **per-user sessions**, **user memory**, or **tools that need request-scoped data** (DB handle, API client, plan flags).
+Use an explicit `RunContext` when you have **multi-tenancy**, **per-user sessions**, **cross-session memory**, or **tools that need request-scoped data** (DB handle, API client, plan flags).
 
 For a local script with one user, you can skip it and pass `session_id=` only on `run()`.
 
@@ -290,7 +290,7 @@ writer = AgentConfig(
 )
 ```
 
-In production, a **config factory** (like `NexusTenantConfigFactory` in the SaaS example) maps tenant/plan → `LLMProviderConfig` + tool allow-list + memory flags, then returns `AgentConfig`. **Storage** resolves at the tenant/request layer on the runner, not on `AgentConfig`.
+In production, a **config factory** (like `NexusTenantConfigFactory` in the SaaS example) maps tenant/plan → `LLMProviderConfig` + tool allow-list + session_memory flags, then returns `AgentConfig`. **Storage** resolves at the tenant/request layer on the runner, not on `AgentConfig`.
 
 Each config can use a **different** `LLMProviderConfig` (OpenAI, Anthropic, LiteLLM proxy, LM Studio, etc.). That is how you give one agent GPT-4o and another Claude on the same app — two configs, two runners (or one group — see below).
 
@@ -463,51 +463,51 @@ runner_b = AgentRunner(config=cfg_b, tool_registry=SHARED)  # cfg_b.tool_plugins
 
 ## Memory
 
-Nexus has **three** memory channels (session entity, session working, user profile). The easy mistake is treating "entity memory" and "user memory" as the same thing — they are both key/value facts, but scoped differently.
+Nexus has **three** memory channels (session entity, session working, cross-session profile). The easy mistake is treating "entity memory" and "cross-session memory" as the same thing — they are both key/value facts, but scoped differently.
 
 ### Overview — three channels
 
 | Question | Use this | Config / wiring |
 |----------|----------|-----------------|
-| "Remember this **for the rest of this chat**?" | **Session memory** | `memory.entity` + `memory.working` on `AgentSession` (same `session_id`) |
-| "Remember this **for this user next time they open a new chat**?" | **User memory** | `memory.user` + `UserMemoryStore` + `RunContext.user_id` |
+| "Remember this **for the rest of this chat**?" | **Session memory** | `session_memory.entity` + `session_memory.working` on `AgentSession` (same `session_id`) |
+| "Remember this **for this user next time they open a new chat**?" | **Cross-session memory** | `session_memory.cross_session` + `CrossSessionMemoryStore` + `RunContext.user_id` |
 | "Search a large document corpus?" | **Your RAG tool** | Custom tool + vector DB (Pinecone, pgvector, etc.) — not built into Nexus |
 
 ```text
 Same user, new session_id
 ─────────────────────────
-  User memory (profile)     →  loaded at run start  →  "About this user (across conversations)"
+  Cross-session memory      →  loaded at run start  →  "About this user (across conversations)"
   Session memory (chat)     →  starts empty         →  "Known Facts (this conversation)"
 
 Same session_id, next turn
 ──────────────────────────
   Session memory            →  updated by curator after each turn
-  User memory               →  also updated when curator saves (if user.enabled)
+  Cross-session memory      →  also updated when curator saves (if cross_session.enabled)
 ```
 
-**Session memory** lives on the conversation record (`AgentSession` JSON). **User memory** lives in a separate store keyed by `tenant_id` + `user_id` + namespace (default namespace = agent name). See [What goes where](#what-goes-where).
+**Session memory** lives on the conversation record (`AgentSession` JSON). **Cross-session memory** lives in a separate store keyed by `tenant_id` + `user_id` + namespace (default namespace = agent name). See [What goes where](#what-goes-where).
 
-### Session memory vs user memory
+### Session memory vs cross-session memory
 
 | Channel | Plain name | Stored on | Survives new `session_id`? | In system prompt? |
 |---------|------------|-----------|----------------------------|-------------------|
-| **User memory** | User profile facts | `UserMemoryStore` (sqlite, or **your own** backend) | **Yes** (with a persistent store) | Yes — "About this user (across conversations)" |
+| **Cross-session memory** | User profile facts | `CrossSessionMemoryStore` (sqlite, or **your own** backend) | **Yes** (with a persistent store) | Yes — "About this user (across conversations)" |
 | **Session entity memory** | This-chat facts | `session.entity_memory` | No — tied to one chat | Yes — "Known Facts (this conversation)" |
 | **Session working memory** | This-chat scratchpad | `session.working_memory` | No | Yes — "Your Working Notes" |
 
-The curator writes **session** facts first; if `memory.user.persist_from_curator` is on, those facts are **copied/merged** into the user store — there is no second extraction LLM call for user memory.
+The curator writes **session** facts first; if `session_memory.cross_session.persist_from_curator` is on, those facts are **copied/merged** into the cross-session store — there is no second extraction LLM call for cross-session memory.
 
 ### When to use which
 
 - **Session entity + working** — small summary the agent should always see **inside one conversation** (current task notes + facts from this thread).
-- **User memory** — durable profile facts for a **returning user** (preferences, name, plan tier) across many chats. Needs `user_id` on every request.
+- **Cross-session memory** — durable profile facts for a **returning user** (preferences, name, plan tier) across many chats. Needs `user_id` on every request.
 - **Large corpora / semantic search** — use a **custom RAG tool** wired to your vector store; Nexus does not ship a built-in vector memory layer.
 
 ### When to skip session memory entirely
 
 If you prompt the **RCS compactor** to preserve meaningful facts from tool responses and conversation turns — not just that tools were called — you may not need the session curator at all. The rolling summary can carry forward what matters after old turns are compacted.
 
-Session memory is **fully opt-out**: set `memory.enabled=False`, or leave both `memory.entity.enabled` and `memory.working.enabled` false. The curator never runs (`MemoryCurator.active` is false) and **no extra LLM call** is made per turn.
+Session memory is **fully opt-out**: set `session_memory.enabled=False`, or leave both `session_memory.entity.enabled` and `session_memory.working.enabled` false. The curator never runs (`MemoryCurator.active` is false) and **no extra LLM call** is made per turn.
 
 Use session entity/working memory when you want **structured, capped, reliably-injectable** facts in dedicated prompt blocks, without depending on compactor summary quality.
 
@@ -515,33 +515,36 @@ Use session entity/working memory when you want **structured, capped, reliably-i
 
 **Session curator** (writes session memory) requires:
 
-- `memory.enabled=True`
-- At least one of `memory.entity.enabled` or `memory.working.enabled`
+- `session_memory.enabled=True`
+- At least one of `session_memory.entity.enabled` or `session_memory.working.enabled`
 
-**User memory** (read + persist across sessions) additionally requires:
+**Cross-session memory** (read + persist across sessions) additionally requires:
 
-- `memory.user.enabled=True`
-- A **`user_memory_store`** passed into `AgentRunner` / `AgentOrchestrator`
+- `session_memory.cross_session.enabled=True`
+- A **`cross_session_memory_store`** passed into `AgentRunner` / `AgentOrchestrator`
 - **`RunContext.user_id`** set on every run (and usually `tenant_id`)
 
-If `user.enabled` is true but `user_id` or `user_memory_store` is missing, user memory is silently skipped; session memory still works.
+If `cross_session.enabled` is true but `user_id` or `cross_session_memory_store` is missing, cross-session memory is silently skipped; session memory still works.
 
 ```python
 from nexus.config.memory import (
-    MemoryConfig, EntityMemoryConfig, WorkingMemoryConfig, UserMemoryConfig,
+    SessionMemoryConfig,
+    EntityMemoryConfig,
+    WorkingMemoryConfig,
+    CrossSessionMemoryConfig,
 )
-from nexus.memory import SQLiteUserMemoryStore
+from nexus.memory import SQLiteCrossSessionMemoryStore
 
-USER_MEMORY = SQLiteUserMemoryStore(db_path="./user_memory.db")
+CROSS_SESSION_STORE = SQLiteCrossSessionMemoryStore(db_path="./cross_session_memory.db")
 
 AgentConfig(
     name="assistant",
     llm=...,
-    memory=MemoryConfig(
+    session_memory=SessionMemoryConfig(
         enabled=True,
         entity=EntityMemoryConfig(enabled=True, max_entities=50),
         working=WorkingMemoryConfig(enabled=True, max_length=2000),
-        user=UserMemoryConfig(enabled=True),  # cross-session profile facts
+        cross_session=CrossSessionMemoryConfig(enabled=True),
     ),
 )
 
@@ -549,52 +552,55 @@ runner = AgentRunner(
     config=...,
     tool_registry=registry,
     storage_config=...,  # session JSON lives here — see What goes where
-    user_memory_store=USER_MEMORY,  # required when user.enabled
+    cross_session_memory_store=CROSS_SESSION_STORE,
     run_context=RunContext(tenant_id="acme", user_id="user-42"),
 )
 ```
 
-### User memory stores (built-in + your own)
+### Cross-session memory stores (built-in + your own)
 
-`user_memory_store` is **pluggable**. The framework only calls three async methods — any class that implements them can be passed to `AgentRunner` / `AgentOrchestrator` (duck typing; no base class required).
+`cross_session_memory_store` is **pluggable**. The framework only calls three async methods — any class that implements them can be passed to `AgentRunner` / `AgentOrchestrator` (duck typing; no base class required).
 
 | Built-in | When to use |
 |----------|-------------|
-| **`InMemoryUserMemoryStore`** | Unit tests, local dev (lost on process exit) |
-| **`SQLiteUserMemoryStore`** | Single-server apps, simple persistence (`uv pip install aiosqlite`) |
+| **`InMemoryCrossSessionMemoryStore`** | Unit tests, local dev (lost on process exit) |
+| **`SQLiteCrossSessionMemoryStore`** | Single-server apps, simple persistence (`uv pip install aiosqlite`) |
 
-There is **no** first-party PostgreSQL (or Redis) user-memory adapter yet. For those backends, implement your own store or wrap an existing DB client.
+There is **no** first-party PostgreSQL (or Redis) cross-session adapter yet. For those backends, implement your own store or wrap an existing DB client.
 
-**`UserMemoryStore` contract** ([`nexus/memory/user_store.py`](nexus/memory/user_store.py)):
+**`CrossSessionMemoryStore` contract** ([`nexus/memory/cross_session_store.py`](nexus/memory/cross_session_store.py)):
 
-- `load(tenant_id, user_id, namespace) -> UserMemoryRecord | None`
-- `save(record: UserMemoryRecord) -> None`
-- `merge_entities(tenant_id, user_id, namespace, entities, *, max_entities) -> UserMemoryRecord`
+- `load(tenant_id, user_id, namespace) -> CrossSessionMemoryRecord | None`
+- `save(record: CrossSessionMemoryRecord) -> None`
+- `merge_entities(tenant_id, user_id, namespace, entities, *, max_entities) -> CrossSessionMemoryRecord`
 
-Use `make_user_memory_key(tenant_id, user_id, namespace)` so keys stay consistent with the built-in stores (`{tenant}:{user}:{namespace}`).
+Use `make_cross_session_memory_key(tenant_id, user_id, namespace)` so keys stay consistent with the built-in stores (`{tenant}:{user}:{namespace}`).
 
 ```python
-from nexus.memory.user_store import UserMemoryRecord, make_user_memory_key
+from nexus.memory.cross_session_store import (
+    CrossSessionMemoryRecord,
+    make_cross_session_memory_key,
+)
 
-class MyPostgresUserMemoryStore:
+class MyPostgresCrossSessionMemoryStore:
     """Example skeleton — wire to your DB in load/save/merge_entities."""
 
     async def load(self, tenant_id, user_id, namespace):
-        key = make_user_memory_key(tenant_id, user_id, namespace)
+        key = make_cross_session_memory_key(tenant_id, user_id, namespace)
         row = await self._fetch(key)  # your code
-        return UserMemoryRecord(**row) if row else None
+        return CrossSessionMemoryRecord(**row) if row else None
 
-    async def save(self, record: UserMemoryRecord) -> None:
-        await self._upsert(make_user_memory_key(
+    async def save(self, record: CrossSessionMemoryRecord) -> None:
+        await self._upsert(make_cross_session_memory_key(
             record.tenant_id, record.user_id, record.namespace
         ), record.model_dump())
 
     async def merge_entities(
         self, tenant_id, user_id, namespace, entities, *, max_entities
-    ) -> UserMemoryRecord:
+    ) -> CrossSessionMemoryRecord:
         existing = await self.load(tenant_id, user_id, namespace)
         if existing is None:
-            existing = UserMemoryRecord(
+            existing = CrossSessionMemoryRecord(
                 tenant_id=tenant_id, user_id=user_id, namespace=namespace
             )
         if entities:
@@ -603,28 +609,28 @@ class MyPostgresUserMemoryStore:
         await self.save(existing)
         return existing
 
-runner = AgentRunner(..., user_memory_store=MyPostgresUserMemoryStore(dsn="..."))
+runner = AgentRunner(..., cross_session_memory_store=MyPostgresCrossSessionMemoryStore(dsn="..."))
 ```
 
-Copy [`InMemoryUserMemoryStore`](nexus/memory/user_store.py) or [`SQLiteUserMemoryStore`](nexus/memory/user_store.py) as a starting point if you prefer not to implement `merge_entities` from scratch.
+Copy [`InMemoryCrossSessionMemoryStore`](nexus/memory/cross_session_store.py) or [`SQLiteCrossSessionMemoryStore`](nexus/memory/cross_session_store.py) as a starting point if you prefer not to implement `merge_entities` from scratch.
 
 Caps keep memory small:
 
-- **Session:** `memory.entity.max_entities`, `memory.working.max_length`
-- **User:** `memory.user.max_entities` (separate cap on the profile store)
+- **Session:** `session_memory.entity.max_entities`, `session_memory.working.max_length`
+- **Cross-session:** `session_memory.cross_session.max_entities` (separate cap on the profile store)
 
-**Curator timing (defaults):** runs **after each completed turn**, so the *next* turn's system prompt includes updated session memory. User store is updated in the same pass when `memory.user.enabled`. Set `extract_after_each_turn=False` and `extraction_interval=N` to curate less often (cheaper).
+**Curator timing (defaults):** runs **after each completed turn**, so the *next* turn's system prompt includes updated session memory. The cross-session store is updated in the same pass when `session_memory.cross_session.enabled`. Set `extract_after_each_turn=False` and `extraction_interval=N` to curate less often (cheaper).
 
 ### Memory curator (writer)
 
-One optional **LLM call** per curation (like the RCS compactor) extracts JSON facts into **session** `entity_memory` / `working_memory`. With **`memory.user.enabled`**, the framework then merges session entities into **`UserMemoryStore`** — you do not configure a separate user curator.
+One optional **LLM call** per curation (like the RCS compactor) extracts JSON facts into **session** `entity_memory` / `working_memory`. With **`session_memory.cross_session.enabled`**, the framework then merges session entities into **`CrossSessionMemoryStore`** — you do not configure a separate cross-session curator.
 
 - **`curator_llm`** — use a cheaper/smaller model than the main agent.
-- **`curator_prompt`** — override what to extract and how (default: `DEFAULT_MEMORY_CURATOR_PROMPT`).
+- **`curator_prompt`** — override what to extract and how (default: `DEFAULT_SESSION_MEMORY_CURATOR_PROMPT`).
 - **`curator_agent`** — advanced: run a full `AgentConfig` as the curator (its own tools/persona); recursion is disabled on that sub-agent.
 
 ```python
-memory=MemoryConfig(
+session_memory=SessionMemoryConfig(
     enabled=True,
     entity=EntityMemoryConfig(enabled=True),
     curator_llm=LLMProviderConfig(provider="openai", model="gpt-4o-mini", api_key=...),
@@ -677,7 +683,7 @@ That example's flow: resolve tenant → build `AgentConfig` → **`storage_confi
 | `persona` | `role` / `goal` system framing |
 | `turns` | `max_turns`, `max_tool_calls_per_turn` |
 | `tool_plugins` | Allow-list of plugin namespaces (see Tool registry) |
-| `memory` | Curator + session (`entity`/`working`) + cross-session `user`; see Memory section |
+| `session_memory` | Curator + session (`entity`/`working`) + cross-session promotion; see Memory section |
 | `rcs` | Long-context summarization (optional) |
 | `storage` | Optional fallback when runner has no `storage_config` — prefer runner-level storage in production |
 
@@ -689,7 +695,7 @@ That example's flow: resolve tenant → build `AgentConfig` → **`storage_confi
 | `tool_registry` | Registered tools (required for runner) |
 | `storage_config` | **Preferred** — session persistence backend (`SessionStorageConfig` or `SessionManager`) |
 | `run_context` | `tenant_id`, `user_id`, `session_id`, `metadata` for this request |
-| `user_memory_store` | Cross-session user profile store (when `memory.user.enabled`) |
+| `cross_session_memory_store` | Cross-session profile store (when `session_memory.cross_session.enabled`) |
 
 ---
 

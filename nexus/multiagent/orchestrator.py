@@ -25,13 +25,13 @@ class AgentOrchestrator:
         tool_registry: Optional[ToolRegistry] = None,
         storage_config: Optional[Any] = None,
         run_context: Optional[RunContext] = None,
-        user_memory_store: Optional[Any] = None,
+        cross_session_memory_store: Optional[Any] = None,
     ):
         self.config = config
         self.tool_registry = tool_registry or ToolRegistry()
         self.storage_config = storage_config
         self.run_context = run_context or RunContext()
-        self.user_memory_store = user_memory_store
+        self.cross_session_memory_store = cross_session_memory_store
         self._init_members()
 
     def _init_members(self) -> None:
@@ -53,7 +53,7 @@ class AgentOrchestrator:
                     tool_registry=self.tool_registry,
                     storage_config=self.storage_config,
                     run_context=m_ctx,
-                    user_memory_store=self.user_memory_store,
+                    cross_session_memory_store=self.cross_session_memory_store,
                 )
                 self._members[member.name] = runner
             elif isinstance(member, AgentGroupConfig):
@@ -63,7 +63,7 @@ class AgentOrchestrator:
                     tool_registry=self.tool_registry,
                     storage_config=self.storage_config,
                     run_context=m_ctx,
-                    user_memory_store=self.user_memory_store,
+                    cross_session_memory_store=self.cross_session_memory_store,
                 )
                 self._members[member.name] = nested_orc
 

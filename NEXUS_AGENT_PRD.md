@@ -245,17 +245,15 @@ class ServerCompactorConfig(BaseModel):
     max_compacted_summary_tokens: int = 150
 ```
 
-#### 4.1.6 `MemoryConfig`
+#### 4.1.6 `SessionMemoryConfig`
 
 ```python
-class MemoryConfig(BaseModel):
-    short_term_max_messages: int = 50
-    entity_memory_enabled: bool = False
-    entity_extraction_prompt: str = DEFAULT_ENTITY_EXTRACTION_PROMPT
-    vector_memory_enabled: bool = False
-    vector_store_config: Optional[dict] = None
-    working_memory_enabled: bool = False
-    working_memory_max_tokens: int = 1000
+class SessionMemoryConfig(BaseModel):
+    enabled: bool = False
+    entity: EntityMemoryConfig
+    working: WorkingMemoryConfig
+    cross_session: CrossSessionMemoryConfig  # promotion to CrossSessionMemoryStore
+    # curator_llm, curator_prompt, curator_agent, inject_into_prompt, ...
 ```
 
 #### 4.1.7 `AgentConfig` (Top-Level)
@@ -270,7 +268,7 @@ class AgentConfig(BaseModel):
     persona: AgentPersonaConfig
     turns: TurnConfig = TurnConfig()
     rcs: RuntimeContextSummarizerConfig = RuntimeContextSummarizerConfig()
-    memory: MemoryConfig = MemoryConfig()
+    session_memory: SessionMemoryConfig = SessionMemoryConfig()
 
     tool_plugins: list[str] = []
     sub_agents: list[str] = []
@@ -438,7 +436,7 @@ class StorageAdapter(ABC):
     dsn: SecretStr
     pool_size: int = 10
     max_overflow: int = 20
-    schema: str = "public"
+    db_schema: str = "public"  # wire key "schema" in adapter_config JSON
     table_prefix: str = "nexus_"
     auto_migrate: bool = True
 - Features:
@@ -1743,7 +1741,7 @@ nexus/
 │   ├── llm.py                     # LLMProviderConfig
 │   ├── agent.py                   # AgentConfig, TurnConfig
 │   ├── rcs.py                     # RuntimeContextSummarizerConfig, ServerCompactorConfig
-│   ├── memory.py                  # MemoryConfig
+│   ├── memory.py                  # SessionMemoryConfig
 │   ├── storage.py                 # SessionStorageConfig
 │   └── defaults.py                # All DEFAULT_* prompt constants
 

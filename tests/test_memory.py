@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nexus.config import AgentConfig, LLMProviderConfig
-from nexus.config.memory import EntityMemoryConfig, MemoryConfig, WorkingMemoryConfig
+from nexus.config.memory import EntityMemoryConfig, SessionMemoryConfig, WorkingMemoryConfig
 from nexus.context.builder import ContextWindowBuilder
 from nexus.llm.proxy import LLMProxy
 from nexus.llm.response import LLMResponse, TokenUsage
@@ -80,7 +80,7 @@ def test_memory_update_malformed_json_no_op():
 def test_should_trigger_matrix(
     turn_index, after_each, interval, at_end, extract_at_end, expected
 ):
-    cfg = MemoryConfig(
+    cfg = SessionMemoryConfig(
         enabled=True,
         entity=EntityMemoryConfig(enabled=True),
         extract_after_each_turn=after_each,
@@ -95,7 +95,7 @@ def test_should_trigger_matrix(
 
 @pytest.mark.asyncio
 async def test_curator_disabled_no_llm_call():
-    cfg = MemoryConfig(enabled=False)
+    cfg = SessionMemoryConfig(enabled=False)
     curator = MemoryCurator(cfg, MagicMock(spec=LLMProxy), MagicMock())
     session = _session_with_turn()
     mock_chat = AsyncMock()
@@ -121,7 +121,7 @@ async def test_curator_llm_updates_session():
     )
     session = await manager.load_session("cur-sess")
 
-    cfg = MemoryConfig(
+    cfg = SessionMemoryConfig(
         enabled=True,
         entity=EntityMemoryConfig(enabled=True, max_entities=10),
         working=WorkingMemoryConfig(enabled=True, max_length=200),
@@ -166,9 +166,9 @@ async def test_curator_agent_path_recursion_guard():
     curator_agent_cfg = AgentConfig(
         name="mem-curator",
         llm=LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk"),
-        memory=MemoryConfig(enabled=True),  # should be forced off inside curator
+        session_memory=SessionMemoryConfig(enabled=True),  # should be forced off inside curator
     )
-    cfg = MemoryConfig(
+    cfg = SessionMemoryConfig(
         enabled=True,
         entity=EntityMemoryConfig(enabled=True),
         curator_agent=curator_agent_cfg,
@@ -189,7 +189,7 @@ async def test_curator_agent_path_recursion_guard():
         await curator.curate(session, 0)
 
         call_kwargs = MockRunner.call_args.kwargs
-        assert call_kwargs["config"].memory.enabled is False
+        assert call_kwargs["config"].session_memory.enabled is False
         parent_llm.chat.assert_not_called()
 
     reloaded = await manager.load_session("main-sess")
@@ -208,12 +208,12 @@ async def test_inject_into_prompt_gate():
     agent_on = AgentConfig(
         name="a",
         llm=llm,
-        memory=MemoryConfig(enabled=True, inject_into_prompt=True),
+        session_memory=SessionMemoryConfig(enabled=True, inject_into_prompt=True),
     )
     agent_off = AgentConfig(
         name="a",
         llm=llm,
-        memory=MemoryConfig(enabled=True, inject_into_prompt=False),
+        session_memory=SessionMemoryConfig(enabled=True, inject_into_prompt=False),
     )
     builder = ContextWindowBuilder()
 
@@ -232,7 +232,7 @@ async def test_runner_invokes_curator_at_end():
     agent_config = AgentConfig(
         name="mem-runner",
         llm=llm_config,
-        memory=MemoryConfig(
+        session_memory=SessionMemoryConfig(
             enabled=True,
             entity=EntityMemoryConfig(enabled=True),
             extract_after_each_turn=True,

@@ -32,16 +32,16 @@ from nexus.config import (
     LLMProviderConfig,
     RuntimeContextSummarizerConfig,
     ServerCompactorConfig,
-    MemoryConfig,
+    SessionMemoryConfig,
     EntityMemoryConfig,
     WorkingMemoryConfig,
-    UserMemoryConfig,
+    CrossSessionMemoryConfig,
     SessionStorageConfig,
     DEFAULT_RCS_SYSTEM_BLOCK,
     DEFAULT_COMPACTOR_PROMPT,
     DEFAULT_SYSTEM_TEMPLATE,
     DEFAULT_ENTITY_EXTRACTION_PROMPT,
-    DEFAULT_MEMORY_CURATOR_PROMPT,
+    DEFAULT_SESSION_MEMORY_CURATOR_PROMPT,
 )
 from nexus.runner.agent_runner import AgentRunner
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
@@ -50,10 +50,10 @@ from nexus.tools.decorators import tool, tool_plugin
 from nexus.memory import (
     MemoryCurator,
     MemoryUpdate,
-    UserMemoryStore,
-    UserMemoryRecord,
-    InMemoryUserMemoryStore,
-    SQLiteUserMemoryStore,
+    CrossSessionMemoryStore,
+    CrossSessionMemoryRecord,
+    InMemoryCrossSessionMemoryStore,
+    SQLiteCrossSessionMemoryStore,
 )
 from nexus.multiagent.orchestrator import AgentOrchestrator
 from nexus.multiagent.results import AgentGroupResult
@@ -71,16 +71,16 @@ __all__ = [
     "LLMProviderConfig",
     "RuntimeContextSummarizerConfig",
     "ServerCompactorConfig",
-    "MemoryConfig",
+    "SessionMemoryConfig",
     "EntityMemoryConfig",
     "WorkingMemoryConfig",
-    "UserMemoryConfig",
+    "CrossSessionMemoryConfig",
     "SessionStorageConfig",
     "DEFAULT_RCS_SYSTEM_BLOCK",
     "DEFAULT_COMPACTOR_PROMPT",
     "DEFAULT_SYSTEM_TEMPLATE",
     "DEFAULT_ENTITY_EXTRACTION_PROMPT",
-    "DEFAULT_MEMORY_CURATOR_PROMPT",
+    "DEFAULT_SESSION_MEMORY_CURATOR_PROMPT",
     # Runner
     "AgentRunner",
     "AgentRunResult",
@@ -92,10 +92,10 @@ __all__ = [
     # Memory
     "MemoryCurator",
     "MemoryUpdate",
-    "UserMemoryStore",
-    "UserMemoryRecord",
-    "InMemoryUserMemoryStore",
-    "SQLiteUserMemoryStore",
+    "CrossSessionMemoryStore",
+    "CrossSessionMemoryRecord",
+    "InMemoryCrossSessionMemoryStore",
+    "SQLiteCrossSessionMemoryStore",
     # Multi-agent
     "AgentOrchestrator",
     "AgentGroupResult",
