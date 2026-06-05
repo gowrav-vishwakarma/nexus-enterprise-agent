@@ -40,6 +40,7 @@ from nexus.config.memory import (
 from nexus.memory.cross_session_store import SQLiteCrossSessionMemoryStore
 from nexus.config.rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
 from nexus.config.storage import SessionStorageConfig
+from nexus.skills.config import SkillsConfig
 from nexus.runner.agent_runner import AgentRunner
 from nexus.multiagent.orchestrator import AgentOrchestrator
 from nexus.tools.context import RunContext
@@ -113,6 +114,9 @@ class PlanLimits(BaseModel):
     # Tools
     allowed_tool_plugins: list[str]
 
+    # Skills (global only in phase 1; tenant/user skills are future)
+    skills_enabled: bool
+
     # LLM Options
     use_tenant_llm_key: bool
     default_model: str
@@ -135,6 +139,7 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         entity_memory=False,
         working_memory=False,
         allowed_tool_plugins=[],
+        skills_enabled=False,
         use_tenant_llm_key=False,
         default_model="gpt-4o-mini",
         allow_model_override=False,
@@ -154,6 +159,7 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         entity_memory=True,
         working_memory=False,
         allowed_tool_plugins=["web_search"],
+        skills_enabled=False,
         use_tenant_llm_key=False,
         default_model="gpt-4o-mini",
         allow_model_override=False,
@@ -173,6 +179,7 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         entity_memory=True,
         working_memory=True,
         allowed_tool_plugins=["web_search", "database", "calendar"],
+        skills_enabled=True,
         use_tenant_llm_key=True,
         default_model="gpt-4o",
         allow_model_override=True,
@@ -192,6 +199,7 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         entity_memory=True,
         working_memory=True,
         allowed_tool_plugins=["web_search", "database", "calendar", "custom"],
+        skills_enabled=True,
         use_tenant_llm_key=True,
         default_model="claude-3-5-sonnet-20241022",
         allow_model_override=True,
@@ -404,6 +412,13 @@ class NexusTenantConfigFactory:
                 cross_session=CrossSessionMemoryConfig(enabled=limits.entity_memory),
             ),
             tool_plugins=allowed_tools,
+            skills=SkillsConfig(
+                enabled=limits.skills_enabled,
+                activation_mode="auto",
+                allow_tenant_skills=False,
+                allow_user_skills=False,
+                allow_scripts=False,
+            ),
         )
 
 

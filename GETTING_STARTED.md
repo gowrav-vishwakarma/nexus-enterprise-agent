@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
 **Assembly checklist**
 
-1. Build `AgentConfig` (LLM, persona, turns, tools — see [What goes where](#what-goes-where)).
+1. Build `AgentConfig` (LLM, persona, turns, tools, optional skills — see [What goes where](#what-goes-where)).
 2. Build `ToolRegistry` and register tools.
 3. `AgentRunner(config=..., tool_registry=..., storage_config=..., run_context=...)`.
 4. `await runner.run(user_message=...)`.
@@ -109,7 +109,7 @@ Nexus splits **what the agent is** from **who is calling and where data lives**.
 
 | Concern | Put it on | Notes |
 |---------|-----------|-------|
-| LLM, persona, turns, tools, session_memory, RCS | `AgentConfig` | Per agent; built once or from a factory |
+| LLM, persona, turns, tools, skills, session_memory, RCS | `AgentConfig` | Per agent; built once or from a factory |
 | Tenant, user, default chat id, tool metadata | `RunContext` | Per HTTP request / job |
 | Session persistence backend | `storage_config` on **Runner / Orchestrator** | **Preferred**; one backend per tenant for joinable history |
 | Session persistence fallback | `AgentConfig.storage` | Only when runner gets no `storage_config` (minimal local scripts) |
@@ -119,7 +119,7 @@ Nexus splits **what the agent is** from **who is calling and where data lives**.
 flowchart TB
   subgraph configLayer [AgentConfig - what the agent is]
     name[name persona llm turns]
-    tools[tool_plugins session_memory rcs]
+    tools[tool_plugins skills session_memory rcs]
   end
 
   subgraph runtimeLayer [Runtime wiring - per request]
@@ -721,6 +721,211 @@ That example's flow: resolve tenant → build `AgentConfig` → **`storage_confi
 
 ---
 
+## Skills
+
+Nexus supports the [Agent Skills open standard](https://agentskills.io/specification) — portable `SKILL.md` folders used by Cursor, Hermes, Codex, and other agents. Skills add specialized workflows without bloating every system prompt.
+
+### How it works (three stages)
+
+| Stage | What loads | When |
+|-------|------------|------|
+| **Advertise** | Skill `name` + `description` (catalog in system prompt) | Start of each run (`activation_mode` includes `auto` or `both`) |
+| **Activate** | Full `SKILL.md` body | Agent calls `skills.load_skill`, or you pre-load via `explicit` mode |
+| **Execute** | Files in `references/`, `assets/` | Agent calls `skills.read_skill_resource` on demand |
+
+Script execution (`skills.run_skill_script`) is **disabled by default** in phase 1.
+
+### Write a skill
+
+Each skill is a directory. The folder name must match the `name` in frontmatter (lowercase letters, numbers, hyphens only).
+
+```text
+skills/
+└── code-review/              # folder name == skill name
+    ├── SKILL.md              # required
+    ├── references/           # optional — deep docs
+    ├── assets/               # optional — templates, data
+    └── scripts/              # optional — not executed in phase 1
+```
+
+Minimal `SKILL.md`:
+
+```markdown
+---
+name: code-review
+description: Review code for bugs and style. Use when reviewing PRs or code changes.
+---
+
+# Code Review
+
+1. Read the code carefully.
+2. Check for bugs, security issues, and style problems.
+3. Provide actionable feedback.
+```
+
+Skills copied from Cursor, Hermes, or skills marketplaces that follow agentskills.io work without changes.
+
+### Install skills (manual)
+
+Copy skill folders into your global skills directory. Set the path with **`NEXUS_SKILLS_ROOT`** (default `./skills`):
+
+```bash
+# .env
+NEXUS_SKILLS_ROOT=./skills
+```
+
+`SkillsConfig.global_paths` defaults to `[NEXUS_SKILLS_ROOT]`. Override `global_paths` only when you need multiple scan roots:
+
+```python
+skills=SkillsConfig(
+    enabled=True,
+    global_paths=["./skills", "/opt/shared-skills"],
+)
+```
+
+There is no remote installer yet — drop folders in manually.
+
+### Enable skills on an agent
+
+Skills are configured on `AgentConfig.skills`. When `enabled=True`, `AgentRunner` **automatically**:
+
+- discovers skills from `global_paths`
+- registers the `skills` tool plugin on your `ToolRegistry` (per run)
+- appends `"skills"` to the effective tool allow-list — you do **not** add `"skills"` to `tool_plugins` yourself
+
+Full wiring example:
+
+```python
+import asyncio
+from pydantic import SecretStr
+
+from nexus.config.agent import AgentConfig, AgentPersonaConfig
+from nexus.config.llm import LLMProviderConfig
+from nexus.runner.agent_runner import AgentRunner
+from nexus.skills.config import SkillsConfig
+from nexus.tools.context import RunContext
+from nexus.tools.registry import ToolRegistry
+
+config = AgentConfig(
+    name="assistant",
+    llm=LLMProviderConfig(
+        provider="openai",
+        model="gpt-4o-mini",
+        api_key=SecretStr("sk-..."),
+    ),
+    persona=AgentPersonaConfig(
+        role="Software engineer",
+        goal="Help with coding tasks using available skills.",
+    ),
+    skills=SkillsConfig(
+        enabled=True,
+        activation_mode="auto",   # catalog + on-demand load_skill
+        # global_paths omitted → uses NEXUS_SKILLS_ROOT / ./skills
+        allow_scripts=False,
+        allow_tenant_skills=False,
+        allow_user_skills=False,
+    ),
+)
+
+async def main():
+    registry = ToolRegistry()  # skills plugin is added by the runner
+
+    runner = AgentRunner(
+        config=config,
+        tool_registry=registry,
+        run_context=RunContext(tenant_id="demo", user_id="user-1"),
+    )
+
+    result = await runner.run("Review this function for bugs: def add(a,b): return a+b")
+    print(result.final_response)
+
+asyncio.run(main())
+```
+
+### `SkillsConfig` fields
+
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `enabled` | `False` | Turn skills on for this agent |
+| `activation_mode` | `"auto"` | `"auto"` \| `"explicit"` \| `"both"` — see below |
+| `global_paths` | `[NEXUS_SKILLS_ROOT]` | Directories to scan for `SKILL.md` (phase 1: only these are used) |
+| `explicit_skills` | `[]` | Skill names to pre-load into the system prompt every run |
+| `enabled_skills` | `None` | Allowlist of skill names; `None` = all discovered skills |
+| `allow_tenant_skills` | `False` | Phase 2 — scan `{NEXUS_DATA_ROOT}/{tenant}/skills/` |
+| `allow_user_skills` | `False` | Phase 2 — scan `{NEXUS_DATA_ROOT}/{tenant}/users/{user}/skills/` |
+| `allow_scripts` | `False` | Expose `skills.run_skill_script` to the LLM |
+| `require_script_approval` | `True` | Future HITL gate before script execution |
+| `sandbox_adapter` | `None` | Name of a registered `SkillSandboxAdapter` (required for scripts) |
+
+Import: `from nexus.skills.config import SkillsConfig` or `from nexus.config import SkillsConfig`.
+
+### Activation modes
+
+| Mode | System prompt | Tools still available |
+|------|---------------|----------------------|
+| `auto` | Skill catalog (names + descriptions) injected | `skills.load_skill`, `skills.read_skill_resource` |
+| `explicit` | Full bodies of `explicit_skills` + `RunContext.metadata["skills"]` injected | Same tools (agent can still load others if it discovers names) |
+| `both` | Explicit bodies **and** catalog for remaining skills | Same |
+
+**Per-request skills** — pass skill names on `RunContext` without changing `AgentConfig`:
+
+```python
+run_context=RunContext(
+    tenant_id="acme",
+    user_id="user-1",
+    metadata={"skills": ["code-review"]},  # or ["skill-a", "skill-b"]
+)
+
+runner = AgentRunner(config=config, tool_registry=registry, run_context=run_context)
+await runner.run("Review this patch")
+```
+
+Pre-loading only happens when `activation_mode` is `"explicit"` or `"both"`. With `"auto"` alone, `explicit_skills` and `metadata["skills"]` are **not** injected — the agent sees the catalog and must call `skills.load_skill` (or you switch mode).
+
+**Restrict which skills an agent sees:**
+
+```python
+skills=SkillsConfig(
+    enabled=True,
+    enabled_skills=["code-review", "commit-messages"],  # hide everything else
+)
+```
+
+### Tools the agent gets
+
+When `skills.enabled=True`, the runner registers these LLM tools (namespace `skills`):
+
+| Tool | Purpose |
+|------|---------|
+| `skills.load_skill` | Return full `SKILL.md` instructions + resource/script index |
+| `skills.read_skill_resource` | Read a file from `references/`, `assets/`, or skill root (path-validated) |
+| `skills.run_skill_script` | Hidden unless `allow_scripts=True` **and** at least one skill has scripts |
+
+`skills` is auto-included in the tool allow-list. Your other `tool_plugins` filters still apply to non-skills plugins.
+
+### Script execution (phase 1 — off)
+
+Bundled `scripts/` are listed by `load_skill` but not run unless you enable execution:
+
+1. Set `allow_scripts=True`
+2. Register a sandbox adapter: `nexus.skills.register_sandbox_adapter("my_sandbox", MySandbox())`
+3. Set `sandbox_adapter="my_sandbox"` on `SkillsConfig`
+
+Without this, `run_skill_script` is not advertised to the LLM. Core ships with `DisabledSkillSandbox` only.
+
+### Phase 1 limitations
+
+- **Global skills only** — `allow_tenant_skills` and `allow_user_skills` default to `False`; tenant/user paths exist in code but are not scanned
+- **No script execution** by default
+- **Manual install** — copy skill folders into `NEXUS_SKILLS_ROOT`
+- **Trusted sources** — skill text is injected into prompts; only install skills you trust
+
+### SaaS / multi-tenant
+
+In [examples/nexus_saas_api.py](examples/nexus_saas_api.py), **Pro** and **Enterprise** plans set `skills.enabled=True`; Free and Starter keep skills off. Tenant-specific skill directories are a future enterprise feature.
+
+---
+
 ## Quick reference
 
 ### `AgentConfig` fields
@@ -732,6 +937,7 @@ That example's flow: resolve tenant → build `AgentConfig` → **`storage_confi
 | `persona` | `role` / `goal` system framing |
 | `turns` | `max_turns`, `max_tool_calls_per_turn` |
 | `tool_plugins` | Allow-list of plugin namespaces (see Tool registry) |
+| `skills` | `SkillsConfig` — agentskills.io folders; see [Skills](#skills) |
 | `session_memory` | Curator + session (`entity`/`working`) + cross-session promotion; see Memory section |
 | `rcs` | Long-context summarization (optional) |
 | `storage` | Optional fallback when runner has no `storage_config` — prefer runner-level storage in production |

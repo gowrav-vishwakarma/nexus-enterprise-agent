@@ -10,6 +10,7 @@ from .memory import (
     CrossSessionMemoryConfig,
 )
 from .storage import SessionStorageConfig
+from nexus.skills.config import SkillsConfig
 from .defaults import (
     DEFAULT_RCS_SYSTEM_BLOCK,
     DEFAULT_COMPACTOR_PROMPT,
@@ -30,6 +31,7 @@ __all__ = [
     "WorkingMemoryConfig",
     "CrossSessionMemoryConfig",
     "SessionStorageConfig",
+    "SkillsConfig",
     "DEFAULT_RCS_SYSTEM_BLOCK",
     "DEFAULT_COMPACTOR_PROMPT",
     "DEFAULT_SYSTEM_TEMPLATE",

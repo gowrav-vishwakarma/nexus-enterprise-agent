@@ -56,6 +56,8 @@ class ContextWindowBuilder:
         current_user_message: Optional[str] = None,
         token_budget: int = 100000,
         cross_session_entity_memory: Optional[dict[str, str]] = None,
+        skills_catalog: Optional[str] = None,
+        explicit_skills_content: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Assemble the complete messages array for the LLM call.
 
@@ -86,6 +88,12 @@ class ContextWindowBuilder:
         # Inject RCS System Prompt Block if enabled
         if rcs_enabled:
             system_content = RCSSystemPromptInjector.inject(system_content, agent_config.rcs)
+
+        if explicit_skills_content:
+            system_content = f"{system_content}\n\n{explicit_skills_content}"
+
+        if skills_catalog:
+            system_content = f"{system_content}\n\n{skills_catalog}"
 
         system_message = {"role": "system", "content": system_content}
 

@@ -9,6 +9,7 @@ from nexus.config.llm import LLMProviderConfig
 from nexus.config.memory import SessionMemoryConfig
 from nexus.config.rcs import RuntimeContextSummarizerConfig
 from nexus.config.storage import SessionStorageConfig
+from nexus.skills.config import SkillsConfig
 
 
 class AgentPersonaConfig(BaseModel):
@@ -79,6 +80,10 @@ class AgentConfig(BaseModel):
     )
     tool_plugins: list[str] = Field(
         default_factory=list, description="Namespaces of tools to register"
+    )
+    skills: SkillsConfig = Field(
+        default_factory=SkillsConfig,
+        description="Agent skills configuration (agentskills.io compatible)",
     )
     result_type: Optional[type] = Field(
         None, description="Pydantic model for structured output"

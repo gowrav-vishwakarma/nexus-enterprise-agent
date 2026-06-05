@@ -37,6 +37,9 @@ from nexus.rcs.compactor import ServerCompactor
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, ToolCallRecord, TurnRecord
+from nexus.skills.catalog import build_explicit_skills_block, build_skills_catalog
+from nexus.skills.plugin import create_skills_plugin
+from nexus.skills.registry import SkillsRegistry
 from nexus.tools.context import RunContext
 from nexus.tools.interceptor import ContextUpdateInterceptor
 from nexus.tools.registry import ToolRegistry
@@ -151,6 +154,12 @@ class AgentRunner:
             agent_name=self.config.name,
         )
 
+        self.skills_registry: Optional[SkillsRegistry] = None
+        self._skills_catalog: Optional[str] = None
+        self._explicit_skills_content: Optional[str] = None
+        if self.config.skills.enabled:
+            self.skills_registry = SkillsRegistry(self.config.skills)
+
     def _resolve_stream(self, stream: Optional[bool]) -> bool:
         """Resolve effective streaming mode from per-call override or config default."""
         return self.config.stream_output if stream is None else stream
@@ -164,6 +173,49 @@ class AgentRunner:
             or (session.tenant_id if session else None),
             "user_id": self.run_context.user_id or (session.user_id if session else None),
         }
+
+    def _effective_tool_plugins(self) -> list[str]:
+        """Return tool plugin allow-list, auto-including skills when enabled."""
+        plugins = list(self.config.tool_plugins)
+        if self.config.skills.enabled and "skills" not in plugins:
+            plugins.append("skills")
+        return plugins
+
+    def _setup_skills(self) -> None:
+        """Register skills plugin and prepare prompt injection content."""
+        if not self.skills_registry:
+            return
+
+        plugin = create_skills_plugin(
+            self.skills_registry,
+            self.config.skills,
+            self.run_context,
+        )
+        self.tool_registry.register_plugin(plugin)
+
+        mode = self.config.skills.activation_mode
+        self._skills_catalog = None
+        self._explicit_skills_content = None
+
+        if mode in ("auto", "both"):
+            skills = self.skills_registry.list_skills(self.run_context)
+            self._skills_catalog = build_skills_catalog(skills)
+
+        if mode in ("explicit", "both"):
+            explicit = self.skills_registry.resolve_explicit_skills(self.run_context)
+            self._explicit_skills_content = build_explicit_skills_block(explicit)
+
+    def _filter_tool_schemas(self, tool_schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Hide run_skill_script unless scripts are enabled and present."""
+        if not self.skills_registry:
+            return tool_schemas
+        expose_scripts = (
+            self.config.skills.allow_scripts
+            and self.skills_registry.has_scripts(self.run_context)
+        )
+        if expose_scripts:
+            return tool_schemas
+        return [s for s in tool_schemas if s.get("name") != "skills.run_skill_script"]
 
     async def _load_cross_session_entity_memory(self) -> dict[str, str]:
         """Load cross-session facts for injection into the system prompt."""
@@ -359,6 +411,7 @@ class AgentRunner:
         """Shared agent loop. Yields AgentStreamEvents when stream=True."""
         session = await self._get_or_create_session(session_id)
         self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
+        self._setup_skills()
 
         if initial_context:
             session.metadata.update(initial_context)
@@ -398,6 +451,8 @@ class AgentRunner:
                     current_user_message=current_user_message if turn_index == 0 else None,
                     token_budget=self.config.llm.context_window_tokens,
                     cross_session_entity_memory=self._cross_session_entity_memory,
+                    skills_catalog=self._skills_catalog,
+                    explicit_skills_content=self._explicit_skills_content,
                 )
                 current_tokens = TokenCounter.count_messages(messages, self.config.llm.model)
 
@@ -408,6 +463,8 @@ class AgentRunner:
                             session=session,
                             agent_config=self.config,
                             current_user_message=current_user_message if turn_index == 0 else None,
+                            skills_catalog=self._skills_catalog,
+                            explicit_skills_content=self._explicit_skills_content,
                         )
 
                 await self.event_emitter.emit(
@@ -426,9 +483,11 @@ class AgentRunner:
                         data={"agent_id": self.config.name, "turn_index": turn_index},
                     )
 
-                tool_schemas = self.tool_registry.get_tool_schemas_for_llm(
-                    plugin_names=self.config.tool_plugins,
-                    rcs_config=self.config.rcs,
+                tool_schemas = self._filter_tool_schemas(
+                    self.tool_registry.get_tool_schemas_for_llm(
+                        plugin_names=self._effective_tool_plugins(),
+                        rcs_config=self.config.rcs,
+                    )
                 )
 
                 llm_response: Optional[LLMResponse] = None

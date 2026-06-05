@@ -163,5 +163,5 @@ docs/_build/
 *.pyi
 
 
-# Local databases
-*.db
+# Local storage
+tenants/
