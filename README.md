@@ -132,79 +132,7 @@ class EchoPlugin:
         return f"Echo: {message}"
 ```
 
-### Way 1 — YAML manifest
-
-**`team.yaml`**
-
-```yaml
-version: "1"
-root: support_team
-
-defaults:
-  llm:
-    provider: openai
-    model: ${ENV:OPENAI_MODEL|gpt-4o-mini}
-    api_key: ${ENV:OPENAI_API_KEY}
-
-storage:
-  adapter: sqlite
-  adapter_config:
-    data_root: ./data
-
-plugins:
-  lookup: myapp.tools.LookupPlugin
-  echo: myapp.tools.EchoPlugin
-
-agents:
-  lead:
-    tool_plugins: [lookup]
-    persona:
-      role: Support lead
-      goal: Route tickets and look up accounts
-
-  specialist:
-    tool_plugins: [echo]
-    persona:
-      role: Specialist
-      goal: Confirm technical details with the echo tool
-
-groups:
-  support_team:
-    pattern: supervisor
-    members: [lead, specialist]   # lead supervises; specialist is delegated to
-```
-
-**`myapp/app_yaml.py`**
-
-```python
-from uuid import uuid4
-from fastapi import FastAPI, Header
-from pydantic import BaseModel
-from nexus import OrchestrationManifest, OrchestrationRuntime, RunContext
-
-MANIFEST = OrchestrationManifest.load("team.yaml")
-app = FastAPI()
-
-class ChatIn(BaseModel):
-    message: str
-    session_id: str | None = None
-
-@app.post("/v1/chat")
-async def chat(
-    body: ChatIn,
-    tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    user_id: str = Header("demo-user", alias="X-User-ID"),
-):
-    session_id = body.session_id or str(uuid4())
-    runtime = OrchestrationRuntime.from_manifest(
-        MANIFEST,
-        run_context=RunContext(tenant_id=tenant_id, user_id=user_id, session_id=session_id),
-    )
-    result = await runtime.run(body.message)
-    return {"session_id": session_id, "response": result.final_response}
-```
-
-### Way 2 — Programmatic Python
+### Way 1 — Programmatic Python
 
 **`myapp/team.py`** — same agents and group as `team.yaml`
 
@@ -286,6 +214,78 @@ async def chat(
         run_context=RunContext(tenant_id=tenant_id, user_id=user_id, session_id=session_id),
     )
     result = await orchestrator.run(body.message, session_id=session_id)
+    return {"session_id": session_id, "response": result.final_response}
+```
+
+### Way 2 — YAML manifest
+
+**`team.yaml`**
+
+```yaml
+version: "1"
+root: support_team
+
+defaults:
+  llm:
+    provider: openai
+    model: ${ENV:OPENAI_MODEL|gpt-4o-mini}
+    api_key: ${ENV:OPENAI_API_KEY}
+
+storage:
+  adapter: sqlite
+  adapter_config:
+    data_root: ./data
+
+plugins:
+  lookup: myapp.tools.LookupPlugin
+  echo: myapp.tools.EchoPlugin
+
+agents:
+  lead:
+    tool_plugins: [lookup]
+    persona:
+      role: Support lead
+      goal: Route tickets and look up accounts
+
+  specialist:
+    tool_plugins: [echo]
+    persona:
+      role: Specialist
+      goal: Confirm technical details with the echo tool
+
+groups:
+  support_team:
+    pattern: supervisor
+    members: [lead, specialist]   # lead supervises; specialist is delegated to
+```
+
+**`myapp/app_yaml.py`**
+
+```python
+from uuid import uuid4
+from fastapi import FastAPI, Header
+from pydantic import BaseModel
+from nexus import OrchestrationManifest, OrchestrationRuntime, RunContext
+
+MANIFEST = OrchestrationManifest.load("team.yaml")
+app = FastAPI()
+
+class ChatIn(BaseModel):
+    message: str
+    session_id: str | None = None
+
+@app.post("/v1/chat")
+async def chat(
+    body: ChatIn,
+    tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    user_id: str = Header("demo-user", alias="X-User-ID"),
+):
+    session_id = body.session_id or str(uuid4())
+    runtime = OrchestrationRuntime.from_manifest(
+        MANIFEST,
+        run_context=RunContext(tenant_id=tenant_id, user_id=user_id, session_id=session_id),
+    )
+    result = await runtime.run(body.message)
     return {"session_id": session_id, "response": result.final_response}
 ```
 
