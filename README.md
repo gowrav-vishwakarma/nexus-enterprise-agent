@@ -39,14 +39,14 @@ pip install "nexus-enterprise-agent[sqlite,litellm,fastapi]"
 **From GitHub** (latest main, not a PyPI release):
 
 ```bash
-pip install "git+https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework.git"
+pip install "git+https://github.com/gowrav-vishwakarma/nexus-enterprise-agent.git"
 ```
 
 **Contributors** — clone and sync the repo:
 
 ```bash
-git clone https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework.git
-cd nexus-saas-agent-framework
+git clone https://github.com/gowrav-vishwakarma/nexus-enterprise-agent.git
+cd nexus-enterprise-agent
 uv sync --extra dev --extra sqlite --extra file
 ```
 

@@ -36,9 +36,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework"
-Repository = "https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework"
-Documentation = "https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework/tree/main/docs"
+Homepage = "https://github.com/gowrav-vishwakarma/nexus-enterprise-agent"
+Repository = "https://github.com/gowrav-vishwakarma/nexus-enterprise-agent"
+Documentation = "https://github.com/gowrav-vishwakarma/nexus-enterprise-agent/tree/main/docs"
 
 [project.optional-dependencies]
 # Storage adapters
