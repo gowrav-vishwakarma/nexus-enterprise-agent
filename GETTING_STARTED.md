@@ -14,24 +14,37 @@ For a full multi-tenant SaaS layout (plans, tenants, FastAPI), see [examples/nex
 # Library only (scripts, tests — add extras as needed)
 uv sync --extra dev --extra sqlite --extra file
 
+# Full test suite (all LLM adapters + storage + FastAPI)
+uv sync --extra test
+
 # SaaS API example (FastAPI + session/cross-session SQLite stores)
-uv sync --extra fastapi --extra sqlite
+uv sync --extra fastapi --extra sqlite --extra litellm
 ```
 
-Optional: `uv pip install python-dotenv` so the example loads `.env` from the repo root.
+Run tests:
+
+```bash
+uv run pytest
+```
+
+Optional: `python-dotenv` is included in the `fastapi` extra; the SaaS example loads `.env` from the repo root automatically.
 
 ### 2. Set LLM credentials (your app reads env; Nexus does not)
 
 Copy `.env.example` to `.env` and fill in keys, or pass secrets directly in code.
 
-For a local OpenAI-compatible server (LiteLLM, LM Studio):
+**Adapter selection is driven by `provider`.** `base_url` is an optional endpoint override passed to whichever adapter you choose — it does not select the adapter.
+
+For a LiteLLM proxy server:
 
 ```env
-NEXUS_LLM_PROVIDER=openai
+NEXUS_LLM_PROVIDER=litellm
 NEXUS_LLM_BASE_URL=http://localhost:4000
 NEXUS_LLM_API_KEY=not-needed
-NEXUS_LLM_MODEL=gpt-4o-mini
+NEXUS_LLM_MODEL=openai/qwen
 ```
+
+Use `provider=openai` instead of `litellm` if you prefer the native OpenAI SDK to the same proxy (no `litellm` Python package required).
 
 ### 3. Define config → runner → run
 
@@ -439,7 +452,13 @@ writer = AgentConfig(
 
 In production, a **config factory** (like `NexusTenantConfigFactory` in the SaaS example) maps tenant/plan → `LLMProviderConfig` + tool allow-list + session_memory flags, then returns `AgentConfig`. **Storage** resolves at the tenant/request layer on the runner, not on `AgentConfig`.
 
-Each config can use a **different** `LLMProviderConfig` (OpenAI, Anthropic, LiteLLM proxy, LM Studio, etc.). That is how you give one agent GPT-4o and another Claude on the same app — two configs, two runners (or one group — see below).
+Each config can use a **different** `LLMProviderConfig` (OpenAI, Anthropic, LiteLLM, etc.). That is how you give one agent GPT-4o and another Claude on the same app — two configs, two runners (or one group — see below).
+
+| `provider` | Adapter | Notes |
+|------------|---------|-------|
+| `openai`, `azure_openai` | Native OpenAI SDK | Optional `base_url` for proxies (LM Studio, LiteLLM OpenAI route) |
+| `anthropic` | Native Anthropic SDK | Optional `base_url` for custom endpoints |
+| `litellm`, `gemini`, `groq`, `ollama`, … | LiteLLM library | Optional `base_url` passed as `api_base` |
 
 ---
 
@@ -791,14 +810,25 @@ Set **`inject_into_prompt=False`** if you only want the curator to write storage
 
 ## Run the bundled SaaS API example
 
-From the repo root (install **`fastapi`** and **`sqlite`** extras first — the example uses `SQLiteCrossSessionMemoryStore`, which needs `aiosqlite` from the `sqlite` extra):
+From the repo root (install **`fastapi`**, **`sqlite`**, and **`litellm`** extras — the example reads `NEXUS_LLM_*` from `.env` and uses `provider` to pick the adapter):
 
 ```bash
-uv sync --extra fastapi --extra sqlite
+uv sync --extra fastapi --extra sqlite --extra litellm
 uv run uvicorn examples.nexus_saas_api:app --host 0.0.0.0 --port 8000
 ```
 
-Single agent:
+When `NEXUS_LLM_BASE_URL` is set in `.env`, the SaaS factory uses that endpoint for all tenants (overriding tenant BYOK). Set `NEXUS_LLM_PROVIDER=litellm` to route through the LiteLLM Python library.
+
+Single agent (use `free_tenant_1` for local smoke tests — memory storage, no Postgres):
+
+```bash
+curl -X POST http://localhost:8000/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: free_tenant_1" \
+  -d '{"message": "Search for Nexus framework releases"}'
+```
+
+Pro tenant (requires PostgreSQL for session storage):
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat \

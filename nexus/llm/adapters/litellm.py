@@ -100,6 +100,14 @@ class LiteLLMAdapter(LLMAdapter):
         self._litellm.suppress_debug_info = True
         self._litellm.set_verbose = False
 
+        # litellm.acompletion strips provider prefixes (openai/qwen → qwen) before
+        # calling OpenAI-compatible endpoints. Proxies register full names like
+        # openai/qwen — use the OpenAI SDK directly so the model is sent unchanged.
+        self._proxy_delegate: LLMAdapter | None = None
+        if config.base_url:
+            from nexus.llm.adapters.openai import OpenAIAdapter
+            self._proxy_delegate = OpenAIAdapter(config)
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @property
@@ -120,17 +128,9 @@ class LiteLLMAdapter(LLMAdapter):
         api_key = self.config.get_api_key()
         if api_key:
             kw["api_key"] = api_key
+        kw["model"] = self._model
         if self.config.base_url:
             kw["api_base"] = self.config.base_url
-            # When using a custom api_base (e.g. LM Studio, LiteLLM proxy),
-            # pass the model string EXACTLY as configured. Do NOT strip provider
-            # prefixes — the upstream server may require them (e.g. LM Studio keys
-            # that only allow 'openai/qwen'). Force the OpenAI client so the full
-            # model name is sent unchanged to the endpoint.
-            kw["model"] = self.config.model
-            kw["custom_llm_provider"] = "openai"
-        else:
-            kw["model"] = self._model
         if self.config.api_version:
             kw["api_version"] = self.config.api_version
         if self.config.extra_headers:
@@ -223,6 +223,16 @@ class LiteLLMAdapter(LLMAdapter):
         **kwargs: Any,
     ) -> LLMResponse:
         """Non-streaming chat via LiteLLM."""
+        if self._proxy_delegate is not None:
+            return await self._proxy_delegate.chat(
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stop_sequences=stop_sequences,
+                **kwargs,
+            )
+
         kw = self._base_kwargs(temperature, max_tokens, stop_sequences, tools)
         kw["messages"] = messages
         kw.update(kwargs)
@@ -245,6 +255,18 @@ class LiteLLMAdapter(LLMAdapter):
         **kwargs: Any,
     ) -> AsyncIterator[LLMStreamChunk]:
         """Streaming chat via LiteLLM — yields LLMStreamChunk deltas."""
+        if self._proxy_delegate is not None:
+            async for chunk in self._proxy_delegate.chat_stream(
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stop_sequences=stop_sequences,
+                **kwargs,
+            ):
+                yield chunk
+            return
+
         kw = self._base_kwargs(temperature, max_tokens, stop_sequences, tools, stream=True)
         kw["messages"] = messages
         kw.update(kwargs)

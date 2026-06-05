@@ -6,6 +6,7 @@ memory, RCS, and agent group configurations in a FastAPI environment.
 
 from __future__ import annotations
 
+import logging
 import os
 import warnings
 from datetime import datetime
@@ -48,6 +49,8 @@ from nexus.session.manager import SessionManager
 from nexus.tools.context import RunContext
 from nexus.tools.registry import ToolRegistry
 from nexus.tools.decorators import tool, tool_plugin
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -265,10 +268,10 @@ class NexusTenantConfigFactory:
     @classmethod
     def _resolve_custom_llm_env(cls) -> tuple[str, str, str, str]:
         """Return (provider, base_url, api_key, model) from NEXUS_LLM_* or legacy LM_STUDIO_*."""
-        base_url = cls.NEXUS_LLM_BASE_URL
-        api_key = cls.NEXUS_LLM_API_KEY
-        model = cls.NEXUS_LLM_MODEL
-        provider = cls.NEXUS_LLM_PROVIDER
+        base_url = os.getenv("NEXUS_LLM_BASE_URL", "")
+        api_key = os.getenv("NEXUS_LLM_API_KEY", "")
+        model = os.getenv("NEXUS_LLM_MODEL", "gpt-4o-mini")
+        provider = os.getenv("NEXUS_LLM_PROVIDER", "openai")
 
         legacy_base = os.getenv("LM_STUDIO_BASE_URL", "")
         if not base_url and legacy_base:
@@ -285,7 +288,17 @@ class NexusTenantConfigFactory:
 
     @classmethod
     def build_llm_config(cls, tenant: TenantRecord, limits: PlanLimits) -> LLMProviderConfig:
-        # Priority: tenant-specific LLM config > custom endpoint env vars > plan defaults
+        # Priority: platform custom endpoint (NEXUS_LLM_*) > tenant BYOK > plan defaults
+        provider, base_url, api_key, model = cls._resolve_custom_llm_env()
+        if base_url:
+            return LLMProviderConfig(
+                provider=provider,  # type: ignore[arg-type]
+                model=model,
+                api_key=SecretStr(api_key) if api_key else SecretStr("not-needed"),
+                base_url=base_url,
+                context_window_tokens=limits.context_window_tokens,
+            )
+
         if limits.use_tenant_llm_key and limits.allow_model_override:
             if tenant.preferred_provider == "anthropic" and tenant.anthropic_api_key:
                 return LLMProviderConfig(
@@ -301,16 +314,6 @@ class NexusTenantConfigFactory:
                     api_key=tenant.openai_api_key,
                     context_window_tokens=limits.context_window_tokens,
                 )
-
-        provider, base_url, api_key, model = cls._resolve_custom_llm_env()
-        if base_url:
-            return LLMProviderConfig(
-                provider=provider,  # type: ignore[arg-type]
-                model=model,
-                api_key=SecretStr(api_key) if api_key else SecretStr("not-needed"),
-                base_url=base_url,
-                context_window_tokens=limits.context_window_tokens,
-            )
 
         # Ultimate fallback: use plan defaults with platform key
         return LLMProviderConfig(
@@ -431,6 +434,19 @@ class NexusTenantConfigFactory:
 # =============================================================================
 
 app = FastAPI(title="Nexus SaaS API")
+
+
+@app.on_event("startup")
+async def log_custom_llm_config() -> None:
+    provider, base_url, _, model = NexusTenantConfigFactory._resolve_custom_llm_env()
+    if base_url:
+        logger.info(
+            "Custom LLM endpoint configured: provider=%s base_url=%s model=%s",
+            provider,
+            base_url,
+            model,
+        )
+
 
 # InMemory DB mock for tenants
 MOCK_TENANTS_DB: dict[str, TenantRecord] = {

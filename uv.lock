@@ -2052,6 +2052,7 @@ all = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-sdk" },
+    { name = "python-dotenv" },
     { name = "sse-starlette" },
     { name = "uvicorn" },
 ]
@@ -2075,6 +2076,7 @@ dev = [
 ]
 fastapi = [
     { name = "fastapi" },
+    { name = "python-dotenv" },
     { name = "sse-starlette" },
     { name = "uvicorn" },
 ]
@@ -2113,6 +2115,29 @@ sqlite = [
     { name = "aiosqlite" },
     { name = "filelock" },
 ]
+test = [
+    { name = "aiosqlite" },
+    { name = "alembic" },
+    { name = "anthropic" },
+    { name = "asyncpg" },
+    { name = "coverage" },
+    { name = "faker" },
+    { name = "fastapi" },
+    { name = "filelock" },
+    { name = "hiredis" },
+    { name = "litellm" },
+    { name = "mypy" },
+    { name = "openai" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-mock" },
+    { name = "python-dotenv" },
+    { name = "redis" },
+    { name = "respx" },
+    { name = "ruff" },
+    { name = "sse-starlette" },
+    { name = "uvicorn" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2137,6 +2162,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1" },
     { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.40" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "nexus-agent", extras = ["dev", "litellm", "openai", "anthropic", "sqlite", "postgres", "redis", "file", "fastapi"], marker = "extra == 'test'" },
     { name = "nexus-agent", extras = ["sqlite", "postgres", "file", "openai", "anthropic", "gemini", "litellm", "groq", "ollama", "otel", "fastapi"], marker = "extra == 'all'" },
     { name = "ollama", marker = "extra == 'ollama'", specifier = ">=0.2" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.30" },
@@ -2148,6 +2174,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14" },
+    { name = "python-dotenv", marker = "extra == 'fastapi'", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0" },
@@ -2158,7 +2185,7 @@ requires-dist = [
     { name = "tiktoken", specifier = ">=0.7" },
     { name = "uvicorn", marker = "extra == 'fastapi'", specifier = ">=0.30" },
 ]
-provides-extras = ["sqlite", "postgres", "redis", "file", "openai", "anthropic", "gemini", "litellm", "groq", "ollama", "otel", "fastapi", "all", "dev"]
+provides-extras = ["sqlite", "postgres", "redis", "file", "openai", "anthropic", "gemini", "litellm", "groq", "ollama", "otel", "fastapi", "all", "test", "dev"]
 
 [[package]]
 name = "ollama"

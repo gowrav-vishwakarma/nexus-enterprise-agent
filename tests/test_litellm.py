@@ -64,8 +64,8 @@ def test_proxy_routes_gemini_to_litellm():
     assert proxy._adapter._model == "gemini/gemini-2.0-flash-exp"
 
 
-def test_proxy_routes_base_url_before_prefix():
-    """Custom base_url with prefixed model should use OpenAIAdapter, not LiteLLM."""
+def test_proxy_routes_openai_with_base_url_to_native():
+    """provider=openai with base_url still uses OpenAIAdapter (provider selects adapter)."""
     config = LLMProviderConfig(
         provider="openai",
         model="openai/qwen",
@@ -76,6 +76,40 @@ def test_proxy_routes_base_url_before_prefix():
         proxy = LLMProxy(config)
     from nexus.llm.adapters.openai import OpenAIAdapter
     assert isinstance(proxy._adapter, OpenAIAdapter)
+
+
+def test_proxy_routes_litellm_with_base_url_to_litellm():
+    """provider=litellm with base_url uses LiteLLMAdapter with OpenAI proxy delegate."""
+    config = LLMProviderConfig(
+        provider="litellm",
+        model="openai/qwen",
+        api_key="sk-test",
+        base_url="http://localhost:4000",
+    )
+    proxy = LLMProxy(config)
+    assert isinstance(proxy._adapter, LiteLLMAdapter)
+    assert proxy._adapter._proxy_delegate is not None
+    assert proxy._adapter._proxy_delegate.config.model == "openai/qwen"
+
+
+@pytest.mark.asyncio
+async def test_litellm_adapter_proxy_passes_model_unchanged():
+    """With base_url set, chat delegates to OpenAI SDK — model not stripped to qwen."""
+    config = LLMProviderConfig(
+        provider="litellm",
+        model="openai/qwen",
+        api_key="sk-test",
+        base_url="http://localhost:4000",
+    )
+    adapter = LiteLLMAdapter(config)
+    mock_response = LLMResponse(content="ok")
+    adapter._proxy_delegate.chat = AsyncMock(return_value=mock_response)  # type: ignore[method-assign]
+
+    result = await adapter.chat(messages=[{"role": "user", "content": "hi"}])
+
+    assert result.content == "ok"
+    adapter._proxy_delegate.chat.assert_awaited_once()  # type: ignore[attr-defined]
+    assert adapter._proxy_delegate.config.model == "openai/qwen"
 
 
 def test_proxy_routes_litellm_provider_to_litellm():

@@ -50,11 +50,17 @@ fastapi = [
     "fastapi>=0.111",
     "uvicorn>=0.30",
     "sse-starlette>=2.1",
+    "python-dotenv>=1.0",
 ]
 
 # All dependencies
 all = [
     "nexus-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi]",
+]
+
+# Full test suite (all adapters + storage + FastAPI)
+test = [
+    "nexus-agent[dev,litellm,openai,anthropic,sqlite,postgres,redis,file,fastapi]",
 ]
 
 # Dev / integration-test dependencies

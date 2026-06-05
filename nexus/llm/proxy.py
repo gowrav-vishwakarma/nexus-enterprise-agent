@@ -5,7 +5,6 @@ from typing import Any, AsyncIterator, Optional
 
 from nexus.config.llm import LLMProviderConfig
 from nexus.llm.adapters.base import LLMAdapter
-from nexus.llm.adapters.litellm import has_provider_prefix
 from nexus.llm.response import LLMResponse, LLMStreamChunk
 
 logger = logging.getLogger(__name__)
@@ -21,36 +20,20 @@ class LLMProxy:
     def _init_adapter(self) -> LLMAdapter:
         """Initialize the specific provider adapter.
 
-        Routing priority:
-          1. ``base_url`` set (LiteLLM proxy, LM Studio, any OpenAI-compatible server)
-             → native OpenAI adapter (model sent as-is, including prefixed names)
-          2. Provider prefix in model string without ``base_url`` (e.g. ``gemini/...``)
-             → LiteLLMAdapter (LiteLLM routes by prefix)
-          3. ``openai`` / ``azure_openai``  → native OpenAI adapter (httpx, no extra dep)
-          4. ``anthropic``                  → native Anthropic adapter (uses Anthropic SDK)
-          5. Everything else                → LiteLLMAdapter (litellm handles 100+ providers)
+        Routing is driven only by ``provider``. ``base_url`` is optional endpoint
+        configuration passed through to whichever adapter is selected.
 
-        Users who want to use OpenAI or Anthropic *through* LiteLLM can set
-        ``provider="litellm"`` and pass the appropriate model string.
+          - ``openai`` / ``azure_openai`` → native OpenAI adapter
+          - ``anthropic``                 → native Anthropic adapter
+          - everything else               → LiteLLMAdapter (litellm, gemini, groq,
+                                            ollama, bedrock, openrouter, custom, …)
+
+        Examples:
+          - Direct OpenAI: ``provider="openai"``, no base_url
+          - LiteLLM proxy via OpenAI SDK: ``provider="openai"``, ``base_url="http://…"``
+          - LiteLLM proxy via litellm lib: ``provider="litellm"``, ``base_url="http://…"``
         """
         provider = self.config.provider
-        model = self.config.model
-
-        # Custom endpoint (LiteLLM proxy, local server): OpenAI-compatible HTTP client.
-        if self.config.base_url:
-            from nexus.llm.adapters.openai import OpenAIAdapter
-            return OpenAIAdapter(self.config)
-
-        # Prefixed model without base_url: LiteLLM resolves provider from the prefix.
-        if has_provider_prefix(model):
-            try:
-                from nexus.llm.adapters.litellm import LiteLLMAdapter
-                return LiteLLMAdapter(self.config)
-            except ImportError:
-                raise ValueError(
-                    f"Model '{model}' has a provider prefix but LiteLLM is not installed. "
-                    "Install it with: uv pip install litellm"
-                )
 
         if provider in ("openai", "azure_openai"):
             from nexus.llm.adapters.openai import OpenAIAdapter
@@ -60,8 +43,6 @@ class LLMProxy:
             from nexus.llm.adapters.anthropic import AnthropicAdapter
             return AnthropicAdapter(self.config)
 
-        # LiteLLM catch-all: gemini, groq, ollama, bedrock, openrouter,
-        # litellm, custom, or any future provider string.
         try:
             from nexus.llm.adapters.litellm import LiteLLMAdapter
             return LiteLLMAdapter(self.config)
