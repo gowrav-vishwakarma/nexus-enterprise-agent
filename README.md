@@ -4,6 +4,30 @@
 
 No global LLM settings. No shared agent singleton. Built for multi-tenant SaaS apps.
 
+> **Beta — under active development.** APIs and behaviour may change between releases. Nexus is published early so the community can try it, report issues, and contribute — not as a finished production guarantee. See [NEXUS_AGENT_PRD.md](NEXUS_AGENT_PRD.md) for the design spec and open a PR if you want to help build it.
+
+## Why another agent framework?
+
+LangGraph, CrewAI, AutoGen, OpenAI Agents SDK, Pydantic AI, and LangChain each solve parts of the problem — but production SaaS workloads expose recurring gaps:
+
+| Framework | Gap for production SaaS |
+|-----------|-------------------------|
+| LangGraph | Graph-coupled state machines; awkward in stateless HTTP APIs |
+| CrewAI | Opinionated roles; high token overhead on simple tasks |
+| AutoGen / AG2 | GroupChat bloat; full history every turn; env-var config |
+| OpenAI Agents SDK | Model-locked; no durable context management; no BYOM |
+| Pydantic AI | Strong types, but context compression is still manual |
+| LangChain | Token-efficient patterns, but heavy architecture and churn |
+
+**Nexus** targets what those stacks under-serve: **long-horizon agents in multi-tenant apps**, where **context is the scarcest resource**.
+
+- **SaaS-native** — zero global state; tenant, user, API keys, and storage passed per request
+- **Context-first (RCS)** — the agent compresses old tool results inline via `_context_updates`; no extra LLM calls
+- **Config-driven teams** — YAML manifests for multi-agent orchestration; Python only for wiring and tools
+- **Provider-agnostic** — bring your own model; pluggable SQLite, Postgres, Redis, or file storage
+
+Full landscape analysis and design rationale: [NEXUS_AGENT_PRD.md](NEXUS_AGENT_PRD.md).
+
 ---
 
 ## Install
