@@ -12,7 +12,7 @@
 | Path | What you will learn |
 |------|---------------------|
 | [examples/orchestration/research_team.yaml](../examples/orchestration/research_team.yaml) | Supervisor + nested pipeline team |
-| [examples/orchestration/research_team_prompts.py](../examples/orchestration/research_team_prompts.py) | PROMPTS dict, two-pass Jinja |
+| [examples/orchestration/research_team_prompts.py](../examples/orchestration/research_team_prompts.py) | PROMPTS dict, Jinja templates |
 | [examples/orchestration/run_team.py](../examples/orchestration/run_team.py) | CLI to load manifest and run |
 
 ```bash
@@ -22,6 +22,7 @@ uv run python examples/orchestration/run_team.py "Your question here"
 Annotated references (not runnable as-is):
 
 - [assets/complete-manifest.annotated.yaml](assets/complete-manifest.annotated.yaml)
+- [assets/research_team_prompts.annotated.py](assets/research_team_prompts.annotated.py)
 - [assets/complete-run.annotated.py](assets/complete-run.annotated.py)
 
 ## SaaS API

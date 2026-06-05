@@ -88,7 +88,7 @@ PROMPTS = {
 
 At load time the callable receives `role`, `goal`, `backstory`, `tenant_id`, and flattened `prompt_args`. Runtime variables like `user_memory` and `summary_text` are still resolved on each LLM turn.
 
-Full example: [examples/orchestration/research_team_prompts.py](../../examples/orchestration/research_team_prompts.py).
+Annotated reference: [../assets/research_team_prompts.annotated.py](../assets/research_team_prompts.annotated.py). Runnable example: [examples/orchestration/research_team_prompts.py](../../examples/orchestration/research_team_prompts.py).
 
 ## Enable memory and context summary
 

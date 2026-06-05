@@ -8,7 +8,7 @@
 - **Root** — The agent or group name that runs when you call `runtime.run()`.
 - **Anchor** — YAML `&name` / `*name` syntax to reuse a block (often for shared LLM settings).
 
-Annotated example: [../assets/complete-manifest.annotated.yaml](../assets/complete-manifest.annotated.yaml).
+Annotated examples: [../assets/complete-manifest.annotated.yaml](../assets/complete-manifest.annotated.yaml), [../assets/research_team_prompts.annotated.py](../assets/research_team_prompts.annotated.py).
 
 ## Top-level fields
 
@@ -16,7 +16,7 @@ Annotated example: [../assets/complete-manifest.annotated.yaml](../assets/comple
 |------|-----------|---------|--------------|
 | `version` | No | `"1"` | Manifest format version |
 | `root` | Yes | — | Agent or group name to execute |
-| `prompts_module` | No | `{stem}_prompts.py` beside YAML | Python file with `PROMPTS` dict |
+| `prompts_module` | No | `{stem}_prompts.py` beside YAML | Python file with `PROMPTS` dict — see [research_team_prompts.annotated.py](../assets/research_team_prompts.annotated.py) |
 | `defaults` | No | empty | Shared blocks merged into agents/groups |
 | `storage` | No | `adapter: memory` | Where chat history is saved |
 | `plugins` | No | `{}` | Plugin name → `module.path.ClassName` |

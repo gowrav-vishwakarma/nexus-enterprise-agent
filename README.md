@@ -298,7 +298,7 @@ curl -X POST http://localhost:8000/v1/chat \
   -d '{"message": "Look up account acme-99 and confirm the plan"}'
 ```
 
-Full annotated options: [docs/assets/complete-manifest.annotated.yaml](docs/assets/complete-manifest.annotated.yaml), [docs/assets/complete-run.annotated.py](docs/assets/complete-run.annotated.py), [docs/getting-started-python.md](docs/getting-started-python.md). Production SaaS (plan tiers, per-tenant storage): [examples/nexus_saas_api.py](examples/nexus_saas_api.py).
+Full annotated options: [docs/assets/complete-manifest.annotated.yaml](docs/assets/complete-manifest.annotated.yaml), [docs/assets/research_team_prompts.annotated.py](docs/assets/research_team_prompts.annotated.py), [docs/assets/complete-run.annotated.py](docs/assets/complete-run.annotated.py), [docs/getting-started-python.md](docs/getting-started-python.md). Production SaaS (plan tiers, per-tenant storage): [examples/nexus_saas_api.py](examples/nexus_saas_api.py).
 
 ---
 

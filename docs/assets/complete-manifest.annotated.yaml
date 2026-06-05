@@ -9,7 +9,9 @@ version: "1"
 
 # prompts_module (optional, default: {manifest_stem}_prompts.py beside this file)
 # Path to a Python file that defines PROMPTS = { "key": "template string or callable" }
-prompts_module: ./research_team_prompts.py
+# Annotated prompts: ./research_team_prompts.annotated.py
+# Runnable prompts: examples/orchestration/research_team_prompts.py
+prompts_module: ./research_team_prompts.annotated.py
 
 # root (required)
 # Name of the agent or group to run when you call runtime.run()

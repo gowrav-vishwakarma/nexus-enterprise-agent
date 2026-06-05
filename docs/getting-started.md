@@ -52,7 +52,7 @@ For every field with defaults, see the annotated copy: [assets/complete-manifest
 
 ## Step 3: Write prompt templates
 
-Open [examples/orchestration/research_team_prompts.py](../examples/orchestration/research_team_prompts.py).
+Open [assets/research_team_prompts.annotated.py](assets/research_team_prompts.annotated.py) (field-by-field comments) or the runnable [examples/orchestration/research_team_prompts.py](../examples/orchestration/research_team_prompts.py).
 
 Your prompts module must define:
 
