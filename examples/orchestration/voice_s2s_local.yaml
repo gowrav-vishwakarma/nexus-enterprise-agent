@@ -1,0 +1,34 @@
+version: "1"
+root: voice_s2s_local
+
+# Real, full-duplex speech-to-speech via a self-hosted Kyutai Moshi server.
+# The model runs separately (see local-ai-stack/run-s2s-moshi.sh); the framework
+# only opens a local WebSocket. No paid API, no mock.
+#
+# Swap models later by changing `provider` + `base_url` and adding an adapter:
+#   provider: moshi   -> ws://localhost:8998   (this file)
+#   provider: local   -> any OpenAI-Realtime-compatible local server
+
+storage:
+  adapter: memory
+
+agents:
+  voice_s2s_local:
+    modality: voice_s2s
+    duplex: full
+    s2s:
+      provider: ${ENV:NEXUS_S2S_PROVIDER|moshi}
+      model: ${ENV:NEXUS_S2S_MODEL|moshiko}
+      base_url: ${ENV:NEXUS_S2S_BASE_URL|ws://localhost:8998}
+      api_key: ${ENV:NEXUS_S2S_API_KEY|local}
+    agent:
+      # Moshi is audio-native and self-contained, but the agent block is still
+      # required (persona/tools apply to S2S models that support bridging).
+      llm:
+        provider: openai
+        base_url: ${ENV:NEXUS_LLM_BASE_URL|http://localhost:11434/v1}
+        model: ${ENV:NEXUS_LLM_MODEL|gpt-oss:latest}
+        api_key: ${ENV:NEXUS_LLM_API_KEY|ollama}
+      persona:
+        role: Local Voice Companion
+        goal: Have a natural, real-time spoken conversation.

@@ -8,6 +8,14 @@ from nexus.realtime.adapters.vad.base import VADAdapter
 from nexus.realtime.config import STTConfig, TTSConfig, VADConfig
 
 
+# Provider names that all speak the OpenAI /v1/audio/transcriptions API. Point
+# `base_url` at any local server (speaches, faster-whisper-server, ...) for a
+# fully self-hosted, BYOM, offline-first setup — no paid API required.
+_OPENAI_COMPATIBLE_STT = frozenset(
+    {"openai", "whisper", "openai_compatible", "local", "speaches", "faster-whisper-server"}
+)
+
+
 def build_stt(config: STTConfig) -> STTAdapter:
     """Instantiate an STT adapter for the configured provider."""
     provider = config.provider.lower()
@@ -15,7 +23,7 @@ def build_stt(config: STTConfig) -> STTAdapter:
         from nexus.realtime.adapters.stt.mock import MockSTT
 
         return MockSTT(config)
-    if provider in ("openai", "whisper"):
+    if provider in _OPENAI_COMPATIBLE_STT:
         from nexus.realtime.adapters.stt.openai import OpenAISTT
 
         return OpenAISTT(config)
@@ -26,6 +34,14 @@ def build_stt(config: STTConfig) -> STTAdapter:
     raise ValueError(f"Unknown STT provider: {config.provider!r}")
 
 
+# Provider names that all speak the OpenAI /v1/audio/speech API. Point
+# `base_url` at any local server (Kokoro-FastAPI, speaches, openedai-speech, ...)
+# for a fully self-hosted, BYOM, offline-first setup — no paid API required.
+_OPENAI_COMPATIBLE_TTS = frozenset(
+    {"openai", "openai_compatible", "local", "kokoro", "speaches", "openedai-speech", "piper"}
+)
+
+
 def build_tts(config: TTSConfig) -> TTSAdapter:
     """Instantiate a TTS adapter for the configured provider."""
     provider = config.provider.lower()
@@ -33,7 +49,7 @@ def build_tts(config: TTSConfig) -> TTSAdapter:
         from nexus.realtime.adapters.tts.mock import MockTTS
 
         return MockTTS(config)
-    if provider == "openai":
+    if provider in _OPENAI_COMPATIBLE_TTS:
         from nexus.realtime.adapters.tts.openai import OpenAITTS
 
         return OpenAITTS(config)

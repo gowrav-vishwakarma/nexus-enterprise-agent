@@ -77,9 +77,17 @@ realtime = [
     "httpx>=0.27",
 ]
 
+# Kyutai Moshi speech-to-speech client (the MODEL runs in a separate server).
+# Light, torch-free: just the WebSocket + Opus codec the adapter needs.
+moshi = [
+    "websockets>=12",
+    "sphn>=0.1.4",
+    "numpy>=1.26",
+]
+
 # All dependencies
 all = [
-    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi,realtime]",
+    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi,realtime,moshi]",
 ]
 
 # Full test suite (all adapters + storage + FastAPI)

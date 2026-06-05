@@ -95,7 +95,13 @@ class SpeechToSpeechPipeline:
             from nexus.realtime.adapters.s2s.mock import MockS2S
 
             return MockS2S(s2s, **kwargs)
-        if provider in ("openai", "openai_realtime"):
+        if provider == "moshi":
+            from nexus.realtime.adapters.s2s.moshi import MoshiS2S
+
+            return MoshiS2S(s2s, **kwargs)
+        # OpenAI Realtime protocol — also covers any local server that speaks it
+        # (point base_url at it). New duplex models = add a provider + adapter here.
+        if provider in ("openai", "openai_realtime", "openai_compatible", "local"):
             from nexus.realtime.adapters.s2s.openai_realtime import OpenAIRealtimeS2S
 
             return OpenAIRealtimeS2S(s2s, **kwargs)

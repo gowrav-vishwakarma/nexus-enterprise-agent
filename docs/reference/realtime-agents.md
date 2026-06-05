@@ -84,12 +84,16 @@ Each step yields a `RealtimeStreamEvent` (`transcript_final`, `content`,
 
 | Stage | Providers | Notes |
 |-------|-----------|-------|
-| STT | `mock`, `openai` (Whisper), `deepgram` | Deepgram supports streaming partials |
-| TTS | `mock`, `openai` | Streams per sentence |
+| STT | `mock`, `openai` (Whisper), `deepgram`, `local`/`openai_compatible`/`speaches` | Deepgram supports streaming partials |
+| TTS | `mock`, `openai`, `local`/`openai_compatible`/`kokoro`/`speaches` | Streams per sentence |
 | VAD | `energy` (built-in), `silero` | `energy` needs no extra deps |
 
 `mock` providers run with no keys (handy for tests/demos): mock STT decodes bytes
 as UTF-8 text; mock TTS returns `b"AUDIO:" + text`.
+
+The `local` / `openai_compatible` aliases use the same OpenAI REST shape as
+`openai` — just set `base_url` to your own server for a fully self-hosted, no-paid-API
+setup (see [Self-hosted / offline-first](#self-hosted--offline-first-byom)).
 
 ## Speech-to-speech (S2S)
 
@@ -106,6 +110,19 @@ async for ev in pipeline.process_audio_stream(audio_frames):
 
 Tool names are sanitized for the realtime API (`plugin.tool` → `plugin-tool`) and
 mapped back automatically when executing.
+
+S2S providers: `mock`, `openai`/`openai_realtime` (also `local`/`openai_compatible`
+for any server speaking the OpenAI Realtime protocol), and **`moshi`** for a
+self-hosted [Kyutai Moshi](https://github.com/kyutai-labs/moshi) server. Adding a
+new duplex model is just a new `SpeechToSpeechAdapter` + a provider name — the
+pipeline, transports, and browser keep speaking plain PCM.
+
+The `moshi` adapter is a thin, torch-free client (the model runs in a separate
+server); install its extra:
+
+```bash
+pip install "nexus-enterprise-agent[moshi]"   # websockets + sphn + numpy
+```
 
 ## Half-duplex IVR
 
@@ -214,6 +231,42 @@ plan can use and caps concurrent sessions.
 uv run --extra fastapi --extra realtime --extra openai \
     uvicorn examples.realtime_saas_api:app --reload
 ```
+
+## Self-hosted / offline-first (BYOM)
+
+Nexus is **offline-first and bring-your-own-model**: every media adapter takes a
+`base_url`, so you can run all models yourself and call them over local,
+OpenAI-compatible HTTP/WS — no paid API. The framework stays lean (no `torch`);
+the models run as **separate servers** (e.g. an Ollama/vLLM/llama.cpp + STT/TTS
+stack, kept in its own folder).
+
+A typical fully-local mapping:
+
+| Capability | Server | Endpoint | Provider in manifest |
+|-----------|--------|----------|----------------------|
+| LLM | Ollama / vLLM / llama.cpp | `http://localhost:11434/v1` | `openai` + `base_url` |
+| STT | faster-whisper / speaches | `http://localhost:8001/v1` | `local` + `base_url` |
+| TTS | Kokoro / speaches | `http://localhost:8002/v1` | `local` + `base_url` |
+| S2S | Kyutai Moshi | `ws://localhost:8998` | `moshi` + `base_url` |
+
+Example manifests and runnable demos:
+
+- [`voice_local.yaml`](../../examples/orchestration/voice_local.yaml) — cascaded, all-local.
+- [`voice_s2s_local.yaml`](../../examples/orchestration/voice_s2s_local.yaml) — real S2S via Moshi.
+- `examples/realtime_local_voice.py` — CLI turn (`--check` probes the servers).
+- `examples/realtime_local_voice_ui.py` — push-to-talk browser UI (cascaded).
+- `examples/realtime_s2s_ui.py` — full-duplex browser UI (Moshi S2S).
+
+```bash
+# cascaded talk-in-browser (STT + Ollama + TTS):
+uv run --extra fastapi uvicorn examples.realtime_local_voice_ui:app --port 8080
+# full-duplex speech-to-speech (Moshi):
+uv run --extra fastapi --extra moshi uvicorn examples.realtime_s2s_ui:app --port 8081
+```
+
+> **GPU note:** on a single 24 GB card, run one heavy GPU workload at a time —
+> the cascaded LLM (e.g. Ollama gpt-oss ~13 GB) and Moshi (~16 GB) don't co-fit.
+> Free one before starting the other (e.g. `ollama stop <model>`).
 
 ## Next steps
 
