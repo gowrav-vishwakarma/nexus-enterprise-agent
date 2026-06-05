@@ -134,6 +134,10 @@ class AgentOrchestrator:
             data=data,
         )
 
+    def _root_session_id(self) -> str:
+        """Root chat session id shared across all group members."""
+        return self.run_context.session_id or ""
+
     async def _run_pipeline(
         self,
         user_message: str,
@@ -176,6 +180,7 @@ class AgentOrchestrator:
             except Exception as e:
                 logger.error("Pipeline member '%s' failed: %s", name, e)
                 return AgentGroupResult(
+                    session_id=self._root_session_id(),
                     group_name=self.config.name,
                     member_results=member_results,
                     status="failed",
@@ -184,6 +189,7 @@ class AgentOrchestrator:
                 )
 
         return AgentGroupResult(
+            session_id=self._root_session_id(),
             group_name=self.config.name,
             final_response=current_input,
             member_results=member_results,
@@ -253,6 +259,7 @@ class AgentOrchestrator:
                 break
 
         group_result = AgentGroupResult(
+            session_id=self._root_session_id(),
             group_name=self.config.name,
             final_response=final_response,
             member_results=member_results,
@@ -290,6 +297,7 @@ class AgentOrchestrator:
 
         if not supervisor_name:
             return AgentGroupResult(
+                session_id=self._root_session_id(),
                 group_name=self.config.name,
                 status="failed",
                 error="No members available in supervisor group",
@@ -299,6 +307,7 @@ class AgentOrchestrator:
         supervisor = self._members[supervisor_name]
         if not isinstance(supervisor, AgentRunner):
             return AgentGroupResult(
+                session_id=self._root_session_id(),
                 group_name=self.config.name,
                 status="failed",
                 error="Supervisor member must be a single AgentRunner",
@@ -370,6 +379,7 @@ class AgentOrchestrator:
         except Exception as e:
             logger.error("Supervisor agent failed: %s", e)
             return AgentGroupResult(
+                session_id=self._root_session_id(),
                 group_name=self.config.name,
                 member_results=member_results,
                 status="failed",
@@ -378,6 +388,7 @@ class AgentOrchestrator:
             )
 
         return AgentGroupResult(
+            session_id=self._root_session_id(),
             group_name=self.config.name,
             final_response=supervisor_res.final_response,
             member_results=member_results,
@@ -487,6 +498,7 @@ class AgentOrchestrator:
             )
 
         group_result = AgentGroupResult(
+            session_id=self._root_session_id(),
             group_name=self.config.name,
             final_response=final_response,
             member_results=member_results,

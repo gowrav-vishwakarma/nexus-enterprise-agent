@@ -31,7 +31,7 @@ class SessionManager:
     def _create_adapter_from_config(config: SessionStorageConfig) -> StorageAdapter:
         """Create a storage adapter based on configuration."""
         adapter_type = config.adapter or "memory"
-        adapter_config = config.adapter_config or {}
+        adapter_config = dict(config.adapter_config or {})
 
         if adapter_type == "memory":
             from nexus.session.adapters.memory import MemoryStorageAdapter
@@ -43,14 +43,21 @@ class SessionManager:
             from nexus.session.adapters.sqlite import SQLiteStorageAdapter
             return SQLiteStorageAdapter(**adapter_config)
         elif adapter_type == "postgresql":
-            logger.warning("PostgreSQL adapter not yet implemented, falling back to sqlite")
-            from nexus.session.adapters.sqlite import SQLiteStorageAdapter
-            return SQLiteStorageAdapter(db_path="./postgresql_fallback.db")
+            from nexus.session.adapters.postgresql import PostgreSQLStorageAdapter
+            if "dsn" not in adapter_config:
+                raise ValueError("postgresql adapter requires 'dsn' in adapter_config")
+            return PostgreSQLStorageAdapter(**adapter_config)
         elif adapter_type == "redis":
-            logger.warning("Redis adapter not yet implemented, falling back to memory")
-            return MemoryStorageAdapter()
+            from nexus.session.adapters.redis import RedisStorageAdapter
+            return RedisStorageAdapter(**adapter_config)
+        elif adapter_type == "custom":
+            if not config.custom_adapter_class:
+                raise ValueError("custom adapter requires custom_adapter_class")
+            from nexus.persistence.factory import load_custom_adapter
+            return load_custom_adapter(config.custom_adapter_class, adapter_config)
         else:
             logger.warning("Unknown adapter type '%s', falling back to memory", adapter_type)
+            from nexus.session.adapters.memory import MemoryStorageAdapter
             return MemoryStorageAdapter()
 
     async def create_session(
@@ -155,6 +162,47 @@ class SessionManager:
             user_id=user_id,
             limit=limit,
             offset=offset,
+        )
+
+    async def list_sessions_by_prefix(
+        self,
+        session_id_prefix: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        exclude_session_ids: Optional[set[str]] = None,
+    ) -> list[AgentSession]:
+        """Return sessions whose session_id starts with session_id_prefix."""
+        return await self._adapter.list_sessions_by_prefix(
+            session_id_prefix,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            exclude_session_ids=exclude_session_ids,
+        )
+
+    async def load_session_group(
+        self,
+        root_session_id: str,
+        *,
+        session_id_prefix: str = "",
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        pattern: str = "auto",
+        member_order: Optional[list[str]] = None,
+        include_internal: bool = False,
+    ):
+        """Load and aggregate all sub-agent sessions for a root chat session id."""
+        from nexus.session.aggregate import load_session_group
+
+        return await load_session_group(
+            self,
+            root_session_id,
+            session_id_prefix=session_id_prefix,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            pattern=pattern,  # type: ignore[arg-type]
+            member_order=member_order,
+            include_internal=include_internal,
         )
 
     async def deactivate_session(self, session_id: str) -> bool:

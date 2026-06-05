@@ -7,6 +7,8 @@
 from nexus.memory.curator import MemoryCurator, MemoryUpdate
 from nexus.memory.cross_session_store import (
     InMemoryCrossSessionMemoryStore,
+    PostgreSQLCrossSessionMemoryStore,
+    RedisCrossSessionMemoryStore,
     SQLiteCrossSessionMemoryStore,
     CrossSessionMemoryRecord,
     CrossSessionMemoryStore,
@@ -21,6 +23,8 @@ __all__ = [
     "CrossSessionMemoryRecord",
     "InMemoryCrossSessionMemoryStore",
     "SQLiteCrossSessionMemoryStore",
+    "PostgreSQLCrossSessionMemoryStore",
+    "RedisCrossSessionMemoryStore",
     "make_cross_session_memory_key",
     "resolve_cross_session_namespace",
 ]

@@ -81,6 +81,29 @@ class MemoryStorageAdapter(StorageAdapter):
         results.sort(key=lambda s: s.updated_at, reverse=True)
         return results[offset:offset + limit]
 
+    async def list_sessions_by_prefix(
+        self,
+        session_id_prefix: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        exclude_session_ids: Optional[set[str]] = None,
+    ) -> list[AgentSession]:
+        excluded = exclude_session_ids or set()
+        results = []
+        for session in self._sessions.values():
+            if not session.session_id.startswith(session_id_prefix):
+                continue
+            if session.session_id in excluded:
+                continue
+            if tenant_id and session.tenant_id != tenant_id:
+                continue
+            if user_id and session.user_id != user_id:
+                continue
+            results.append(session)
+        results.sort(key=lambda s: s.created_at)
+        return results
+
     async def delete_session(
         self,
         session_id: str,

@@ -189,8 +189,76 @@ Missing `tenant_id` or `user_id` map to `_default`. Set `tenant_scoped=False` on
 | `memory` | In-process only; lost on exit |
 | `file` | `{tenant_id}/users/{user_id}/{session_id}/session.json` |
 | `sqlite` | `{tenant_id}/users/{user_id}/sessions.db` (one row per session) |
+| `postgresql` | User-defined DSN + schema; JSONB blob per session row |
+| `redis` | User-defined URL; JSON blob keys + ZSET index per tenant/user |
 
 Configure via `SessionStorageConfig` on the runner/orchestrator (see [What goes where](#what-goes-where)).
+
+### Production storage (PostgreSQL / Redis)
+
+Install optional backends:
+
+```bash
+uv pip install "nexus-agent[postgres,redis]"
+```
+
+**User-overridable layout** — you control DSN, schema, table names, and Redis key templates. Nexus does not force a single multi-tenant model.
+
+```python
+from nexus.config.storage import PostgreSQLStorageConfig, SessionStorageConfig
+from nexus.persistence import PersistenceFactory
+
+# User-owned schema (no Nexus DDL)
+pg = PostgreSQLStorageConfig(
+    dsn="postgresql://user:pass@localhost:5432/mydb",
+    db_schema="acme_prod",
+    schema_mode="existing",      # never run CREATE TABLE
+    sessions_table="agent_sessions",
+    user_memory_table="user_memory",
+    auto_migrate=False,
+)
+bundle = PersistenceFactory.from_storage_config(
+    SessionStorageConfig(adapter="postgresql", adapter_config=pg.to_adapter_config())
+)
+
+runner = AgentRunner(
+    config=agent_config,
+    storage_config=SessionStorageConfig(adapter="postgresql", adapter_config=pg.to_adapter_config()),
+    cross_session_memory_store=bundle.cross_session_memory_store,
+)
+```
+
+**Per-tenant resolver** (different DSN or schema per tenant):
+
+```python
+from nexus.persistence import PersistenceFactory, PersistenceResolver
+
+class MyResolver(PersistenceResolver):
+    def resolve_storage_config(self, tenant_id, user_id):
+        tenant = load_tenant(tenant_id)  # your DB
+        return SessionStorageConfig(
+            adapter="postgresql",
+            adapter_config={
+                "dsn": tenant.db_dsn,
+                "schema": tenant.db_schema,
+                "schema_mode": "qualified",
+                "auto_migrate": False,
+            },
+        )
+
+    def resolve_bundle(self, tenant_id, user_id):
+        return None
+
+bundle = PersistenceFactory.from_resolver(MyResolver(), tenant_id="acme", user_id="u1")
+```
+
+Environment variables (see [`.env.example`](.env.example)):
+
+- `NEXUS_PG_DSN`, `NEXUS_PG_SCHEMA`, `NEXUS_PG_SCHEMA_MODE`, `NEXUS_PG_AUTO_MIGRATE`
+- `NEXUS_REDIS_URL`, `NEXUS_REDIS_TTL_SECONDS`
+- Integration tests: `NEXUS_TEST_PG_DSN`, `NEXUS_TEST_REDIS_URL` (use [`docker-compose.test.yml`](docker-compose.test.yml))
+
+`auto_migrate` defaults to **false** for PostgreSQL in production; enable only for greenfield dev (`NEXUS_PG_AUTO_MIGRATE=true`).
 
 ### What is in each session JSON
 
@@ -220,12 +288,43 @@ Member ids are derived at orchestrator init: `{session_id_prefix}{group_session_
 
 ### Joining history for a UI
 
-To show all sub-agents in one timeline:
+Use **`SessionManager.load_session_group()`** to load all sub-agent sessions for a root chat id and get a nested array in execution order:
+
+```python
+from nexus.session.manager import SessionManager
+
+manager = SessionManager.from_config(storage_config)
+
+view = await manager.load_session_group(
+    root_session_id="group-sess-1",   # same id returned on every run
+    tenant_id="acme",
+    user_id="user-42",
+    pattern="auto",                   # or "pipeline" / "supervisor" / "single"
+    member_order=["researcher", "analyst"],  # for pipeline groups
+)
+
+# view.sessions is a nested list of SessionNode objects:
+# - pipeline: flat siblings in member_order
+# - supervisor: supervisor node with children[] per delegate_to_* call
+for node in view.sessions:
+    print(node.member_name, len(node.turns), len(node.children))
+```
+
+Member session ids follow `{session_id_prefix}{root}_{member.name}` (e.g. `group-sess-1_researcher`). The root id is what you pass on each chat request (or receive when the server generates one).
+
+HTTP example (SaaS API):
+
+```http
+GET /v1/sessions/group-sess-1/group?pattern=pipeline&member_order=researcher,analyst
+X-Tenant-ID: pro_tenant_1
+X-User-ID: demo-user
+```
+
+Requirements:
 
 1. Use **one** `storage_config` for the whole group (pass it once on `AgentOrchestrator`).
 2. Keep the same `tenant_id` / `user_id` on `RunContext`.
-3. Load sessions by prefix, e.g. all rows where `session_id` starts with `group-sess-1_`.
-4. Merge/sort by timestamp in your API layer.
+3. Pass the same **root** `session_id` on every chat turn; sub-agents store under `{root}_{member}` automatically.
 
 Do **not** give different storage backends to group members — history will be fragmented across stores.
 

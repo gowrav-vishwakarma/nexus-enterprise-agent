@@ -10,6 +10,7 @@ from typing import Optional
 from filelock import FileLock
 
 from nexus.session.adapters.base import StorageAdapter
+from nexus.session.adapters._serde import session_from_json, session_to_json
 from nexus.session.models import AgentSession, TurnRecord
 from nexus.storage.paths import (
     get_data_root,
@@ -112,23 +113,10 @@ class FileStorageAdapter(StorageAdapter):
         return self._locks[key]
 
     def _serialize_session(self, session: AgentSession) -> str:
-        data = session.model_dump()
-        indent = 2 if self.pretty_print else None
-        return json.dumps(data, indent=indent, default=str)
+        return session_to_json(session, pretty=self.pretty_print)
 
     def _deserialize_session(self, data: str) -> AgentSession:
-        parsed = json.loads(data)
-        for key in ["created_at", "updated_at"]:
-            if parsed.get(key):
-                parsed[key] = datetime.fromisoformat(parsed[key])
-        for turn in parsed.get("turns", []):
-            for key in ["timestamp"]:
-                if turn.get(key):
-                    turn[key] = datetime.fromisoformat(turn[key])
-            for tc in turn.get("tool_calls", []):
-                if tc.get("timestamp"):
-                    tc["timestamp"] = datetime.fromisoformat(tc["timestamp"])
-        return AgentSession(**parsed)
+        return session_from_json(data)
 
     async def save_session(self, session: AgentSession) -> None:
         tid, uid = await self._resolve_location(session.session_id, session=session)
@@ -244,6 +232,33 @@ class FileStorageAdapter(StorageAdapter):
                 continue
         results.sort(key=lambda s: s.updated_at, reverse=True)
         return results[offset : offset + limit]
+
+    async def list_sessions_by_prefix(
+        self,
+        session_id_prefix: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        exclude_session_ids: Optional[set[str]] = None,
+    ) -> list[AgentSession]:
+        excluded = exclude_session_ids or set()
+        results = []
+        for path in self._iter_session_files(tenant_id, user_id):
+            try:
+                session = self._deserialize_session(path.read_text())
+                if not session.session_id.startswith(session_id_prefix):
+                    continue
+                if session.session_id in excluded:
+                    continue
+                if tenant_id and session.tenant_id != tenant_id:
+                    continue
+                if user_id and session.user_id != user_id:
+                    continue
+                results.append(session)
+            except Exception:
+                continue
+        results.sort(key=lambda s: s.created_at)
+        return results
 
     async def delete_session(
         self,

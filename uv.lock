@@ -2059,12 +2059,17 @@ anthropic = [
     { name = "anthropic" },
 ]
 dev = [
+    { name = "aiosqlite" },
+    { name = "asyncpg" },
     { name = "coverage" },
     { name = "faker" },
+    { name = "filelock" },
+    { name = "hiredis" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-mock" },
+    { name = "redis" },
     { name = "respx" },
     { name = "ruff" },
 ]
@@ -2111,18 +2116,22 @@ sqlite = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", marker = "extra == 'dev'", specifier = ">=0.20" },
     { name = "aiosqlite", marker = "extra == 'sqlite'", specifier = ">=0.20" },
     { name = "alembic", marker = "extra == 'postgres'", specifier = ">=1.13" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.28" },
     { name = "anyio", specifier = ">=4.0" },
+    { name = "asyncpg", marker = "extra == 'dev'", specifier = ">=0.29" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.29" },
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "faker", marker = "extra == 'dev'", specifier = ">=25.0" },
     { name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.111" },
+    { name = "filelock", marker = "extra == 'dev'", specifier = ">=3.13" },
     { name = "filelock", marker = "extra == 'file'", specifier = ">=3.13" },
     { name = "filelock", marker = "extra == 'sqlite'", specifier = ">=3.13" },
     { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=1.0" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.9" },
+    { name = "hiredis", marker = "extra == 'dev'", specifier = ">=3.0" },
     { name = "hiredis", marker = "extra == 'redis'" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
@@ -2140,6 +2149,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "redis", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },

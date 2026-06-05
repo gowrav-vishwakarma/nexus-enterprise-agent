@@ -5,11 +5,10 @@ making it a zero-dependency persistent option for development and
 single-server SaaS deployments.
 """
 
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Literal, Optional
 
 try:
     import aiosqlite
@@ -17,6 +16,7 @@ except ImportError:
     aiosqlite = None  # type: ignore
 
 from nexus.session.adapters.base import StorageAdapter
+from nexus.session.adapters._serde import session_from_json, session_to_json
 from nexus.session.models import AgentSession, TurnRecord
 from nexus.storage.paths import (
     get_data_root,
@@ -116,7 +116,7 @@ class SQLiteStorageAdapter(StorageAdapter):
             self._initialised_paths.add(db_file)
 
     def _session_to_row(self, session: AgentSession) -> tuple:
-        data = session.model_dump_json()
+        data = session_to_json(session)
         return (
             session.session_id,
             session.agent_id,
@@ -129,8 +129,7 @@ class SQLiteStorageAdapter(StorageAdapter):
         )
 
     def _row_to_session(self, row: tuple) -> AgentSession:
-        data = json.loads(row[7])
-        return AgentSession(**data)
+        return session_from_json(row[7])
 
     async def save_session(self, session: AgentSession) -> None:
         tid, uid = await self._resolve_location(session.session_id, session=session)
@@ -227,6 +226,61 @@ class SQLiteStorageAdapter(StorageAdapter):
         results.sort(key=lambda s: s.updated_at, reverse=True)
         return results[offset : offset + limit]
 
+    async def list_sessions_by_prefix(
+        self,
+        session_id_prefix: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        exclude_session_ids: Optional[set[str]] = None,
+    ) -> list[AgentSession]:
+        if not self.tenant_scoped:
+            return await self._list_from_db(
+                self._resolve_db_path(None, None),
+                None,
+                tenant_id,
+                user_id,
+                limit=10000,
+                offset=0,
+                session_id_prefix=session_id_prefix,
+                exclude_session_ids=exclude_session_ids,
+            )
+
+        if tenant_id is not None and user_id is not None:
+            db_files = [self._resolve_db_path(tenant_id, user_id)]
+        elif tenant_id is not None:
+            tenant_users = self.data_root / normalize_tenant_id(tenant_id) / "users"
+            db_files = []
+            if tenant_users.exists():
+                for user_dir in tenant_users.iterdir():
+                    if user_dir.is_dir():
+                        candidate = user_dir / "sessions.db"
+                        if candidate.exists():
+                            db_files.append(str(candidate))
+        else:
+            db_files = [
+                str(p)
+                for p in self.data_root.rglob("sessions.db")
+                if "_index" not in p.parts
+            ]
+
+        results: list[AgentSession] = []
+        for db_file in db_files:
+            batch = await self._list_from_db(
+                db_file,
+                None,
+                tenant_id,
+                user_id,
+                limit=10000,
+                offset=0,
+                session_id_prefix=session_id_prefix,
+                exclude_session_ids=exclude_session_ids,
+            )
+            results.extend(batch)
+
+        results.sort(key=lambda s: s.created_at)
+        return results
+
     async def _list_from_db(
         self,
         db_file: str,
@@ -235,6 +289,8 @@ class SQLiteStorageAdapter(StorageAdapter):
         user_id: Optional[str],
         limit: int,
         offset: int,
+        session_id_prefix: Optional[str] = None,
+        exclude_session_ids: Optional[set[str]] = None,
     ) -> list[AgentSession]:
         if not Path(db_file).exists():
             return []
@@ -251,8 +307,12 @@ class SQLiteStorageAdapter(StorageAdapter):
         if user_id:
             conditions.append("user_id = ?")
             params.append(user_id)
+        if session_id_prefix:
+            conditions.append("session_id LIKE ?")
+            params.append(f"{session_id_prefix}%")
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        order = "created_at ASC" if session_id_prefix else "updated_at DESC"
         params.extend([limit, offset])
 
         async with aiosqlite.connect(db_file) as db:
@@ -260,11 +320,16 @@ class SQLiteStorageAdapter(StorageAdapter):
             async with db.execute(
                 f"SELECT session_id, agent_id, tenant_id, user_id, is_active, "
                 f"created_at, updated_at, data FROM nexus_sessions "
-                f"{where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                f"{where} ORDER BY {order} LIMIT ? OFFSET ?",
                 params,
             ) as cursor:
                 rows = await cursor.fetchall()
-                return [self._row_to_session(r) for r in rows]
+                sessions = [self._row_to_session(r) for r in rows]
+                if exclude_session_ids:
+                    sessions = [
+                        s for s in sessions if s.session_id not in exclude_session_ids
+                    ]
+                return sessions
 
     async def delete_session(
         self,
@@ -309,13 +374,13 @@ class SQLiteStorageAdapter(StorageAdapter):
                     logger.warning("append_turn: session %s not found", session_id)
                     return
 
-            session = AgentSession(**json.loads(row[0]))
+            session = session_from_json(row[0])
             session.turns.append(turn)
             session.updated_at = datetime.now()
 
             await db.execute(
                 "UPDATE nexus_sessions SET data = ?, updated_at = ? WHERE session_id = ?",
-                (session.model_dump_json(), session.updated_at.isoformat(), session_id),
+                (session_to_json(session), session.updated_at.isoformat(), session_id),
             )
             await db.commit()
 
@@ -343,7 +408,7 @@ class SQLiteStorageAdapter(StorageAdapter):
                 if row is None:
                     return
 
-            session = AgentSession(**json.loads(row[0]))
+            session = session_from_json(row[0])
             for turn in session.turns:
                 for tc in turn.tool_calls:
                     if tc.tc_id == tc_id:
@@ -356,6 +421,6 @@ class SQLiteStorageAdapter(StorageAdapter):
             session.updated_at = datetime.now()
             await db.execute(
                 "UPDATE nexus_sessions SET data = ?, updated_at = ? WHERE session_id = ?",
-                (session.model_dump_json(), session.updated_at.isoformat(), session_id),
+                (session_to_json(session), session.updated_at.isoformat(), session_id),
             )
             await db.commit()

@@ -1,4 +1,20 @@
-"""Base storage adapter interface for the Nexus Agent Framework."""
+"""Base storage adapter interface for the Nexus Agent Framework.
+
+All session storage backends must implement ``list_sessions_by_prefix`` with
+consistent semantics: return every session whose ``session_id`` starts with the
+given prefix (after optional tenant/user filtering). Sort by ``created_at`` ascending.
+
+Future adapters:
+- PostgreSQL: ``WHERE session_id LIKE $1 || '%'`` with index on
+  ``(tenant_id, user_id, session_id)``.
+- Redis: maintain a sorted set of session ids per tenant/user; prefix query via
+  ``ZRANGEBYLEX`` or ``SCAN`` with ``MATCH {prefix}*``.
+
+When ``adapter=postgresql`` or ``adapter=redis`` is configured, use the
+implementations in ``nexus.session.adapters.postgresql`` and
+``nexus.session.adapters.redis``. Install optional deps via
+``pip install nexus-agent[postgres,redis]``.
+"""
 
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -35,6 +51,18 @@ class StorageAdapter(ABC):
         offset: int = 0,
     ) -> list[AgentSession]:
         """List sessions with optional filters."""
+        ...
+
+    @abstractmethod
+    async def list_sessions_by_prefix(
+        self,
+        session_id_prefix: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        exclude_session_ids: Optional[set[str]] = None,
+    ) -> list[AgentSession]:
+        """Return sessions whose session_id starts with session_id_prefix."""
         ...
 
     @abstractmethod

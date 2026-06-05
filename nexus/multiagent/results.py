@@ -9,6 +9,9 @@ from nexus.runner.result import AgentRunResult
 class AgentGroupResult(BaseModel):
     """Result of orchestrating a group of agents."""
 
+    session_id: str = Field(
+        ..., description="Root chat session ID (client-provided or server-generated)"
+    )
     group_name: str = Field(..., description="Name of the agent group executed")
     final_response: Optional[str] = Field(None, description="Aggregated final response")
     member_results: dict[str, Any] = Field(

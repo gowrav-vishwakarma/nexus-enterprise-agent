@@ -24,7 +24,7 @@ try:
 except ImportError:
     pass  # python-dotenv not installed, skip
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, SecretStr, Field
 
@@ -37,12 +37,14 @@ from nexus.config.memory import (
     SessionMemoryConfig,
     WorkingMemoryConfig,
 )
-from nexus.memory.cross_session_store import SQLiteCrossSessionMemoryStore
+from nexus.memory.cross_session_store import CrossSessionMemoryStore
+from nexus.persistence.factory import PersistenceBundle, PersistenceFactory
 from nexus.config.rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
 from nexus.config.storage import SessionStorageConfig
 from nexus.skills.config import SkillsConfig
 from nexus.runner.agent_runner import AgentRunner
 from nexus.multiagent.orchestrator import AgentOrchestrator
+from nexus.session.manager import SessionManager
 from nexus.tools.context import RunContext
 from nexus.tools.registry import ToolRegistry
 from nexus.tools.decorators import tool, tool_plugin
@@ -356,6 +358,8 @@ class NexusTenantConfigFactory:
                     "dsn": dsn.get_secret_value(),
                     "schema": schema,
                     "table_prefix": "nexus_",
+                    "schema_mode": os.getenv("NEXUS_PG_SCHEMA_MODE", "managed"),
+                    "auto_migrate": os.getenv("NEXUS_PG_AUTO_MIGRATE", "false").lower() == "true",
                 },
             )
 
@@ -470,7 +474,38 @@ SHARED_TOOL_REGISTRY.register_plugin(WebSearchPlugin())
 SHARED_TOOL_REGISTRY.register_plugin(DatabasePlugin())
 SHARED_TOOL_REGISTRY.register_plugin(CalendarPlugin())
 
-SHARED_CROSS_SESSION_MEMORY_STORE = SQLiteCrossSessionMemoryStore()
+
+class TenantPersistenceResolver:
+    """Example resolver: map tenant record → SessionStorageConfig (override in production)."""
+
+    def resolve_storage_config(
+        self,
+        tenant_id: Optional[str],
+        user_id: Optional[str],
+    ) -> SessionStorageConfig:
+        tenant_rec = MOCK_TENANTS_DB.get(tenant_id or "")
+        if tenant_rec is None:
+            return SessionStorageConfig(adapter="memory")
+        limits = PLAN_LIMITS[tenant_rec.plan]
+        return NexusTenantConfigFactory.build_storage_config(tenant_rec, limits)
+
+    def resolve_bundle(
+        self,
+        tenant_id: Optional[str],
+        user_id: Optional[str],
+    ) -> Optional[PersistenceBundle]:
+        return None
+
+
+TENANT_PERSISTENCE_RESOLVER = TenantPersistenceResolver()
+
+
+def get_persistence_bundle(tenant_id: str, user_id: str) -> PersistenceBundle:
+    return PersistenceFactory.from_resolver(
+        TENANT_PERSISTENCE_RESOLVER,
+        tenant_id,
+        user_id,
+    )
 
 
 # ── Request / Response schemas ───────────────────────────────────────────────
@@ -508,12 +543,14 @@ async def chat(
         session_id=body.session_id or str(uuid4()),
     )
 
+    persistence = get_persistence_bundle(tenant_ctx.tenant_id, x_user_id)
+
     runner = AgentRunner(
         config=agent_config,
         tool_registry=SHARED_TOOL_REGISTRY,
         storage_config=tenant_ctx.storage_config,
         run_context=run_context,
-        cross_session_memory_store=SHARED_CROSS_SESSION_MEMORY_STORE,
+        cross_session_memory_store=persistence.cross_session_memory_store,
     )
 
     use_stream = body.stream or agent_config.stream_output
@@ -543,6 +580,32 @@ async def chat(
         "plan": tenant_ctx.plan,
         "user_id": x_user_id,
     }
+
+
+@app.get("/v1/sessions/{root_session_id}/group")
+async def get_session_group(
+    root_session_id: str,
+    tenant_ctx: ResolvedTenant = Depends(get_resolved_tenant),
+    x_user_id: str = Header(default="demo-user", alias="X-User-ID"),
+    pattern: str = Query(default="auto"),
+    member_order: Optional[str] = Query(
+        default=None,
+        description="Comma-separated member names for pipeline ordering",
+    ),
+    include_internal: bool = Query(default=False),
+):
+    """Load all sub-agent sessions for a root chat session id as a nested tree."""
+    manager = SessionManager.from_config(tenant_ctx.storage_config)
+    order = [m.strip() for m in member_order.split(",")] if member_order else None
+    view = await manager.load_session_group(
+        root_session_id,
+        tenant_id=tenant_ctx.tenant_id,
+        user_id=x_user_id,
+        pattern=pattern,  # type: ignore[arg-type]
+        member_order=order,
+        include_internal=include_internal,
+    )
+    return view.model_dump()
 
 
 @app.post("/v1/multi-agent/run")
@@ -599,7 +662,9 @@ async def run_multi_agent_group(
         tool_registry=SHARED_TOOL_REGISTRY,
         storage_config=tenant_ctx.storage_config,
         run_context=run_context,
-        cross_session_memory_store=SHARED_CROSS_SESSION_MEMORY_STORE,
+        cross_session_memory_store=get_persistence_bundle(
+            tenant_ctx.tenant_id, x_user_id
+        ).cross_session_memory_store,
     )
 
     use_stream = body.stream or group_config.stream_output
@@ -622,7 +687,7 @@ async def run_multi_agent_group(
     )
 
     return {
-        "session_id": run_context.session_id,
+        "session_id": result.session_id,
         "response": result.final_response,
         "status": result.status,
         "turns_used": result.turns_used,

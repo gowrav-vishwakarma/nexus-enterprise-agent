@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -221,6 +221,264 @@ class SQLiteCrossSessionMemoryStore:
                 ),
             )
             await db.commit()
+
+    async def merge_entities(
+        self,
+        tenant_id: Optional[str],
+        user_id: str,
+        namespace: str,
+        entities: dict[str, str],
+        *,
+        max_entities: int,
+    ) -> CrossSessionMemoryRecord:
+        existing = await self.load(tenant_id, user_id, namespace)
+        if existing is None:
+            existing = CrossSessionMemoryRecord(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                namespace=namespace,
+            )
+        if entities:
+            merged = {**existing.entity_memory, **entities}
+            existing.entity_memory = _cap_entities(merged, max_entities)
+        await self.save(existing)
+        return existing
+
+
+_CREATE_USER_MEMORY_PG = """
+CREATE TABLE IF NOT EXISTS {table} (
+    memory_key  TEXT PRIMARY KEY,
+    tenant_id   TEXT,
+    user_id     TEXT NOT NULL,
+    namespace   TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL,
+    data        JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_{idx_prefix}user_memory_user ON {table} (user_id);
+"""
+
+
+class PostgreSQLCrossSessionMemoryStore:
+    """PostgreSQL-backed cross-session memory store."""
+
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        schema: Optional[str] = None,
+        db_schema: Optional[str] = None,
+        schema_mode: str = "managed",
+        user_memory_table: Optional[str] = None,
+        table_prefix: str = "nexus_",
+        auto_migrate: bool = False,
+        connect_args: Optional[dict[str, Any]] = None,
+        pool: Any = None,
+    ) -> None:
+        from nexus.session.adapters.postgresql import _index_prefix, _resolve_table_name
+
+        try:
+            import asyncpg  # noqa: F401
+        except ImportError as exc:
+            raise ImportError(
+                "asyncpg is required for PostgreSQLCrossSessionMemoryStore. "
+                "Install with: pip install nexus-agent[postgres]"
+            ) from exc
+
+        self.dsn = dsn
+        self.db_schema = db_schema if db_schema is not None else schema
+        self.schema_mode = schema_mode
+        self.auto_migrate = auto_migrate
+        self.connect_args = connect_args or {}
+        self._pool = pool
+        self._owns_pool = pool is None
+        self._schema_ready = False
+        self.memory_table = user_memory_table or _resolve_table_name(
+            sessions_table=f"{table_prefix}user_memory",
+            table_prefix=table_prefix,
+            db_schema=self.db_schema,
+            schema_mode=schema_mode,  # type: ignore[arg-type]
+        )
+        self._idx_prefix = _index_prefix(self.memory_table)
+
+    async def _get_pool(self):
+        import asyncpg
+
+        if self._pool is None:
+            self._pool = await asyncpg.create_pool(
+                self.dsn, min_size=1, max_size=10, **self.connect_args
+            )
+        return self._pool
+
+    async def close(self) -> None:
+        if self._pool is not None and self._owns_pool:
+            await self._pool.close()
+            self._pool = None
+
+    async def _ensure_schema(self, conn) -> None:
+        if self._schema_ready:
+            return
+        if self.schema_mode == "existing":
+            self._schema_ready = True
+            return
+        if self.schema_mode == "managed" and self.auto_migrate:
+            ddl = _CREATE_USER_MEMORY_PG.format(
+                table=self.memory_table,
+                idx_prefix=self._idx_prefix,
+            )
+            await conn.execute(ddl)
+        self._schema_ready = True
+
+    async def load(
+        self,
+        tenant_id: Optional[str],
+        user_id: str,
+        namespace: str,
+    ) -> Optional[CrossSessionMemoryRecord]:
+        key = make_cross_session_memory_key(tenant_id, user_id, namespace)
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            if self.schema_mode != "qualified" and self.db_schema:
+                await conn.execute(f'SET search_path TO "{self.db_schema}", public')
+            await self._ensure_schema(conn)
+            row = await conn.fetchrow(
+                f"SELECT data FROM {self.memory_table} WHERE memory_key = $1",
+                key,
+            )
+        if not row:
+            return None
+        data = row["data"]
+        if isinstance(data, str):
+            return CrossSessionMemoryRecord(**json.loads(data))
+        return CrossSessionMemoryRecord(**data)
+
+    async def save(self, record: CrossSessionMemoryRecord) -> None:
+        record.touch()
+        key = make_cross_session_memory_key(record.tenant_id, record.user_id, record.namespace)
+        payload = record.model_dump_json()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            if self.schema_mode != "qualified" and self.db_schema:
+                await conn.execute(f'SET search_path TO "{self.db_schema}", public')
+            await self._ensure_schema(conn)
+            await conn.execute(
+                f"""
+                INSERT INTO {self.memory_table}
+                    (memory_key, tenant_id, user_id, namespace, updated_at, data)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                ON CONFLICT (memory_key) DO UPDATE SET
+                    tenant_id  = EXCLUDED.tenant_id,
+                    user_id    = EXCLUDED.user_id,
+                    namespace  = EXCLUDED.namespace,
+                    updated_at = EXCLUDED.updated_at,
+                    data       = EXCLUDED.data
+                """,
+                key,
+                record.tenant_id,
+                record.user_id,
+                record.namespace,
+                record.updated_at,
+                payload,
+            )
+
+    async def merge_entities(
+        self,
+        tenant_id: Optional[str],
+        user_id: str,
+        namespace: str,
+        entities: dict[str, str],
+        *,
+        max_entities: int,
+    ) -> CrossSessionMemoryRecord:
+        existing = await self.load(tenant_id, user_id, namespace)
+        if existing is None:
+            existing = CrossSessionMemoryRecord(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                namespace=namespace,
+            )
+        if entities:
+            merged = {**existing.entity_memory, **entities}
+            existing.entity_memory = _cap_entities(merged, max_entities)
+        await self.save(existing)
+        return existing
+
+
+class RedisCrossSessionMemoryStore:
+    """Redis-backed cross-session memory store."""
+
+    def __init__(
+        self,
+        *,
+        url: Optional[str] = None,
+        host: str = "localhost",
+        port: int = 6379,
+        db: int = 0,
+        password: Optional[str] = None,
+        key_prefix: str = "nexus:",
+        memory_key_template: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+        max_connections: int = 50,
+        client: Any = None,
+    ) -> None:
+        try:
+            import redis.asyncio  # noqa: F401
+        except ImportError as exc:
+            raise ImportError(
+                "redis is required for RedisCrossSessionMemoryStore. "
+                "Install with: pip install nexus-agent[redis]"
+            ) from exc
+
+        self.memory_key_template = memory_key_template or "{prefix}xmem:{memory_key}"
+        self.key_prefix = key_prefix
+        self.ttl_seconds = ttl_seconds
+        self._owns_client = client is None
+        if client is not None:
+            self._redis = client
+        elif url:
+            import redis.asyncio as aioredis
+
+            self._redis = aioredis.from_url(
+                url, max_connections=max_connections, decode_responses=True
+            )
+        else:
+            import redis.asyncio as aioredis
+
+            self._redis = aioredis.Redis(
+                host=host,
+                port=port,
+                db=db,
+                password=password,
+                max_connections=max_connections,
+                decode_responses=True,
+            )
+
+    async def close(self) -> None:
+        if self._owns_client and self._redis is not None:
+            await self._redis.aclose()
+            self._redis = None
+
+    def _storage_key(self, memory_key: str) -> str:
+        return self.memory_key_template.format(prefix=self.key_prefix, memory_key=memory_key)
+
+    async def load(
+        self,
+        tenant_id: Optional[str],
+        user_id: str,
+        namespace: str,
+    ) -> Optional[CrossSessionMemoryRecord]:
+        key = make_cross_session_memory_key(tenant_id, user_id, namespace)
+        raw = await self._redis.get(self._storage_key(key))
+        if not raw:
+            return None
+        return CrossSessionMemoryRecord(**json.loads(raw))
+
+    async def save(self, record: CrossSessionMemoryRecord) -> None:
+        record.touch()
+        key = make_cross_session_memory_key(record.tenant_id, record.user_id, record.namespace)
+        storage_key = self._storage_key(key)
+        await self._redis.set(storage_key, record.model_dump_json())
+        if self.ttl_seconds:
+            await self._redis.expire(storage_key, self.ttl_seconds)
 
     async def merge_entities(
         self,

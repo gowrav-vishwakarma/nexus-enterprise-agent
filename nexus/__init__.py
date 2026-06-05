@@ -54,7 +54,10 @@ from nexus.memory import (
     CrossSessionMemoryRecord,
     InMemoryCrossSessionMemoryStore,
     SQLiteCrossSessionMemoryStore,
+    PostgreSQLCrossSessionMemoryStore,
+    RedisCrossSessionMemoryStore,
 )
+from nexus.persistence import PersistenceBundle, PersistenceFactory, PersistenceResolver
 from nexus.multiagent.orchestrator import AgentOrchestrator
 from nexus.multiagent.results import AgentGroupResult
 from nexus.events import EventEmitted, NexusEventEmitter, NexusEventType, NexusEvent
@@ -96,6 +99,12 @@ __all__ = [
     "CrossSessionMemoryRecord",
     "InMemoryCrossSessionMemoryStore",
     "SQLiteCrossSessionMemoryStore",
+    "PostgreSQLCrossSessionMemoryStore",
+    "RedisCrossSessionMemoryStore",
+    # Persistence
+    "PersistenceBundle",
+    "PersistenceFactory",
+    "PersistenceResolver",
     # Multi-agent
     "AgentOrchestrator",
     "AgentGroupResult",
