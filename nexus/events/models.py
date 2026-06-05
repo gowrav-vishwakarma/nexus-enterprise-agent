@@ -43,6 +43,7 @@ class NexusEventType(str, Enum):
     LLM_CALL_STARTED = "llm.call_started"
     LLM_CALL_COMPLETED = "llm.call_completed"
     LLM_CALL_ERROR = "llm.call_error"
+    LLM_STREAM_CHUNK = "llm.stream.chunk"
     
     # Session events
     SESSION_CREATED = "session.created"
@@ -189,6 +190,17 @@ class LLMCallErrorEvent(NexusEvent):
     event_type: NexusEventType = NexusEventType.LLM_CALL_ERROR
     provider: str
     error: str
+
+
+class LLMStreamChunkEvent(NexusEvent):
+    """Emitted for each LLM streaming chunk during a streaming call."""
+
+    event_type: NexusEventType = NexusEventType.LLM_STREAM_CHUNK
+    provider: str
+    model: str
+    turn_index: int
+    content_delta: Optional[str] = None
+    has_tool_call_delta: bool = False
 
 
 class EventEmitted(NexusEvent):

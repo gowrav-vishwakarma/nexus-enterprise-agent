@@ -1,8 +1,9 @@
 """Agent Runner orchestrating the main agentic loop with RCS."""
 
-import asyncio
+import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, AsyncIterator, Optional, Union
 
 from nexus.config.agent import AgentConfig
@@ -21,9 +22,10 @@ from nexus.events.models import (
     LLMCallStartedEvent,
     LLMCallCompletedEvent,
     LLMCallErrorEvent,
+    LLMStreamChunkEvent,
 )
 from nexus.llm.proxy import LLMProxy
-from nexus.llm.response import LLMResponse, ToolCallRequest
+from nexus.llm.response import LLMResponse, TokenUsage, ToolCallRequest
 from nexus.llm.tool_format import tool_calls_to_openai_messages
 from nexus.llm.token_counter import TokenCounter
 from nexus.memory.curator import MemoryCurator
@@ -42,6 +44,54 @@ from nexus.tools.registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class _LoopState:
+    """Holds the terminal result produced by _run_loop."""
+
+    result: Optional[AgentRunResult] = None
+
+
+def _merge_tool_call_delta(accumulated: dict[int, dict[str, Any]], delta: dict[str, Any]) -> None:
+    """Merge an incremental tool-call chunk into accumulated state."""
+    index = delta.get("index", 0)
+    if index not in accumulated:
+        accumulated[index] = {"id": None, "name": "", "arguments": ""}
+    entry = accumulated[index]
+    if delta.get("id"):
+        entry["id"] = delta["id"]
+    if delta.get("name"):
+        entry["name"] = delta["name"]
+    if delta.get("arguments"):
+        entry["arguments"] += delta["arguments"] or ""
+    fn = delta.get("function")
+    if isinstance(fn, dict):
+        if fn.get("name"):
+            entry["name"] = fn["name"]
+        if fn.get("arguments"):
+            entry["arguments"] += fn["arguments"] or ""
+
+
+def _tool_calls_from_accumulated(accumulated: dict[int, dict[str, Any]]) -> list[ToolCallRequest]:
+    """Build ToolCallRequest list from merged streaming tool-call deltas."""
+    tool_calls: list[ToolCallRequest] = []
+    for idx in sorted(accumulated.keys()):
+        tc = accumulated[idx]
+        if not tc.get("id") or not tc.get("name"):
+            continue
+        try:
+            tool_input = json.loads(tc["arguments"]) if tc["arguments"] else {}
+        except json.JSONDecodeError:
+            tool_input = {}
+        tool_calls.append(
+            ToolCallRequest(
+                id=tc["id"],
+                tool_name=tc["name"],
+                tool_input=tool_input,
+            )
+        )
+    return tool_calls
+
+
 class AgentRunner:
     """Orchestrates single-agent execution loops, handling state, tools, and RCS."""
 
@@ -56,14 +106,13 @@ class AgentRunner:
     ):
         self.config = config
         self.tool_registry = tool_registry
-        
+
         # Load or initialize Session Manager
         if isinstance(storage_config, SessionManager):
             self.session_manager = storage_config
         elif isinstance(storage_config, SessionStorageConfig):
             self.session_manager = SessionManager.from_config(storage_config)
         else:
-            # Check if agent has storage config in config object
             if self.config.storage:
                 self.session_manager = SessionManager.from_config(self.config.storage)
             else:
@@ -73,7 +122,6 @@ class AgentRunner:
         self.cross_session_memory_store = cross_session_memory_store
         self._cross_session_entity_memory: dict[str, str] = {}
 
-        # Initialize Event System
         self.event_emitter = event_emitter or NexusEventEmitter()
         if self.config.trace_enabled and not self.event_emitter._sinks:
             if self.config.trace_sink == "stdout":
@@ -82,7 +130,6 @@ class AgentRunner:
                 from nexus.events.emitter import OTelEventSink
                 self.event_emitter.register_sink(OTelEventSink())
 
-        # Initialize LLM proxy, context builder, interceptor, and compactor
         self.llm_proxy = LLMProxy(self.config.llm)
         self.ctx_builder = ContextWindowBuilder(event_emitter=self.event_emitter)
         self.interceptor = ContextUpdateInterceptor(event_emitter=self.event_emitter)
@@ -93,7 +140,6 @@ class AgentRunner:
             event_emitter=self.event_emitter,
         )
 
-        # Memory curator (gated; no-op when memory is disabled)
         self.memory_curator = MemoryCurator(
             config=self.config.session_memory,
             llm_proxy=self.llm_proxy,
@@ -104,6 +150,10 @@ class AgentRunner:
             cross_session_memory_store=self.cross_session_memory_store,
             agent_name=self.config.name,
         )
+
+    def _resolve_stream(self, stream: Optional[bool]) -> bool:
+        """Resolve effective streaming mode from per-call override or config default."""
+        return self.config.stream_output if stream is None else stream
 
     async def _load_cross_session_entity_memory(self) -> dict[str, str]:
         """Load cross-session facts for injection into the system prompt."""
@@ -132,7 +182,7 @@ class AgentRunner:
         session = None
         if sid:
             session = await self.session_manager.load_session(sid)
-        
+
         if not session:
             session = await self.session_manager.create_session(
                 agent_id=self.config.name,
@@ -140,9 +190,8 @@ class AgentRunner:
                 tenant_id=self.run_context.tenant_id,
                 user_id=self.run_context.user_id,
             )
-            # Sync session_id back to run_context
             self.run_context.session_id = session.session_id
-            
+
         return session
 
     async def _maybe_curate_after_turn(
@@ -157,22 +206,150 @@ class AgentRunner:
             self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
         return session
 
-    async def run(
+    async def _call_llm(
         self,
+        *,
+        stream: bool,
+        messages: list[dict[str, Any]],
+        tool_schemas: Optional[list[dict[str, Any]]],
+        session: AgentSession,
+        turn_index: int,
+    ) -> AsyncIterator[Union[AgentStreamEvent, LLMResponse]]:
+        """Invoke the LLM. Yields AgentStreamEvent deltas when streaming, then LLMResponse."""
+        await self.event_emitter.emit(
+            LLMCallStartedEvent(
+                session_id=session.session_id,
+                agent_id=self.config.name,
+                turn_index=turn_index,
+                provider=self.config.llm.provider,
+                model=self.config.llm.model,
+                messages_count=len(messages),
+            )
+        )
+
+        llm_start = time.time()
+        tools = tool_schemas if tool_schemas else None
+
+        try:
+            if not stream:
+                llm_response = await self.llm_proxy.chat(messages=messages, tools=tools)
+                await self.event_emitter.emit(
+                    LLMCallCompletedEvent(
+                        session_id=session.session_id,
+                        agent_id=self.config.name,
+                        turn_index=turn_index,
+                        provider=self.config.llm.provider,
+                        model=self.config.llm.model,
+                        tokens_in=llm_response.usage.prompt_tokens,
+                        tokens_out=llm_response.usage.completion_tokens,
+                        duration_ms=int((time.time() - llm_start) * 1000),
+                    )
+                )
+                yield llm_response
+                return
+
+            raw_stream = await self.llm_proxy.chat_stream(messages=messages, tools=tools)
+            content_parts: list[str] = []
+            content_buffer: list[str] = []
+            tool_calls_acc: dict[int, dict[str, Any]] = {}
+            usage = TokenUsage()
+            finish_reason = "stop"
+
+            async for chunk in raw_stream:
+                if chunk.content:
+                    content_parts.append(chunk.content)
+                    content_buffer.append(chunk.content)
+
+                if chunk.tool_calls:
+                    content_buffer.clear()
+                    for tc_delta in chunk.tool_calls:
+                        _merge_tool_call_delta(tool_calls_acc, tc_delta)
+                    await self.event_emitter.emit(
+                        LLMStreamChunkEvent(
+                            session_id=session.session_id,
+                            agent_id=self.config.name,
+                            turn_index=turn_index,
+                            provider=self.config.llm.provider,
+                            model=self.config.llm.model,
+                            has_tool_call_delta=True,
+                        )
+                    )
+
+                if chunk.usage:
+                    usage = chunk.usage
+                if chunk.finish_reason:
+                    finish_reason = chunk.finish_reason
+
+            llm_response = LLMResponse(
+                content="".join(content_parts) if content_parts else None,
+                tool_calls=_tool_calls_from_accumulated(tool_calls_acc),
+                usage=usage,
+                finish_reason=finish_reason,
+                raw_response={},
+            )
+
+            await self.event_emitter.emit(
+                LLMCallCompletedEvent(
+                    session_id=session.session_id,
+                    agent_id=self.config.name,
+                    turn_index=turn_index,
+                    provider=self.config.llm.provider,
+                    model=self.config.llm.model,
+                    tokens_in=llm_response.usage.prompt_tokens,
+                    tokens_out=llm_response.usage.completion_tokens,
+                    duration_ms=int((time.time() - llm_start) * 1000),
+                )
+            )
+
+            if not llm_response.tool_calls:
+                for delta in content_buffer:
+                    await self.event_emitter.emit(
+                        LLMStreamChunkEvent(
+                            session_id=session.session_id,
+                            agent_id=self.config.name,
+                            turn_index=turn_index,
+                            provider=self.config.llm.provider,
+                            model=self.config.llm.model,
+                            content_delta=delta,
+                            has_tool_call_delta=False,
+                        )
+                    )
+                    yield AgentStreamEvent(
+                        event_type="content",
+                        content=delta,
+                        data={"agent_id": self.config.name, "turn_index": turn_index},
+                    )
+
+            yield llm_response
+
+        except Exception as e:
+            await self.event_emitter.emit(
+                LLMCallErrorEvent(
+                    session_id=session.session_id,
+                    agent_id=self.config.name,
+                    turn_index=turn_index,
+                    provider=self.config.llm.provider,
+                    error=str(e),
+                )
+            )
+            raise
+
+    async def _run_loop(
+        self,
+        stream: bool,
+        state: _LoopState,
         user_message: str,
         session_id: Optional[str] = None,
         initial_context: Optional[dict[str, Any]] = None,
-    ) -> AgentRunResult:
-        """Run the single agent turn-loop synchronously (awaiting entire flow)."""
+    ) -> AsyncIterator[AgentStreamEvent]:
+        """Shared agent loop. Yields AgentStreamEvents when stream=True."""
         session = await self._get_or_create_session(session_id)
         self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
 
-        # Set initial metadata if provided
         if initial_context:
             session.metadata.update(initial_context)
             await self.session_manager.save_session(session)
 
-        # Emit Agent Run Started Event
         await self.event_emitter.emit(
             AgentStartedEvent(
                 agent_name=self.config.name,
@@ -181,6 +358,13 @@ class AgentRunner:
                 user_message=user_message,
             )
         )
+
+        if stream:
+            yield AgentStreamEvent(
+                event_type="event",
+                content="Agent started execution.",
+                data={"agent_id": self.config.name, "session_id": session.session_id},
+            )
 
         start_time = time.time()
         turn_index = 0
@@ -191,12 +375,9 @@ class AgentRunner:
         final_resp: Optional[str] = None
 
         try:
-            # We seed the conversation loop with user_message if this is the first turn
             current_user_message = user_message
 
             while turn_index < self.config.turns.max_turns:
-                # ── 1. BUILD CONTEXT WINDOW ──
-                # Build prompt with tagged unsummarized, plain summarized, or omitted dropped results
                 messages = self.ctx_builder.build(
                     session=session,
                     agent_config=self.config,
@@ -206,18 +387,15 @@ class AgentRunner:
                 )
                 current_tokens = TokenCounter.count_messages(messages, self.config.llm.model)
 
-                # ── 2. FALLBACK COMPACTOR ──
                 if self.config.rcs.fallback_compactor.enabled:
                     if await self.compactor.should_trigger(session, current_tokens):
                         await self.compactor.compact(session, turn_index)
-                        # Rebuild messages list with newly compacted responses
                         messages = self.ctx_builder.build(
                             session=session,
                             agent_config=self.config,
                             current_user_message=current_user_message if turn_index == 0 else None,
                         )
 
-                # Emit Turn Started Event
                 await self.event_emitter.emit(
                     TurnStartedEvent(
                         session_id=session.session_id,
@@ -227,58 +405,35 @@ class AgentRunner:
                     )
                 )
 
-                # ── 3. CALL LLM ──
+                if stream:
+                    yield AgentStreamEvent(
+                        event_type="event",
+                        content=f"Turn {turn_index} started.",
+                        data={"agent_id": self.config.name, "turn_index": turn_index},
+                    )
+
                 tool_schemas = self.tool_registry.get_tool_schemas_for_llm(
                     plugin_names=self.config.tool_plugins,
                     rcs_config=self.config.rcs,
                 )
 
-                await self.event_emitter.emit(
-                    LLMCallStartedEvent(
-                        session_id=session.session_id,
-                        agent_id=self.config.name,
-                        turn_index=turn_index,
-                        provider=self.config.llm.provider,
-                        model=self.config.llm.model,
-                        messages_count=len(messages),
-                    )
-                )
+                llm_response: Optional[LLMResponse] = None
+                async for item in self._call_llm(
+                    stream=stream,
+                    messages=messages,
+                    tool_schemas=tool_schemas,
+                    session=session,
+                    turn_index=turn_index,
+                ):
+                    if isinstance(item, AgentStreamEvent):
+                        yield item
+                    else:
+                        llm_response = item
 
-                llm_start = time.time()
-                try:
-                    llm_response = await self.llm_proxy.chat(
-                        messages=messages,
-                        tools=tool_schemas if tool_schemas else None,
-                    )
-                    
-                    total_tokens_in += llm_response.usage.prompt_tokens
-                    total_tokens_out += llm_response.usage.completion_tokens
-                    
-                    await self.event_emitter.emit(
-                        LLMCallCompletedEvent(
-                            session_id=session.session_id,
-                            agent_id=self.config.name,
-                            turn_index=turn_index,
-                            provider=self.config.llm.provider,
-                            model=self.config.llm.model,
-                            tokens_in=llm_response.usage.prompt_tokens,
-                            tokens_out=llm_response.usage.completion_tokens,
-                            duration_ms=int((time.time() - llm_start) * 1000),
-                        )
-                    )
-                except Exception as e:
-                    await self.event_emitter.emit(
-                        LLMCallErrorEvent(
-                            session_id=session.session_id,
-                            agent_id=self.config.name,
-                            turn_index=turn_index,
-                            provider=self.config.llm.provider,
-                            error=str(e),
-                        )
-                    )
-                    raise
+                assert llm_response is not None
+                total_tokens_in += llm_response.usage.prompt_tokens
+                total_tokens_out += llm_response.usage.completion_tokens
 
-                # ── 4. STOP CONDITIONS: save final-response turn, then break ──
                 if not llm_response.tool_calls and self.config.turns.stop_on_empty_tool_calls:
                     final_resp = llm_response.content
                     final_turn = TurnRecord(
@@ -297,13 +452,11 @@ class AgentRunner:
                     turn_index += 1
                     break
 
-                # ── 5. PROCESS TOOL CALLS ──
                 turn_tool_records = []
                 tokens_saved_this_turn = 0
                 all_updates = []
 
                 for tc_req in llm_response.tool_calls:
-                    # 5a. Intercept _context_updates before tool executes
                     clean_args, updates = await self.interceptor.intercept(
                         tool_name=tc_req.tool_name,
                         tool_input=tc_req.tool_input,
@@ -314,14 +467,24 @@ class AgentRunner:
                     )
                     all_updates.extend([u.model_dump() for u in updates])
                     tokens_saved_this_turn += sum(
-                        max(0, session.find_tc(u.tc_id).tokens_raw - len(u.summary.split()))  # Rough estimation
+                        max(0, session.find_tc(u.tc_id).tokens_raw - len(u.summary.split()))
                         for u in updates if session.find_tc(u.tc_id)
                     )
 
-                    # 5b. Assign Turn Index and TC ID
                     tc_id = f"TC{session.next_tc_index()}"
 
-                    # Emit Tool call start event
+                    if stream:
+                        yield AgentStreamEvent(
+                            event_type="tool_call",
+                            data={
+                                "agent_id": self.config.name,
+                                "turn_index": turn_index,
+                                "tool_name": tc_req.tool_name,
+                                "tool_args": clean_args,
+                                "tc_id": tc_id,
+                            },
+                        )
+
                     await self.event_emitter.emit(
                         ToolCallStartedEvent(
                             session_id=session.session_id,
@@ -334,8 +497,6 @@ class AgentRunner:
 
                     tool_start = time.time()
                     try:
-                        # 5c. Execute Tool
-                        # Tool name is plugin_name.tool_name
                         parts = tc_req.tool_name.split(".")
                         plugin = parts[0]
                         tool = parts[1] if len(parts) > 1 else ""
@@ -370,7 +531,18 @@ class AgentRunner:
                             )
                         )
 
-                    # 5d. Store ToolCallRecord
+                    if stream:
+                        yield AgentStreamEvent(
+                            event_type="tool_result",
+                            content=result_str,
+                            data={
+                                "agent_id": self.config.name,
+                                "turn_index": turn_index,
+                                "tool_name": tc_req.tool_name,
+                                "tc_id": tc_id,
+                            },
+                        )
+
                     tc_record = ToolCallRecord(
                         tc_id=tc_id,
                         tc_index=session.tc_counter,
@@ -381,7 +553,6 @@ class AgentRunner:
                     )
                     turn_tool_records.append(tc_record)
 
-                # Format LLM messages safely (handling serialization)
                 llm_messages_to_save = [
                     {
                         "role": "assistant",
@@ -394,7 +565,6 @@ class AgentRunner:
                     }
                 ]
 
-                # ── 6. BUILD AND SAVE TURN RECORD ──
                 turn_record = TurnRecord(
                     turn_index=turn_index,
                     user_message=current_user_message if turn_index == 0 else None,
@@ -407,12 +577,9 @@ class AgentRunner:
                     duration_ms=int((time.time() - start_time) * 1000),
                     status="completed",
                 )
-                
-                await self.session_manager.append_turn(session.session_id, turn_record)
-                
-                # Fetch fresh session state from persistence to reflect append
-                session = await self.session_manager.load_session(session.session_id)
 
+                await self.session_manager.append_turn(session.session_id, turn_record)
+                session = await self.session_manager.load_session(session.session_id)
                 session = await self._maybe_curate_after_turn(session, turn_index)
 
                 await self.event_emitter.emit(
@@ -429,7 +596,7 @@ class AgentRunner:
                 )
 
                 turn_index += 1
-                
+
             if turn_index >= self.config.turns.max_turns:
                 status = "max_turns_reached"
 
@@ -444,9 +611,13 @@ class AgentRunner:
                     error=error_msg,
                 )
             )
+            if stream:
+                yield AgentStreamEvent(
+                    event_type="error",
+                    content=error_msg,
+                    data={"agent_id": self.config.name, "status": "error"},
+                )
 
-        # End-of-run memory curation (gated). Reload first so the curator sees the
-        # final turn, then guard against double-curating the same turn.
         if status != "error" and self.memory_curator.active:
             try:
                 refreshed = await self.session_manager.load_session(session.session_id)
@@ -461,7 +632,6 @@ class AgentRunner:
 
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Pull final response — prefer the directly tracked value; fall back to session scan
         if final_resp is None and session.turns:
             last_turn = session.turns[-1]
             for msg in last_turn.llm_messages:
@@ -479,6 +649,7 @@ class AgentRunner:
             status=status,
             error=error_msg,
         )
+        state.result = run_result
 
         await self.event_emitter.emit(
             AgentCompletedEvent(
@@ -491,25 +662,59 @@ class AgentRunner:
             )
         )
 
-        return run_result
+        if stream:
+            yield AgentStreamEvent(
+                event_type="final_response",
+                content=final_resp,
+                data=run_result.model_dump(),
+            )
+
+    async def run(
+        self,
+        user_message: str,
+        session_id: Optional[str] = None,
+        initial_context: Optional[dict[str, Any]] = None,
+        stream: Optional[bool] = None,
+    ) -> AgentRunResult:
+        """Run the agent loop and return the complete result (non-streaming mode)."""
+        if self._resolve_stream(stream):
+            raise ValueError(
+                "Streaming mode enabled; use run_stream() or pass stream=False."
+            )
+
+        state = _LoopState()
+        async for _ in self._run_loop(
+            stream=False,
+            state=state,
+            user_message=user_message,
+            session_id=session_id,
+            initial_context=initial_context,
+        ):
+            pass
+
+        assert state.result is not None
+        return state.result
 
     async def run_stream(
         self,
         user_message: str,
         session_id: Optional[str] = None,
+        stream: Optional[bool] = None,
     ) -> AsyncIterator[AgentStreamEvent]:
-        """Run the single agent loop in streaming mode, yielding tokens and events."""
-        # Yield start event placeholder
-        yield AgentStreamEvent(event_type="event", content="Agent started execution.")
-        
-        # Simple fallback execution utilizing synchronous chat + streaming simulations
-        # For simplicity and robust usage, execute chat and yield events.
-        result = await self.run(user_message, session_id)
-        if result.final_response:
-            yield AgentStreamEvent(event_type="content", content=result.final_response)
-        
-        yield AgentStreamEvent(
-            event_type="final_response",
-            content=result.final_response,
-            data=result.model_dump(),
-        )
+        """Run the agent loop in streaming mode, yielding incremental events."""
+        if not self._resolve_stream(stream):
+            raise ValueError(
+                "Non-streaming mode; use run() or pass stream=True."
+            )
+
+        state = _LoopState()
+        async for event in self._run_loop(
+            stream=True,
+            state=state,
+            user_message=user_message,
+            session_id=session_id,
+            initial_context=None,
+        ):
+            yield event
+
+        assert state.result is not None

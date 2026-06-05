@@ -85,6 +85,10 @@ class AgentConfig(BaseModel):
     )
     trace_enabled: bool = Field(default=False, description="Enable observability tracing")
     trace_sink: Literal["stdout", "otel"] = Field(default="stdout", description="Observability trace target")
+    stream_output: bool = Field(
+        default=False,
+        description="Default execution mode: stream AgentStreamEvents vs return blocking AgentRunResult",
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Arbitrary metadata for this agent"
     )
@@ -123,6 +127,10 @@ class AgentGroupConfig(BaseModel):
     rcs: RuntimeContextSummarizerConfig = Field(
         default_factory=RuntimeContextSummarizerConfig,
         description="RCS configuration for group sessions",
+    )
+    stream_output: bool = Field(
+        default=False,
+        description="Default execution mode: stream AgentStreamEvents vs return blocking AgentGroupResult",
     )
 
     model_config = {"arbitrary_types_allowed": True}

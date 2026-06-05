@@ -274,6 +274,35 @@ await runner.run(
 
 `initial_context` is **per runner / per session**, not propagated across group members. To pass structured state through a pipeline, embed it in the handoff message or put it in `RunContext.metadata`.
 
+### Streaming vs blocking output
+
+Each run is either **streaming** or **non-streaming** for the whole agent loop (LLM calls, tools, session persistence). Set the default on config; override per call.
+
+```python
+config = AgentConfig(
+    name="assistant",
+    llm=llm_config,
+    stream_output=False,  # default: blocking AgentRunResult
+)
+
+# Blocking (JSON APIs, batch jobs)
+result = await runner.run("Hello", stream=False)
+
+# Streaming (SSE, live UIs) — yields AgentStreamEvent chunks
+async for event in runner.run_stream("Hello", stream=True):
+    if event.event_type == "content":
+        print(event.content, end="", flush=True)
+    elif event.event_type == "final_response":
+        result = AgentRunResult(**event.data)
+```
+
+| Method | Resolved mode | Returns |
+|--------|---------------|---------|
+| `run(..., stream=None)` | `config.stream_output` unless overridden | `AgentRunResult` |
+| `run_stream(..., stream=None)` | same resolution | `AsyncIterator[AgentStreamEvent]` |
+
+`AgentGroupConfig.stream_output` and `AgentOrchestrator.run_stream()` follow the same pattern for multi-agent groups. The SaaS example accepts `"stream": true` on `ChatRequest` and returns Server-Sent Events from `/v1/chat`.
+
 ---
 
 ## Per-agent LLM providers

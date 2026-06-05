@@ -464,6 +464,7 @@ SHARED_CROSS_SESSION_MEMORY_STORE = SQLiteCrossSessionMemoryStore(
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    stream: bool = False
 
 
 # Storage is per-tenant runtime wiring on the runner/orchestrator, not AgentConfig.
@@ -501,9 +502,23 @@ async def chat(
         cross_session_memory_store=SHARED_CROSS_SESSION_MEMORY_STORE,
     )
 
+    use_stream = body.stream or agent_config.stream_output
+
+    if use_stream:
+        async def event_generator():
+            async for event in runner.run_stream(
+                user_message=body.message,
+                session_id=run_context.session_id,
+                stream=True if body.stream else None,
+            ):
+                yield f"data: {event.model_dump_json()}\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
     result = await runner.run(
         user_message=body.message,
         session_id=run_context.session_id,
+        stream=False if body.stream is False else None,
     )
 
     return {
@@ -573,13 +588,27 @@ async def run_multi_agent_group(
         cross_session_memory_store=SHARED_CROSS_SESSION_MEMORY_STORE,
     )
 
+    use_stream = body.stream or group_config.stream_output
+
+    if use_stream:
+        async def group_event_generator():
+            async for event in orchestrator.run_stream(
+                user_message=body.message,
+                session_id=run_context.session_id,
+                stream=True if body.stream else None,
+            ):
+                yield f"data: {event.model_dump_json()}\n\n"
+
+        return StreamingResponse(group_event_generator(), media_type="text/event-stream")
+
     result = await orchestrator.run(
         user_message=body.message,
         session_id=run_context.session_id,
+        stream=False if body.stream is False else None,
     )
 
     return {
-        "session_id": result.group_session_id,
+        "session_id": run_context.session_id,
         "response": result.final_response,
         "status": result.status,
         "turns_used": result.turns_used,
