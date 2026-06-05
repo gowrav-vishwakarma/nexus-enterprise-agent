@@ -102,29 +102,203 @@ uv run python examples/orchestration/run_team.py "Analyze Q4 revenue"
 
 ---
 
-## Minimal example
+## Two-agent SaaS sketch
+
+**The examples below are the same support team expressed two ways** — pick YAML manifests or programmatic Python config. Both use a supervisor group (`lead` delegates to `specialist`), one dummy tool per agent, SQLite storage, and a per-request FastAPI endpoint scoped by tenant and user.
+
+| | YAML way | Programmatic way |
+|---|----------|------------------|
+| Define agents & group | `team.yaml` | `AgentConfig` + `AgentGroupConfig` in Python |
+| Load at startup | `OrchestrationManifest.load(...)` | `build_support_team()` factory |
+| Run per request | `OrchestrationRuntime.from_manifest(...)` | `AgentOrchestrator(...)` |
+
+**Shared — `myapp/tools.py`** (identical for both ways)
 
 ```python
-import asyncio
-from nexus import OrchestrationManifest, OrchestrationRuntime, RunContext
+from nexus.tools.decorators import tool, tool_plugin
 
-async def main():
-    manifest = OrchestrationManifest.load("examples/orchestration/research_team.yaml")
-    runtime = OrchestrationRuntime.from_manifest(
-        manifest,
-        run_context=RunContext(
-            tenant_id="demo",
-            user_id="user-1",
-            session_id="chat-1",  # set before building runtime for teams
-        ),
-    )
-    result = await runtime.run("Analyze Q4 revenue")
-    print(result.final_response)
+@tool_plugin("lookup")
+class LookupPlugin:
+    @tool()
+    def lookup_account(self, account_id: str) -> str:
+        """Look up a customer account."""
+        return f"Account {account_id}: active, plan=pro"
 
-asyncio.run(main())
+@tool_plugin("echo")
+class EchoPlugin:
+    @tool()
+    def echo(self, message: str) -> str:
+        """Echo a message for confirmation."""
+        return f"Echo: {message}"
 ```
 
-Every parameter (optional fields and defaults) is documented in [docs/assets/complete-manifest.annotated.yaml](docs/assets/complete-manifest.annotated.yaml) and [docs/assets/complete-run.annotated.py](docs/assets/complete-run.annotated.py).
+### Way 1 — YAML manifest
+
+**`team.yaml`**
+
+```yaml
+version: "1"
+root: support_team
+
+defaults:
+  llm:
+    provider: openai
+    model: ${ENV:OPENAI_MODEL|gpt-4o-mini}
+    api_key: ${ENV:OPENAI_API_KEY}
+
+storage:
+  adapter: sqlite
+  adapter_config:
+    data_root: ./data
+
+plugins:
+  lookup: myapp.tools.LookupPlugin
+  echo: myapp.tools.EchoPlugin
+
+agents:
+  lead:
+    tool_plugins: [lookup]
+    persona:
+      role: Support lead
+      goal: Route tickets and look up accounts
+
+  specialist:
+    tool_plugins: [echo]
+    persona:
+      role: Specialist
+      goal: Confirm technical details with the echo tool
+
+groups:
+  support_team:
+    pattern: supervisor
+    members: [lead, specialist]   # lead supervises; specialist is delegated to
+```
+
+**`myapp/app_yaml.py`**
+
+```python
+from uuid import uuid4
+from fastapi import FastAPI, Header
+from pydantic import BaseModel
+from nexus import OrchestrationManifest, OrchestrationRuntime, RunContext
+
+MANIFEST = OrchestrationManifest.load("team.yaml")
+app = FastAPI()
+
+class ChatIn(BaseModel):
+    message: str
+    session_id: str | None = None
+
+@app.post("/v1/chat")
+async def chat(
+    body: ChatIn,
+    tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    user_id: str = Header("demo-user", alias="X-User-ID"),
+):
+    session_id = body.session_id or str(uuid4())
+    runtime = OrchestrationRuntime.from_manifest(
+        MANIFEST,
+        run_context=RunContext(tenant_id=tenant_id, user_id=user_id, session_id=session_id),
+    )
+    result = await runtime.run(body.message)
+    return {"session_id": session_id, "response": result.final_response}
+```
+
+### Way 2 — Programmatic Python
+
+**`myapp/team.py`** — same agents and group as `team.yaml`
+
+```python
+import os
+from pydantic import SecretStr
+from nexus import AgentConfig, AgentGroupConfig, AgentPersonaConfig, LLMProviderConfig
+
+LLM = LLMProviderConfig(
+    provider="openai",
+    model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+    api_key=SecretStr(os.environ["OPENAI_API_KEY"]),
+)
+
+def build_support_team() -> AgentGroupConfig:
+    lead = AgentConfig(
+        name="lead",
+        llm=LLM,
+        tool_plugins=["lookup"],
+        persona=AgentPersonaConfig(
+            role="Support lead",
+            goal="Route tickets and look up accounts",
+        ),
+    )
+    specialist = AgentConfig(
+        name="specialist",
+        llm=LLM,
+        tool_plugins=["echo"],
+        persona=AgentPersonaConfig(
+            role="Specialist",
+            goal="Confirm technical details with the echo tool",
+        ),
+    )
+    return AgentGroupConfig(
+        name="support_team",
+        pattern="supervisor",
+        members=[lead, specialist],   # lead supervises; specialist is delegated to
+    )
+```
+
+**`myapp/app_programmatic.py`**
+
+```python
+from uuid import uuid4
+from fastapi import FastAPI, Header
+from pydantic import BaseModel
+from nexus import AgentOrchestrator, RunContext, SessionStorageConfig
+from nexus.session.manager import SessionManager
+from nexus.tools.registry import ToolRegistry
+from myapp.team import build_support_team
+from myapp.tools import LookupPlugin, EchoPlugin
+
+GROUP = build_support_team()
+REGISTRY = ToolRegistry()
+REGISTRY.register_plugin(LookupPlugin())
+REGISTRY.register_plugin(EchoPlugin())
+STORAGE = SessionManager.from_config(SessionStorageConfig(
+    adapter="sqlite",
+    adapter_config={"data_root": "./data"},
+))
+
+app = FastAPI()
+
+class ChatIn(BaseModel):
+    message: str
+    session_id: str | None = None
+
+@app.post("/v1/chat")
+async def chat(
+    body: ChatIn,
+    tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    user_id: str = Header("demo-user", alias="X-User-ID"),
+):
+    session_id = body.session_id or str(uuid4())
+    orchestrator = AgentOrchestrator(
+        config=GROUP,
+        tool_registry=REGISTRY,
+        storage_config=STORAGE,
+        run_context=RunContext(tenant_id=tenant_id, user_id=user_id, session_id=session_id),
+    )
+    result = await orchestrator.run(body.message, session_id=session_id)
+    return {"session_id": session_id, "response": result.final_response}
+```
+
+**Same request for either app**
+
+```bash
+curl -X POST http://localhost:8000/v1/chat \
+  -H "X-Tenant-ID: acme" -H "X-User-ID: user-42" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Look up account acme-99 and confirm the plan"}'
+```
+
+Full annotated options: [docs/assets/complete-manifest.annotated.yaml](docs/assets/complete-manifest.annotated.yaml), [docs/assets/complete-run.annotated.py](docs/assets/complete-run.annotated.py), [docs/getting-started-python.md](docs/getting-started-python.md). Production SaaS (plan tiers, per-tenant storage): [examples/nexus_saas_api.py](examples/nexus_saas_api.py).
 
 ---
 
