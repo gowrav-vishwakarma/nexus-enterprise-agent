@@ -434,7 +434,8 @@ class AgentRunner:
             )
 
         start_time = time.time()
-        turn_index = 0
+        session_turn_index = len(session.turns)
+        run_turn_index = 0
         status = "completed"
         error_msg = None
         total_tokens_in = 0
@@ -444,11 +445,11 @@ class AgentRunner:
         try:
             current_user_message = user_message
 
-            while turn_index < self.config.turns.max_turns:
+            while run_turn_index < self.config.turns.max_turns:
                 messages = self.ctx_builder.build(
                     session=session,
                     agent_config=self.config,
-                    current_user_message=current_user_message if turn_index == 0 else None,
+                    current_user_message=current_user_message if run_turn_index == 0 else None,
                     token_budget=self.config.llm.context_window_tokens,
                     cross_session_entity_memory=self._cross_session_entity_memory,
                     skills_catalog=self._skills_catalog,
@@ -458,11 +459,11 @@ class AgentRunner:
 
                 if self.config.rcs.fallback_compactor.enabled:
                     if await self.compactor.should_trigger(session, current_tokens):
-                        await self.compactor.compact(session, turn_index)
+                        await self.compactor.compact(session, session_turn_index)
                         messages = self.ctx_builder.build(
                             session=session,
                             agent_config=self.config,
-                            current_user_message=current_user_message if turn_index == 0 else None,
+                            current_user_message=current_user_message if run_turn_index == 0 else None,
                             skills_catalog=self._skills_catalog,
                             explicit_skills_content=self._explicit_skills_content,
                         )
@@ -471,16 +472,16 @@ class AgentRunner:
                     TurnStartedEvent(
                         session_id=session.session_id,
                         agent_id=self.config.name,
-                        turn_index=turn_index,
-                        user_message=current_user_message if turn_index == 0 else None,
+                        turn_index=session_turn_index,
+                        user_message=current_user_message if run_turn_index == 0 else None,
                     )
                 )
 
                 if stream:
                     yield AgentStreamEvent(
                         event_type="event",
-                        content=f"Turn {turn_index} started.",
-                        data={"agent_id": self.config.name, "turn_index": turn_index},
+                        content=f"Turn {session_turn_index} started.",
+                        data={"agent_id": self.config.name, "turn_index": session_turn_index},
                     )
 
                 tool_schemas = self._filter_tool_schemas(
@@ -496,7 +497,7 @@ class AgentRunner:
                     messages=messages,
                     tool_schemas=tool_schemas,
                     session=session,
-                    turn_index=turn_index,
+                    turn_index=session_turn_index,
                 ):
                     if isinstance(item, AgentStreamEvent):
                         yield item
@@ -510,8 +511,8 @@ class AgentRunner:
                 if not llm_response.tool_calls and self.config.turns.stop_on_empty_tool_calls:
                     final_resp = llm_response.content
                     final_turn = TurnRecord(
-                        turn_index=turn_index,
-                        user_message=current_user_message if turn_index == 0 else None,
+                        turn_index=session_turn_index,
+                        user_message=current_user_message if run_turn_index == 0 else None,
                         llm_messages=[{"role": "assistant", "content": llm_response.content}],
                         tool_calls=[],
                         total_tokens_in=llm_response.usage.prompt_tokens,
@@ -527,8 +528,9 @@ class AgentRunner:
                     session = await self.session_manager.load_session(
                         session.session_id, **self._session_lookup_kwargs(session)
                     )
-                    session = await self._maybe_curate_after_turn(session, turn_index)
-                    turn_index += 1
+                    session = await self._maybe_curate_after_turn(session, session_turn_index)
+                    session_turn_index += 1
+                    run_turn_index += 1
                     break
 
                 turn_tool_records = []
@@ -540,7 +542,7 @@ class AgentRunner:
                         tool_name=tc_req.tool_name,
                         tool_input=tc_req.tool_input,
                         session=session,
-                        current_turn_index=turn_index,
+                        current_turn_index=session_turn_index,
                         storage_adapter=self.session_manager,
                         rcs_config=self.config.rcs,
                     )
@@ -557,7 +559,7 @@ class AgentRunner:
                             event_type="tool_call",
                             data={
                                 "agent_id": self.config.name,
-                                "turn_index": turn_index,
+                                "turn_index": session_turn_index,
                                 "tool_name": tc_req.tool_name,
                                 "tool_args": clean_args,
                                 "tc_id": tc_id,
@@ -568,7 +570,7 @@ class AgentRunner:
                         ToolCallStartedEvent(
                             session_id=session.session_id,
                             agent_id=self.config.name,
-                            turn_index=turn_index,
+                            turn_index=session_turn_index,
                             tool_name=tc_req.tool_name,
                             tool_args=clean_args,
                         )
@@ -592,7 +594,7 @@ class AgentRunner:
                             ToolCallCompletedEvent(
                                 session_id=session.session_id,
                                 agent_id=self.config.name,
-                                turn_index=turn_index,
+                                turn_index=session_turn_index,
                                 tool_name=tc_req.tool_name,
                                 tool_output_length=len(result_str),
                                 duration_ms=int((time.time() - tool_start) * 1000),
@@ -604,7 +606,7 @@ class AgentRunner:
                             ToolCallErrorEvent(
                                 session_id=session.session_id,
                                 agent_id=self.config.name,
-                                turn_index=turn_index,
+                                turn_index=session_turn_index,
                                 tool_name=tc_req.tool_name,
                                 error=str(e),
                             )
@@ -616,7 +618,7 @@ class AgentRunner:
                             content=result_str,
                             data={
                                 "agent_id": self.config.name,
-                                "turn_index": turn_index,
+                                "turn_index": session_turn_index,
                                 "tool_name": tc_req.tool_name,
                                 "tc_id": tc_id,
                             },
@@ -645,8 +647,8 @@ class AgentRunner:
                 ]
 
                 turn_record = TurnRecord(
-                    turn_index=turn_index,
-                    user_message=current_user_message if turn_index == 0 else None,
+                    turn_index=session_turn_index,
+                    user_message=current_user_message if run_turn_index == 0 else None,
                     llm_messages=llm_messages_to_save,
                     tool_calls=turn_tool_records,
                     context_updates_received=all_updates,
@@ -665,13 +667,13 @@ class AgentRunner:
                 session = await self.session_manager.load_session(
                     session.session_id, **self._session_lookup_kwargs(session)
                 )
-                session = await self._maybe_curate_after_turn(session, turn_index)
+                session = await self._maybe_curate_after_turn(session, session_turn_index)
 
                 await self.event_emitter.emit(
                     TurnCompletedEvent(
                         session_id=session.session_id,
                         agent_id=self.config.name,
-                        turn_index=turn_index,
+                        turn_index=session_turn_index,
                         tool_calls_count=len(turn_tool_records),
                         tokens_in=llm_response.usage.prompt_tokens,
                         tokens_out=llm_response.usage.completion_tokens,
@@ -680,9 +682,10 @@ class AgentRunner:
                     )
                 )
 
-                turn_index += 1
+                session_turn_index += 1
+                run_turn_index += 1
 
-            if turn_index >= self.config.turns.max_turns:
+            if run_turn_index >= self.config.turns.max_turns:
                 status = "max_turns_reached"
 
         except Exception as e:
@@ -710,7 +713,7 @@ class AgentRunner:
                 )
                 if refreshed is not None:
                     session = refreshed
-                final_turn_idx = max(turn_index - 1, 0)
+                final_turn_idx = max(session_turn_index - 1, 0)
                 if self.memory_curator.should_trigger(final_turn_idx, at_end=True):
                     await self.memory_curator.curate(session, final_turn_idx)
                     self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
@@ -728,7 +731,7 @@ class AgentRunner:
         run_result = AgentRunResult(
             session_id=session.session_id,
             final_response=final_resp,
-            turns_used=turn_index,
+            turns_used=run_turn_index,
             total_tokens_in=total_tokens_in,
             total_tokens_out=total_tokens_out,
             total_tokens_saved_by_rcs=session.total_tokens_saved_by_rcs,
@@ -742,7 +745,7 @@ class AgentRunner:
             AgentCompletedEvent(
                 session_id=session.session_id,
                 agent_id=self.config.name,
-                turns_used=turn_index,
+                turns_used=run_turn_index,
                 total_tokens_in=total_tokens_in,
                 total_tokens_out=total_tokens_out,
                 total_tokens_saved_by_rcs=session.total_tokens_saved_by_rcs,

@@ -515,6 +515,19 @@ class TenantPersistenceResolver:
 
 TENANT_PERSISTENCE_RESOLVER = TenantPersistenceResolver()
 
+# In-memory adapters are per-instance; reuse one SessionManager per tenant so
+# chat and session GET endpoints see the same data within a running process.
+_SESSION_MANAGERS: dict[str, SessionManager] = {}
+
+
+def get_shared_session_manager(
+    tenant_id: str,
+    storage_config: SessionStorageConfig,
+) -> SessionManager:
+    if tenant_id not in _SESSION_MANAGERS:
+        _SESSION_MANAGERS[tenant_id] = SessionManager.from_config(storage_config)
+    return _SESSION_MANAGERS[tenant_id]
+
 
 def get_persistence_bundle(tenant_id: str, user_id: str) -> PersistenceBundle:
     return PersistenceFactory.from_resolver(
@@ -561,10 +574,15 @@ async def chat(
 
     persistence = get_persistence_bundle(tenant_ctx.tenant_id, x_user_id)
 
+    session_manager = get_shared_session_manager(
+        tenant_ctx.tenant_id,
+        tenant_ctx.storage_config,
+    )
+
     runner = AgentRunner(
         config=agent_config,
         tool_registry=SHARED_TOOL_REGISTRY,
-        storage_config=tenant_ctx.storage_config,
+        storage_config=session_manager,
         run_context=run_context,
         cross_session_memory_store=persistence.cross_session_memory_store,
     )
@@ -598,6 +616,24 @@ async def chat(
     }
 
 
+@app.get("/v1/sessions/{session_id}")
+async def get_session(
+    session_id: str,
+    tenant_ctx: ResolvedTenant = Depends(get_resolved_tenant),
+    x_user_id: str = Header(default="demo-user", alias="X-User-ID"),
+):
+    """Return the full persisted session JSON (turns, tool calls, memory, RCS totals)."""
+    manager = get_shared_session_manager(tenant_ctx.tenant_id, tenant_ctx.storage_config)
+    session = await manager.load_session(
+        session_id,
+        tenant_id=tenant_ctx.tenant_id,
+        user_id=x_user_id,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session.model_dump()
+
+
 @app.get("/v1/sessions/{root_session_id}/group")
 async def get_session_group(
     root_session_id: str,
@@ -611,7 +647,7 @@ async def get_session_group(
     include_internal: bool = Query(default=False),
 ):
     """Load all sub-agent sessions for a root chat session id as a nested tree."""
-    manager = SessionManager.from_config(tenant_ctx.storage_config)
+    manager = get_shared_session_manager(tenant_ctx.tenant_id, tenant_ctx.storage_config)
     order = [m.strip() for m in member_order.split(",")] if member_order else None
     view = await manager.load_session_group(
         root_session_id,
@@ -673,10 +709,15 @@ async def run_multi_agent_group(
         session_id=body.session_id or str(uuid4()),
     )
 
+    session_manager = get_shared_session_manager(
+        tenant_ctx.tenant_id,
+        tenant_ctx.storage_config,
+    )
+
     orchestrator = AgentOrchestrator(
         config=group_config,
         tool_registry=SHARED_TOOL_REGISTRY,
-        storage_config=tenant_ctx.storage_config,
+        storage_config=session_manager,
         run_context=run_context,
         cross_session_memory_store=get_persistence_bundle(
             tenant_ctx.tenant_id, x_user_id
