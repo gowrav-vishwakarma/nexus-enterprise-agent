@@ -10,6 +10,7 @@ Key features:
 
 Example usage:
     from nexus import AgentConfig, AgentRunner, LLMProviderConfig
+    from nexus.tools.registry import ToolRegistry
 
     config = AgentConfig(
         name="researcher",
@@ -21,7 +22,8 @@ Example usage:
         persona={"role": "Researcher", "goal": "Answer questions"},
     )
 
-    runner = AgentRunner(config=config)
+    registry = ToolRegistry()
+    runner = AgentRunner(config=config, tool_registry=registry)
     result = await runner.run("What is AI?")
 """
 
@@ -32,16 +34,16 @@ from nexus.config import (
     LLMProviderConfig,
     RuntimeContextSummarizerConfig,
     ServerCompactorConfig,
-    SessionMemoryConfig,
-    EntityMemoryConfig,
-    WorkingMemoryConfig,
-    CrossSessionMemoryConfig,
+    MemoryConfig,
+    ContextSummaryConfig,
     SessionStorageConfig,
     DEFAULT_RCS_SYSTEM_BLOCK,
     DEFAULT_COMPACTOR_PROMPT,
     DEFAULT_SYSTEM_TEMPLATE,
     DEFAULT_ENTITY_EXTRACTION_PROMPT,
+    DEFAULT_MEMORY_CURATOR_PROMPT,
     DEFAULT_SESSION_MEMORY_CURATOR_PROMPT,
+    DEFAULT_CONTEXT_SUMMARY_PROMPT,
 )
 from nexus.runner.agent_runner import AgentRunner
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
@@ -75,16 +77,16 @@ __all__ = [
     "LLMProviderConfig",
     "RuntimeContextSummarizerConfig",
     "ServerCompactorConfig",
-    "SessionMemoryConfig",
-    "EntityMemoryConfig",
-    "WorkingMemoryConfig",
-    "CrossSessionMemoryConfig",
+    "MemoryConfig",
+    "ContextSummaryConfig",
     "SessionStorageConfig",
     "DEFAULT_RCS_SYSTEM_BLOCK",
     "DEFAULT_COMPACTOR_PROMPT",
     "DEFAULT_SYSTEM_TEMPLATE",
     "DEFAULT_ENTITY_EXTRACTION_PROMPT",
+    "DEFAULT_MEMORY_CURATOR_PROMPT",
     "DEFAULT_SESSION_MEMORY_CURATOR_PROMPT",
+    "DEFAULT_CONTEXT_SUMMARY_PROMPT",
     # Runner
     "AgentRunner",
     "AgentRunResult",

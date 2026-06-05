@@ -1,40 +1,12 @@
 """Prompt templates for the research_team orchestration example.
 
-Two-pass Jinja rendering
-------------------------
-Pass 1 (orchestration init): ``role``, ``goal``, ``backstory``, ``tenant_id``,
-``user_id``, ``session_id``, ``request_id``, ``metadata``, plus YAML ``prompt_args``.
-
-Pass 2 (each LLM turn via ContextWindowBuilder): ``persona``, ``working_memory``,
-``entity_memory``, ``cross_session_entity_memory``, ``current_date``.
-
-Use ``{% raw %}...{% endraw %}`` around pass-2 blocks so pass-1 does not evaluate
-them away when memory is still empty.
+Single-pass Jinja rendering
+---------------------------
+All variables are resolved in one render per LLM turn: ``role``, ``goal``,
+``backstory``, ``prompt_args`` (e.g. ``domain``), ``tenant_id``, ``user_id``,
+``session_id``, ``request_id``, ``metadata``, ``user_memory``, ``summary_text``,
+and ``current_date``.
 """
-
-# Pass-2 memory blocks — same variables as DEFAULT_SYSTEM_TEMPLATE in nexus/config/defaults.py
-_PASS2_MEMORY_BLOCKS = """{% raw %}
-{% if cross_session_entity_memory %}
-## About this user (across conversations)
-{% for key, value in cross_session_entity_memory.items() %}
-- {{ key }}: {{ value }}
-{% endfor %}
-{% endif %}
-
-{% if working_memory %}
-## Your Working Notes
-{{ working_memory }}
-{% endif %}
-
-{% if entity_memory %}
-## Known Facts (this conversation)
-{% for key, value in entity_memory.items() %}
-- {{ key }}: {{ value }}
-{% endfor %}
-{% endif %}
-
-Today's date: {{ current_date }}
-{% endraw %}"""
 
 RESEARCHER_SYSTEM = """You are {{ role }} focused on {{ domain }}.
 
@@ -48,7 +20,20 @@ Background: {{ backstory }}
 {% if user_id %}User: {{ user_id }}{% endif %}
 {% if session_id %}Session: {{ session_id }}{% endif %}
 
-""" + _PASS2_MEMORY_BLOCKS
+{% if user_memory %}
+## About this user
+{% for key, value in user_memory.items() %}
+- {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+
+{% if summary_text %}
+## Conversation Summary
+{{ summary_text }}
+{% endif %}
+
+Today's date: {{ current_date }}
+"""
 
 SUPERVISOR_SYSTEM = """You are {{ role }} — team supervisor for {{ domain }}.
 
@@ -59,25 +44,36 @@ Delegate work to specialists using delegate_to_* tools.
 {% if tenant_id %}Tenant: {{ tenant_id }}{% endif %}
 {% if user_id %}User: {{ user_id }}{% endif %}
 
-""" + _PASS2_MEMORY_BLOCKS
+{% if user_memory %}
+## About this user
+{% for key, value in user_memory.items() %}
+- {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+
+{% if summary_text %}
+## Conversation Summary
+{{ summary_text }}
+{% endif %}
+
+Today's date: {{ current_date }}
+"""
 
 
 def analyst_system(domain: str = "general", **ctx) -> str:
-    """Callable prompt: pass-1 context via ``**ctx``, pass-2 blocks preserved in raw."""
-    role = ctx.get("role", "Analyst")
-    goal = ctx.get("goal", "Analyze findings")
-    backstory = ctx.get("backstory")
-    tenant_id = ctx.get("tenant_id")
-    user_id = ctx.get("user_id")
-
-    header = f"You are {role} for {domain}.\n\nGoal: {goal}\n"
-    if backstory:
-        header += f"\nBackground: {backstory}\n"
-    if tenant_id:
-        header += f"\nTenant: {tenant_id}\n"
-    if user_id:
-        header += f"User: {user_id}\n"
-    return header + "\n" + _PASS2_MEMORY_BLOCKS
+    """Callable prompt (advanced): returns a Jinja template with domain fixed at load time."""
+    return (
+        f"You are {{{{ role }}}} for {domain}.\n\n"
+        "Goal: {{ goal }}\n"
+        "{% if backstory %}\nBackground: {{ backstory }}\n{% endif %}"
+        "{% if tenant_id %}\nTenant: {{ tenant_id }}\n{% endif %}"
+        "{% if user_id %}User: {{ user_id }}\n{% endif %}"
+        "{% if user_memory %}\n## About this user\n"
+        "{% for key, value in user_memory.items() %}\n- {{ key }}: {{ value }}\n"
+        "{% endfor %}\n{% endif %}"
+        "{% if summary_text %}\n## Conversation Summary\n{{ summary_text }}\n{% endif %}"
+        "\nToday's date: {{ current_date }}\n"
+    )
 
 
 PROMPTS = {

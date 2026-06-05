@@ -1,0 +1,112 @@
+# Annotated orchestration manifest — every field explained.
+# This file is for learning. The runnable example is examples/orchestration/research_team.yaml
+#
+# YAML = a text format for config files. Indentation matters.
+
+# version (optional, default: "1")
+# Manifest format version. Leave as "1" unless docs say otherwise.
+version: "1"
+
+# prompts_module (optional, default: {manifest_stem}_prompts.py beside this file)
+# Path to a Python file that defines PROMPTS = { "key": "template string or callable" }
+prompts_module: ./research_team_prompts.py
+
+# root (required)
+# Name of the agent or group to run when you call runtime.run()
+root: research_team
+
+# defaults (optional)
+# Shared settings merged into every agent and group unless they override.
+defaults:
+  # defaults.llm — used when an agent omits its own llm block
+  llm: &default_llm
+    provider: openai                    # optional, default: openai
+    model: ${ENV:OPENAI_MODEL|gpt-4o}   # optional, default: gpt-4o; ${ENV:VAR|fallback} reads env vars
+    api_key: ${ENV:OPENAI_API_KEY|mock-key}  # required for real LLM calls
+    # base_url: http://localhost:4000  # optional, default: none — custom API endpoint
+    # timeout: 60                      # optional, default: 60 seconds
+    # max_retries: 3                     # optional, default: 3
+    # context_window_tokens: 128000      # optional, default: 128000
+
+  # defaults.agent — merged into every agent
+  agent:
+    turns:
+      max_turns: 5                      # optional, default: 10
+      # max_tool_calls_per_turn: 5      # optional, default: 5
+      # turn_timeout_seconds: 300       # optional, default: 300
+
+  # defaults.group — merged into every group
+  group:
+    # max_turns: 20                     # optional, default: 20
+    # session_id_prefix: ""           # optional, default: ""
+
+# storage (optional, default: adapter memory — chat history lost when process exits)
+storage:
+  adapter: sqlite                       # memory | file | sqlite | postgresql | redis
+  adapter_config:
+    data_root: ${ENV:NEXUS_DATA_ROOT|./data}  # where files are stored on disk
+    # tenant_scoped: true               # optional, default: true for file/sqlite
+
+# plugins (optional, default: {})
+# Maps plugin namespace name -> Python import path "module.path.ClassName"
+# The class is instantiated and its tools are registered.
+plugins:
+  web_search: examples.nexus_saas_api.WebSearchPlugin
+  database: examples.nexus_saas_api.DatabasePlugin
+
+# agents (optional, default: {})
+# Each key is an agent name you can reference from groups.
+agents:
+  supervisor:
+    llm: *default_llm                   # YAML anchor — reuses defaults.llm above
+    persona:
+      role: Supervisor                  # required when using persona block
+      goal: Coordinate the research team
+      # backstory: optional text       # optional, default: none
+      prompt: supervisor_system         # key in PROMPTS dict in prompts module
+      prompt_args:                      # extra Jinja variables (e.g. domain); rendered each LLM turn
+        domain: finance
+    # tool_plugins: []                 # optional, default: [] — allow-list of plugin namespaces
+    # memory:                          # optional, default: disabled — cross-session user facts
+    #   enabled: true
+    #   inject_into_prompt: true       # optional, default: true — show user_memory in system prompt
+    # context_summary:                 # optional, default: disabled — fold oldest turns when context fills
+    #   summarize_on: 0.8              # trigger at 80% of context_window_tokens
+    #   inject_into_prompt: true       # optional, default: true — show summary_text in system prompt
+    # rcs:                             # optional, default: disabled (Runtime Context Summarization)
+    #   enabled: false
+    # skills:                          # optional, default: disabled
+    #   enabled: false
+
+  researcher:
+    llm: *default_llm
+    tool_plugins: [web_search]          # only web_search.* tools go to the LLM
+    persona:
+      role: Researcher
+      goal: Gather facts from the web
+      prompt: researcher_system
+      prompt_args:
+        domain: finance
+
+  analyst:
+    llm: *default_llm
+    tool_plugins: [database]
+    persona:
+      role: Analyst
+      goal: Analyze structured data
+      prompt: analyst_system
+      prompt_args:
+        domain: finance
+
+# groups (optional, default: {})
+# Teams of agents. members can be agent names, inline agents, or nested groups.
+groups:
+  analysis_pipeline:
+    pattern: pipeline                   # optional, default: supervisor; pipeline = run members in order
+    session_id_prefix: pipe_            # optional, default: "" — prefix for member chat ids
+    members: [researcher, analyst]      # agent names defined above
+
+  research_team:
+    pattern: supervisor                 # supervisor delegates via delegate_to_* tools
+    session_id_prefix: team_
+    members: [supervisor, analysis_pipeline]  # nested group reference

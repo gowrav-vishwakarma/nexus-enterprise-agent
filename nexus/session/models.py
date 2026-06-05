@@ -68,9 +68,12 @@ class AgentSession(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
     turns: list[TurnRecord] = Field(default_factory=list)
     tc_counter: int = Field(default=0, description="Global TC index counter")
-    entity_memory: dict[str, str] = Field(default_factory=dict, description="Key-value entity facts")
-    working_memory: str = Field(default="", description="Working notes")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
+    summary_text: str = Field(default="", description="Rolling summary of folded turns")
+    summary_through_turn: int = Field(
+        default=-1,
+        description="Last turn index folded into summary_text",
+    )
     is_active: bool = Field(default=True, description="Whether session is still active")
     total_tokens_saved_by_rcs: int = Field(default=0, description="Cumulative RCS savings")
 

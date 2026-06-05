@@ -1,4 +1,4 @@
-"""Prompt module loading and two-pass Jinja resolution."""
+"""Prompt module loading and template resolution for orchestration."""
 
 from __future__ import annotations
 
@@ -6,8 +6,6 @@ import importlib.util
 import inspect
 from pathlib import Path
 from typing import Any, Callable
-
-from jinja2 import BaseLoader, Environment, select_autoescape
 
 from nexus.orchestration.errors import ManifestLoadError, PromptNotFoundError
 from nexus.tools.context import RunContext
@@ -44,7 +42,7 @@ def build_prompt_context(
     prompt_args: dict[str, Any],
     run_context: RunContext,
 ) -> dict[str, Any]:
-    """Build the pass-1 Jinja/callable context for prompt resolution."""
+    """Build context for callable prompt factories at manifest load time."""
     context: dict[str, Any] = {
         "role": persona.get("role"),
         "goal": persona.get("goal"),
@@ -67,18 +65,18 @@ def resolve_prompt_template(
     prompt_args: dict[str, Any] | None = None,
     run_context: RunContext,
 ) -> str:
-    """Resolve a prompt reference to a pass-1 rendered system prompt template."""
+    """Resolve a prompt reference to a raw Jinja template string (not rendered)."""
     if prompt_name not in prompts:
         raise PromptNotFoundError(prompt_name, list(prompts.keys()))
 
     prompt_value = prompts[prompt_name]
-    context = build_prompt_context(
-        persona=persona,
-        prompt_args=prompt_args or {},
-        run_context=run_context,
-    )
 
     if callable(prompt_value):
+        context = build_prompt_context(
+            persona=persona,
+            prompt_args=prompt_args or {},
+            run_context=run_context,
+        )
         template_str = _invoke_prompt_callable(prompt_value, context)
     elif isinstance(prompt_value, str):
         template_str = prompt_value
@@ -87,7 +85,7 @@ def resolve_prompt_template(
             f"Prompt {prompt_name!r} must be a string or callable, got {type(prompt_value)!r}"
         )
 
-    return _render_pass_one(template_str, context)
+    return template_str
 
 
 def resolve_persona_config(
@@ -100,16 +98,19 @@ def resolve_persona_config(
     persona = dict(persona_data)
     prompt_name = persona.pop("prompt", None)
     prompt_args = persona.pop("prompt_args", None) or {}
+    if not isinstance(prompt_args, dict):
+        prompt_args = {}
+
+    persona["prompt_args"] = prompt_args
 
     if prompt_name is not None:
-        rendered = resolve_prompt_template(
+        persona["system_prompt_template"] = resolve_prompt_template(
             prompts,
             prompt_name,
             persona=persona,
-            prompt_args=prompt_args if isinstance(prompt_args, dict) else {},
+            prompt_args=prompt_args,
             run_context=run_context,
         )
-        persona["system_prompt_template"] = rendered
 
     return persona
 
@@ -127,9 +128,3 @@ def _invoke_prompt_callable(fn: Callable[..., str], context: dict[str, Any]) -> 
         if key in signature.parameters
     }
     return fn(**filtered)
-
-
-def _render_pass_one(template_str: str, context: dict[str, Any]) -> str:
-    env = Environment(loader=BaseLoader(), autoescape=select_autoescape())
-    template = env.from_string(template_str)
-    return template.render(**context)

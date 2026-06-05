@@ -27,6 +27,7 @@ from nexus.llm.response import LLMResponse, TokenUsage
 from nexus.session.manager import SessionManager
 from nexus.tools.context import RunContext
 from nexus.tools.registry import ToolRegistry
+from nexus.utils.jinja import render_system_prompt
 
 FIXTURES = Path(__file__).parent / "fixtures" / "orchestration"
 
@@ -103,19 +104,28 @@ def test_nested_group_resolution():
 
 def test_prompt_template_and_callable_resolution():
     manifest = OrchestrationManifest.load(FIXTURES / "basic.yaml")
+    run_context = RunContext(tenant_id="tenant-42")
     resolver = ManifestResolver(
         manifest.schema,
         manifest.prompts,
-        RunContext(tenant_id="tenant-42"),
+        run_context,
     )
     config = resolver.resolve_root()
     assert isinstance(config, AgentGroupConfig)
     researcher = config.members[0]
     assert isinstance(researcher, AgentConfig)
-    assert "Tenant: tenant-42" in researcher.persona.system_prompt_template
+    assert "{{ tenant_id }}" in researcher.persona.system_prompt_template
+    assert "Tenant: tenant-42" not in researcher.persona.system_prompt_template
     analyst = config.members[1]
     assert isinstance(analyst, AgentConfig)
-    assert "Tenant=tenant-42" in analyst.persona.system_prompt_template
+    assert "{{ tenant_id }}" in analyst.persona.system_prompt_template
+    assert "Tenant=tenant-42" not in analyst.persona.system_prompt_template
+
+    rendered = render_system_prompt(
+        researcher.persona.model_dump(),
+        run_context=run_context,
+    )
+    assert "Tenant: tenant-42" in rendered
 
 
 class _OverrideResolver:

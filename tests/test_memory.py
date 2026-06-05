@@ -6,14 +6,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nexus.config import AgentConfig, LLMProviderConfig
-from nexus.config.memory import EntityMemoryConfig, SessionMemoryConfig, WorkingMemoryConfig
+from nexus.config.memory import MemoryConfig
 from nexus.context.builder import ContextWindowBuilder
 from nexus.llm.proxy import LLMProxy
 from nexus.llm.response import LLMResponse, TokenUsage
+from nexus.memory.cross_session_store import InMemoryCrossSessionMemoryStore
 from nexus.memory.curator import MemoryCurator, MemoryUpdate
 from nexus.runner.agent_runner import AgentRunner
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, TurnRecord
+from nexus.tools.context import RunContext
 from nexus.tools.registry import ToolRegistry
 
 
@@ -31,34 +33,12 @@ def _session_with_turn(user: str = "Hi", assistant: str = "Hello") -> AgentSessi
     )
 
 
-def test_memory_update_parse_and_apply_entity_cap():
+def test_memory_update_parse_entities():
     update = MemoryUpdate.from_llm_output(
-        json.dumps(
-            {
-                "entities": {f"k{i}": f"v{i}" for i in range(5)},
-                "working_memory": "",
-            }
-        )
+        json.dumps({"entities": {f"k{i}": f"v{i}" for i in range(5)}})
     )
-    session = AgentSession(session_id="s", agent_id="a", entity_memory={"old": "1"})
-    entity_cfg = EntityMemoryConfig(enabled=True, max_entities=3)
-    working_cfg = WorkingMemoryConfig(enabled=True, max_length=100)
-
-    changed_e, changed_w = update.apply_to_session(session, entity_cfg, working_cfg)
-    assert changed_e
-    assert len(session.entity_memory) == 3
-    assert "old" not in session.entity_memory  # oldest dropped beyond cap
-
-
-def test_memory_update_working_truncation():
-    update = MemoryUpdate(working_memory="x" * 500)
-    session = AgentSession(session_id="s", agent_id="a")
-    entity_cfg = EntityMemoryConfig(enabled=False)
-    working_cfg = WorkingMemoryConfig(enabled=True, max_length=100)
-
-    _, changed_w = update.apply_to_session(session, entity_cfg, working_cfg)
-    assert changed_w
-    assert len(session.working_memory) == 100
+    assert len(update.entities) == 5
+    assert update.entities["k0"] == "v0"
 
 
 def test_memory_update_malformed_json_no_op():
@@ -80,9 +60,8 @@ def test_memory_update_malformed_json_no_op():
 def test_should_trigger_matrix(
     turn_index, after_each, interval, at_end, extract_at_end, expected
 ):
-    cfg = SessionMemoryConfig(
+    cfg = MemoryConfig(
         enabled=True,
-        entity=EntityMemoryConfig(enabled=True),
         extract_after_each_turn=after_each,
         extraction_interval=interval,
         extract_at_end=extract_at_end,
@@ -95,7 +74,7 @@ def test_should_trigger_matrix(
 
 @pytest.mark.asyncio
 async def test_curator_disabled_no_llm_call():
-    cfg = SessionMemoryConfig(enabled=False)
+    cfg = MemoryConfig(enabled=False)
     curator = MemoryCurator(cfg, MagicMock(spec=LLMProxy), MagicMock())
     session = _session_with_turn()
     mock_chat = AsyncMock()
@@ -108,9 +87,15 @@ async def test_curator_disabled_no_llm_call():
 
 
 @pytest.mark.asyncio
-async def test_curator_llm_updates_session():
+async def test_curator_llm_writes_to_cross_session_store():
+    store = InMemoryCrossSessionMemoryStore()
     manager = SessionManager()
-    session = await manager.create_session(agent_id="a", session_id="cur-sess")
+    session = await manager.create_session(
+        agent_id="a",
+        session_id="cur-sess",
+        tenant_id="t",
+        user_id="u",
+    )
     await manager.append_turn(
         "cur-sess",
         TurnRecord(
@@ -121,38 +106,44 @@ async def test_curator_llm_updates_session():
     )
     session = await manager.load_session("cur-sess")
 
-    cfg = SessionMemoryConfig(
+    cfg = MemoryConfig(
         enabled=True,
-        entity=EntityMemoryConfig(enabled=True, max_entities=10),
-        working=WorkingMemoryConfig(enabled=True, max_length=200),
+        max_entities=10,
         extract_after_each_turn=True,
     )
     llm = MagicMock(spec=LLMProxy)
     llm.chat = AsyncMock(
         return_value=LLMResponse(
-            content=json.dumps(
-                {
-                    "entities": {"ui_preference": "dark mode"},
-                    "working_memory": "track UI prefs",
-                }
-            ),
+            content=json.dumps({"entities": {"ui_preference": "dark mode"}}),
             usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
             finish_reason="stop",
             raw_response={},
         )
     )
-    curator = MemoryCurator(cfg, llm, manager)
+    curator = MemoryCurator(
+        cfg,
+        llm,
+        manager,
+        run_context=RunContext(tenant_id="t", user_id="u"),
+        cross_session_memory_store=store,
+        agent_name="a",
+    )
     await curator.curate(session, 0)
 
-    reloaded = await manager.load_session("cur-sess")
-    assert reloaded.entity_memory.get("ui_preference") == "dark mode"
-    assert "UI prefs" in reloaded.working_memory
+    record = await store.load("t", "u", "a")
+    assert record.entity_memory.get("ui_preference") == "dark mode"
 
 
 @pytest.mark.asyncio
 async def test_curator_agent_path_recursion_guard():
+    store = InMemoryCrossSessionMemoryStore()
     manager = SessionManager()
-    session = await manager.create_session(agent_id="main", session_id="main-sess")
+    session = await manager.create_session(
+        agent_id="main",
+        session_id="main-sess",
+        tenant_id="t",
+        user_id="u",
+    )
     await manager.append_turn(
         "main-sess",
         TurnRecord(
@@ -166,20 +157,27 @@ async def test_curator_agent_path_recursion_guard():
     curator_agent_cfg = AgentConfig(
         name="mem-curator",
         llm=LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk"),
-        session_memory=SessionMemoryConfig(enabled=True),  # should be forced off inside curator
+        memory=MemoryConfig(enabled=True),  # should be forced off inside curator
     )
-    cfg = SessionMemoryConfig(
+    cfg = MemoryConfig(
         enabled=True,
-        entity=EntityMemoryConfig(enabled=True),
         curator_agent=curator_agent_cfg,
         extract_after_each_turn=True,
     )
 
     parent_llm = MagicMock(spec=LLMProxy)
     parent_llm.chat = AsyncMock()
-    curator = MemoryCurator(cfg, parent_llm, manager, tool_registry=ToolRegistry())
+    curator = MemoryCurator(
+        cfg,
+        parent_llm,
+        manager,
+        tool_registry=ToolRegistry(),
+        run_context=RunContext(tenant_id="t", user_id="u"),
+        cross_session_memory_store=store,
+        agent_name="main",
+    )
 
-    json_out = json.dumps({"entities": {"project": "Alpha"}, "working_memory": ""})
+    json_out = json.dumps({"entities": {"project": "Alpha"}})
 
     with patch("nexus.runner.agent_runner.AgentRunner") as MockRunner:
         mock_instance = MockRunner.return_value
@@ -189,41 +187,46 @@ async def test_curator_agent_path_recursion_guard():
         await curator.curate(session, 0)
 
         call_kwargs = MockRunner.call_args.kwargs
-        assert call_kwargs["config"].session_memory.enabled is False
+        assert call_kwargs["config"].memory.enabled is False
         parent_llm.chat.assert_not_called()
 
-    reloaded = await manager.load_session("main-sess")
-    assert reloaded.entity_memory.get("project") == "Alpha"
+    record = await store.load("t", "u", "main")
+    assert record.entity_memory.get("project") == "Alpha"
 
 
 @pytest.mark.asyncio
 async def test_inject_into_prompt_gate():
-    session = AgentSession(
-        session_id="s",
-        agent_id="a",
-        entity_memory={"k": "v"},
-        working_memory="notes",
-    )
+    session = AgentSession(session_id="s", agent_id="a")
     llm = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
     agent_on = AgentConfig(
         name="a",
         llm=llm,
-        session_memory=SessionMemoryConfig(enabled=True, inject_into_prompt=True),
+        memory=MemoryConfig(enabled=True, inject_into_prompt=True),
     )
     agent_off = AgentConfig(
         name="a",
         llm=llm,
-        session_memory=SessionMemoryConfig(enabled=True, inject_into_prompt=False),
+        memory=MemoryConfig(enabled=True, inject_into_prompt=False),
     )
     builder = ContextWindowBuilder()
 
-    msgs_on = builder.build(session, agent_on, current_user_message="hi", token_budget=10000)
-    assert "Known Facts" in msgs_on[0]["content"]
-    assert "Working Notes" in msgs_on[0]["content"]
+    msgs_on = builder.build(
+        session,
+        agent_on,
+        current_user_message="hi",
+        token_budget=10000,
+        user_memory={"k": "v"},
+    )
+    assert "About this user" in msgs_on[0]["content"]
 
-    msgs_off = builder.build(session, agent_off, current_user_message="hi", token_budget=10000)
-    assert "Known Facts" not in msgs_off[0]["content"]
-    assert "Working Notes" not in msgs_off[0]["content"]
+    msgs_off = builder.build(
+        session,
+        agent_off,
+        current_user_message="hi",
+        token_budget=10000,
+        user_memory={"k": "v"},
+    )
+    assert "About this user" not in msgs_off[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -232,9 +235,8 @@ async def test_runner_invokes_curator_at_end():
     agent_config = AgentConfig(
         name="mem-runner",
         llm=llm_config,
-        session_memory=SessionMemoryConfig(
+        memory=MemoryConfig(
             enabled=True,
-            entity=EntityMemoryConfig(enabled=True),
             extract_after_each_turn=True,
         ),
     )

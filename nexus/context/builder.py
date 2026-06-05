@@ -6,8 +6,11 @@ from datetime import datetime
 from typing import Any, Optional
 
 from nexus.config.agent import AgentConfig
+from nexus.context.memory_injector import MemoryPromptInjector
 from nexus.context.rcs_injector import RCSSystemPromptInjector
+from nexus.context.summary_injector import SummaryPromptInjector
 from nexus.session.models import AgentSession, ToolCallRecord, TurnRecord
+from nexus.tools.context import RunContext
 from nexus.utils.jinja import render_system_prompt
 from nexus.llm.token_counter import TokenCounter
 
@@ -55,7 +58,9 @@ class ContextWindowBuilder:
         agent_config: AgentConfig,
         current_user_message: Optional[str] = None,
         token_budget: int = 100000,
-        cross_session_entity_memory: Optional[dict[str, str]] = None,
+        user_memory: Optional[dict[str, str]] = None,
+        summary_text: str = "",
+        run_context: Optional[RunContext] = None,
         skills_catalog: Optional[str] = None,
         explicit_skills_content: Optional[str] = None,
     ) -> list[dict[str, Any]]:
@@ -69,20 +74,37 @@ class ContextWindowBuilder:
 
         # 1. Build and render System Prompt
         persona_dict = agent_config.persona.model_dump()
-        inject_memory = getattr(agent_config.session_memory, "inject_into_prompt", True)
-        cross_cfg = getattr(agent_config.session_memory, "cross_session", None)
-        inject_cross_session = bool(
-            cross_cfg
-            and cross_cfg.enabled
-            and cross_session_entity_memory
+        memory_cfg = getattr(agent_config, "memory", None)
+        summary_cfg = getattr(agent_config, "context_summary", None)
+        facts = user_memory if user_memory is not None else {}
+        memory_for_jinja = (
+            facts
+            if memory_cfg and memory_cfg.enabled and memory_cfg.inject_into_prompt
+            else {}
         )
+        summary_for_jinja = ""
+        if (
+            summary_cfg
+            and summary_cfg.summarize_on is not None
+            and summary_cfg.inject_into_prompt
+        ):
+            summary_for_jinja = summary_text or ""
+
         system_content = render_system_prompt(
             persona=persona_dict,
-            working_memory=session.working_memory if inject_memory else "",
-            entity_memory=session.entity_memory if inject_memory else {},
-            cross_session_entity_memory=cross_session_entity_memory if inject_cross_session else {},
+            user_memory=memory_for_jinja,
+            summary_text=summary_for_jinja,
             current_date=datetime.now().strftime("%Y-%m-%d"),
             template=agent_config.persona.system_prompt or agent_config.persona.system_prompt_template,
+            run_context=run_context,
+            session=session,
+        )
+
+        system_content = MemoryPromptInjector.inject(
+            system_content, facts, memory_cfg
+        )
+        system_content = SummaryPromptInjector.inject(
+            system_content, summary_text or "", summary_cfg
         )
 
         # Inject RCS System Prompt Block if enabled

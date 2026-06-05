@@ -32,12 +32,7 @@ from pydantic import BaseModel, SecretStr, Field
 # ── NEXUS imports (validated against codebase) ────────────────────────────────
 from nexus.config.agent import AgentConfig, AgentPersonaConfig, TurnConfig, AgentGroupConfig
 from nexus.config.llm import LLMProviderConfig
-from nexus.config.memory import (
-    CrossSessionMemoryConfig,
-    EntityMemoryConfig,
-    SessionMemoryConfig,
-    WorkingMemoryConfig,
-)
+from nexus.config.memory import MemoryConfig
 from nexus.memory.cross_session_store import CrossSessionMemoryStore
 from nexus.persistence.factory import PersistenceBundle, PersistenceFactory
 from nexus.config.rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
@@ -113,8 +108,7 @@ class PlanLimits(BaseModel):
     storage_adapter: str
 
     # Memory features
-    entity_memory: bool
-    working_memory: bool
+    memory_enabled: bool
 
     # Tools
     allowed_tool_plugins: list[str]
@@ -141,8 +135,7 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         rcs_fallback_compactor=False,
         context_window_tokens=4000,
         storage_adapter="memory",
-        entity_memory=False,
-        working_memory=False,
+        memory_enabled=False,
         allowed_tool_plugins=[],
         skills_enabled=False,
         use_tenant_llm_key=False,
@@ -161,8 +154,7 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         rcs_fallback_compactor=False,
         context_window_tokens=8000,
         storage_adapter="sqlite",
-        entity_memory=True,
-        working_memory=False,
+        memory_enabled=True,
         allowed_tool_plugins=["web_search"],
         skills_enabled=False,
         use_tenant_llm_key=False,
@@ -181,8 +173,7 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         rcs_fallback_compactor=False,
         context_window_tokens=32000,
         storage_adapter="postgresql",
-        entity_memory=True,
-        working_memory=True,
+        memory_enabled=True,
         allowed_tool_plugins=["web_search", "database", "calendar"],
         skills_enabled=True,
         use_tenant_llm_key=True,
@@ -201,8 +192,7 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         rcs_fallback_compactor=True,
         context_window_tokens=128000,
         storage_adapter="postgresql",
-        entity_memory=True,
-        working_memory=True,
+        memory_enabled=True,
         allowed_tool_plugins=["web_search", "database", "calendar", "custom"],
         skills_enabled=True,
         use_tenant_llm_key=True,
@@ -412,12 +402,7 @@ class NexusTenantConfigFactory:
             persona=AgentPersonaConfig(role=role, goal=goal),
             turns=TurnConfig(max_turns=limits.max_turns, max_tool_calls_per_turn=limits.max_tool_calls_per_turn),
             rcs=cls.build_rcs_config(tenant, limits, llm),
-            session_memory=SessionMemoryConfig(
-                enabled=limits.entity_memory or limits.working_memory,
-                entity=EntityMemoryConfig(enabled=limits.entity_memory),
-                working=WorkingMemoryConfig(enabled=limits.working_memory),
-                cross_session=CrossSessionMemoryConfig(enabled=limits.entity_memory),
-            ),
+            memory=MemoryConfig(enabled=limits.memory_enabled),
             tool_plugins=allowed_tools,
             skills=SkillsConfig(
                 enabled=limits.skills_enabled,

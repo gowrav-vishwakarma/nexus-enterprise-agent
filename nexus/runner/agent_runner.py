@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator, Optional, Union
 from nexus.config.agent import AgentConfig
 from nexus.config.storage import SessionStorageConfig
 from nexus.context.builder import ContextWindowBuilder
+from nexus.context.summarizer import ContextSummarizer
 from nexus.events.emitter import NexusEventEmitter, StdoutEventSink
 from nexus.events.models import (
     AgentStartedEvent,
@@ -123,7 +124,7 @@ class AgentRunner:
 
         self.run_context = run_context or RunContext()
         self.cross_session_memory_store = cross_session_memory_store
-        self._cross_session_entity_memory: dict[str, str] = {}
+        self._user_memory: dict[str, str] = {}
 
         self.event_emitter = event_emitter or NexusEventEmitter()
         if self.config.trace_enabled and not self.event_emitter._sinks:
@@ -144,7 +145,7 @@ class AgentRunner:
         )
 
         self.memory_curator = MemoryCurator(
-            config=self.config.session_memory,
+            config=self.config.memory,
             llm_proxy=self.llm_proxy,
             session_manager=self.session_manager,
             tool_registry=self.tool_registry,
@@ -152,6 +153,12 @@ class AgentRunner:
             event_emitter=self.event_emitter,
             cross_session_memory_store=self.cross_session_memory_store,
             agent_name=self.config.name,
+        )
+        self.context_summarizer = ContextSummarizer(
+            config=self.config.context_summary,
+            llm_proxy=self.llm_proxy,
+            session_manager=self.session_manager,
+            event_emitter=self.event_emitter,
         )
 
         self.skills_registry: Optional[SkillsRegistry] = None
@@ -217,15 +224,16 @@ class AgentRunner:
             return tool_schemas
         return [s for s in tool_schemas if s.get("name") != "skills.run_skill_script"]
 
-    async def _load_cross_session_entity_memory(self) -> dict[str, str]:
-        """Load cross-session facts for injection into the system prompt."""
-        cross_cfg = self.config.session_memory.cross_session
-        if not cross_cfg.enabled or not self.cross_session_memory_store:
+    async def _load_user_memory(self) -> dict[str, str]:
+        """Load cross-session user facts for injection into the system prompt."""
+        if not self.config.memory.enabled or not self.cross_session_memory_store:
             return {}
         if not self.run_context.user_id:
             return {}
 
-        namespace = resolve_cross_session_namespace(cross_cfg.namespace, self.config.name)
+        namespace = resolve_cross_session_namespace(
+            self.config.memory.namespace, self.config.name
+        )
         try:
             record = await self.cross_session_memory_store.load(
                 self.run_context.tenant_id,
@@ -269,8 +277,58 @@ class AgentRunner:
             )
             if reloaded is not None:
                 session = reloaded
-            self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
+            self._user_memory = await self._load_user_memory()
         return session
+
+    def _build_context_messages(
+        self,
+        session: AgentSession,
+        *,
+        current_user_message: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Build LLM messages with user_memory, summary_text, and token budget."""
+        return self.ctx_builder.build(
+            session=session,
+            agent_config=self.config,
+            current_user_message=current_user_message,
+            token_budget=self.config.llm.context_window_tokens,
+            user_memory=self._user_memory,
+            summary_text=session.summary_text,
+            run_context=self.run_context,
+            skills_catalog=self._skills_catalog,
+            explicit_skills_content=self._explicit_skills_content,
+        )
+
+    async def _maybe_compact_and_summarize(
+        self,
+        session: AgentSession,
+        messages: list[dict[str, Any]],
+        session_turn_index: int,
+        *,
+        current_user_message: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Run RCS compactor and context summarizer when thresholds are met; rebuild context."""
+        model = self.config.llm.model
+        current_tokens = TokenCounter.count_messages(messages, model)
+        context_window = self.config.llm.context_window_tokens
+
+        if self.config.rcs.fallback_compactor.enabled:
+            if await self.compactor.should_trigger(session, current_tokens):
+                await self.compactor.compact(session, session_turn_index)
+                messages = self._build_context_messages(
+                    session, current_user_message=current_user_message
+                )
+                current_tokens = TokenCounter.count_messages(messages, model)
+
+        if self.context_summarizer.should_trigger(
+            session, current_tokens, context_window
+        ):
+            await self.context_summarizer.summarize(session, session_turn_index)
+            messages = self._build_context_messages(
+                session, current_user_message=current_user_message
+            )
+
+        return messages
 
     async def _call_llm(
         self,
@@ -410,7 +468,7 @@ class AgentRunner:
     ) -> AsyncIterator[AgentStreamEvent]:
         """Shared agent loop. Yields AgentStreamEvents when stream=True."""
         session = await self._get_or_create_session(session_id)
-        self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
+        self._user_memory = await self._load_user_memory()
         self._setup_skills()
 
         if initial_context:
@@ -446,27 +504,16 @@ class AgentRunner:
             current_user_message = user_message
 
             while run_turn_index < self.config.turns.max_turns:
-                messages = self.ctx_builder.build(
-                    session=session,
-                    agent_config=self.config,
-                    current_user_message=current_user_message if run_turn_index == 0 else None,
-                    token_budget=self.config.llm.context_window_tokens,
-                    cross_session_entity_memory=self._cross_session_entity_memory,
-                    skills_catalog=self._skills_catalog,
-                    explicit_skills_content=self._explicit_skills_content,
+                turn_user_msg = current_user_message if run_turn_index == 0 else None
+                messages = self._build_context_messages(
+                    session, current_user_message=turn_user_msg
                 )
-                current_tokens = TokenCounter.count_messages(messages, self.config.llm.model)
-
-                if self.config.rcs.fallback_compactor.enabled:
-                    if await self.compactor.should_trigger(session, current_tokens):
-                        await self.compactor.compact(session, session_turn_index)
-                        messages = self.ctx_builder.build(
-                            session=session,
-                            agent_config=self.config,
-                            current_user_message=current_user_message if run_turn_index == 0 else None,
-                            skills_catalog=self._skills_catalog,
-                            explicit_skills_content=self._explicit_skills_content,
-                        )
+                messages = await self._maybe_compact_and_summarize(
+                    session,
+                    messages,
+                    session_turn_index,
+                    current_user_message=turn_user_msg,
+                )
 
                 await self.event_emitter.emit(
                     TurnStartedEvent(
@@ -718,7 +765,7 @@ class AgentRunner:
                 final_turn_idx = max(session_turn_index - 1, 0)
                 if self.memory_curator.should_trigger(final_turn_idx, at_end=True):
                     await self.memory_curator.curate(session, final_turn_idx)
-                    self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
+                    self._user_memory = await self._load_user_memory()
             except Exception as e:
                 logger.warning("AgentRunner: end-of-run memory curation failed: %s", e)
 

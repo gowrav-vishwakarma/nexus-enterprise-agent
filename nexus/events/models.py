@@ -33,7 +33,9 @@ class NexusEventType(str, Enum):
     
     # Memory events
     ENTITY_EXTRACTED = "memory.entity_extracted"
-    WORKING_MEMORY_UPDATED = "memory.working_memory_updated"
+
+    # Context summary events
+    CONTEXT_SUMMARIZED = "context.summarized"
     
     # Human-in-loop
     HUMAN_IN_LOOP_REQUESTED = "human_in_loop.requested"

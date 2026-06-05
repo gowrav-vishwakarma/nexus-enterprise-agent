@@ -6,12 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nexus.config import AgentConfig, LLMProviderConfig
-from nexus.config.memory import (
-    CrossSessionMemoryConfig,
-    EntityMemoryConfig,
-    SessionMemoryConfig,
-)
+from nexus.config import AgentConfig, AgentPersonaConfig, LLMProviderConfig
+from nexus.config.memory import MemoryConfig
 from nexus.context.builder import ContextWindowBuilder
 from nexus.llm.response import LLMResponse, TokenUsage
 from nexus.memory.cross_session_store import (
@@ -44,32 +40,44 @@ async def test_cross_session_store_merge_and_cap():
 
 
 @pytest.mark.asyncio
-async def test_cross_session_inject_in_system_prompt():
-    store = InMemoryCrossSessionMemoryStore()
-    await store.merge_entities(
-        "t1",
-        "alice",
-        "support",
-        {"preference": "dark mode"},
-        max_entities=50,
-    )
-
-    session = AgentSession(session_id="sess-2", agent_id="support")
+async def test_user_memory_injector_on_plain_system_prompt():
+    """Custom system_prompt without Jinja still gets user facts via injector."""
+    session = AgentSession(session_id="sess-plain", agent_id="support")
     llm = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
     agent = AgentConfig(
         name="support",
         llm=llm,
-        session_memory=SessionMemoryConfig(
-            enabled=True,
-            entity=EntityMemoryConfig(enabled=True),
-            cross_session=CrossSessionMemoryConfig(enabled=True),
+        memory=MemoryConfig(enabled=True, inject_into_prompt=True),
+        persona=AgentPersonaConfig(
+            role="Support",
+            goal="Help",
+            system_prompt="You are support. Be concise.",
         ),
     )
     messages = ContextWindowBuilder().build(
         session,
         agent,
         current_user_message="hi",
-        cross_session_entity_memory={"preference": "dark mode"},
+        user_memory={"timezone": "PST"},
+    )
+    assert "About this user" in messages[0]["content"]
+    assert "PST" in messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_cross_session_inject_in_system_prompt():
+    session = AgentSession(session_id="sess-2", agent_id="support")
+    llm = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    agent = AgentConfig(
+        name="support",
+        llm=llm,
+        memory=MemoryConfig(enabled=True),
+    )
+    messages = ContextWindowBuilder().build(
+        session,
+        agent,
+        current_user_message="hi",
+        user_memory={"preference": "dark mode"},
     )
     assert "About this user" in messages[0]["content"]
     assert "dark mode" in messages[0]["content"]
@@ -102,11 +110,7 @@ async def test_runner_loads_cross_session_memory_on_new_session():
     agent_config = AgentConfig(
         name="bot",
         llm=llm_config,
-        session_memory=SessionMemoryConfig(
-            enabled=True,
-            entity=EntityMemoryConfig(enabled=True),
-            cross_session=CrossSessionMemoryConfig(enabled=True),
-        ),
+        memory=MemoryConfig(enabled=True),
     )
     registry = ToolRegistry()
     manager = SessionManager()
@@ -131,11 +135,11 @@ async def test_runner_loads_cross_session_memory_on_new_session():
         with patch.object(runner.memory_curator, "curate", mock_curate):
             await runner.run(user_message="Hello", session_id="brand-new-session")
 
-    assert runner._cross_session_entity_memory.get("language") == "Spanish"
+    assert runner._user_memory.get("language") == "Spanish"
 
 
 @pytest.mark.asyncio
-async def test_curator_promotes_to_cross_session_store():
+async def test_curator_writes_to_cross_session_store():
     store = InMemoryCrossSessionMemoryStore()
     manager = SessionManager()
     session = await manager.create_session(
@@ -159,20 +163,14 @@ async def test_curator_promotes_to_cross_session_store():
     llm = MagicMock()
     llm.chat = AsyncMock(
         return_value=LLMResponse(
-            content=json.dumps(
-                {"entities": {"contact": "email"}, "working_memory": ""}
-            ),
+            content=json.dumps({"entities": {"contact": "email"}}),
             usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
             finish_reason="stop",
             raw_response={},
         )
     )
     curator = MemoryCurator(
-        SessionMemoryConfig(
-            enabled=True,
-            entity=EntityMemoryConfig(enabled=True),
-            cross_session=CrossSessionMemoryConfig(enabled=True),
-        ),
+        MemoryConfig(enabled=True),
         llm,
         manager,
         run_context=RunContext(tenant_id="t", user_id="u1"),
@@ -187,8 +185,6 @@ async def test_curator_promotes_to_cross_session_store():
 
 @pytest.mark.asyncio
 async def test_sqlite_cross_session_memory_tenant_scoped():
-    import tempfile
-
     with tempfile.TemporaryDirectory() as tmpdir:
         store = SQLiteCrossSessionMemoryStore(data_root=tmpdir, tenant_scoped=True)
         await store.merge_entities(
@@ -218,5 +214,3 @@ async def test_sqlite_cross_session_memory_tenant_scoped():
 
         user2 = await store.load("tenant-a", "user-2", "agent")
         assert user2.entity_memory["preference"] == "sms"
-
-

@@ -1,4 +1,4 @@
-"""Session and cross-session memory configuration models."""
+"""Cross-session memory configuration models."""
 
 from typing import TYPE_CHECKING, Optional
 
@@ -10,30 +10,21 @@ if TYPE_CHECKING:
     from nexus.config.agent import AgentConfig
 
 
-class EntityMemoryConfig(BaseModel):
-    """Configuration for entity memory (durable key/value facts across turns)."""
+class MemoryConfig(BaseModel):
+    """Cross-session user memory configuration.
 
-    enabled: bool = Field(default=False, description="Enable entity memory extraction")
-    max_entities: int = Field(
-        default=50, ge=1, description="Hard cap on stored entities (oldest dropped beyond cap)"
-    )
+    Memory is written by an optional "memory curator" - a separate, gated LLM call
+    (or a full agent) that extracts durable facts from the conversation and merges
+    them into the cross-session store. Reading is automatic: stored facts are
+    injected into the system prompt unless ``inject_into_prompt`` is False.
 
-
-class WorkingMemoryConfig(BaseModel):
-    """Configuration for working memory (a short scratchpad across turns)."""
-
-    enabled: bool = Field(default=False, description="Enable working memory updates")
-    max_length: int = Field(
-        default=2000, ge=100, description="Max character length (truncated beyond cap)"
-    )
-
-
-class CrossSessionMemoryConfig(BaseModel):
-    """Cross-session memory keyed by tenant + user (+ namespace)."""
+    Within a single chat thread, context comes from ``session.turns`` and RCS
+    summaries — not from this config.
+    """
 
     enabled: bool = Field(
         default=False,
-        description="Load/save durable user facts across chat sessions",
+        description="Master gate. If False the curator is a no-op and memory is not injected",
     )
     namespace: str = Field(
         default="",
@@ -42,36 +33,7 @@ class CrossSessionMemoryConfig(BaseModel):
     max_entities: int = Field(
         default=100,
         ge=1,
-        description="Hard cap on cross-session entities (oldest dropped beyond cap)",
-    )
-    persist_from_curator: bool = Field(
-        default=True,
-        description="Promote session entity_memory to cross-session store after each curation",
-    )
-
-
-class SessionMemoryConfig(BaseModel):
-    """Per-session memory configuration (entity + working within one chat).
-
-    Memory is written by an optional "memory curator" - a separate, gated LLM call
-    (or a full agent) that extracts durable facts/notes from the conversation. It is
-    deliberately size-limited so context stays small. Reading is automatic: stored
-    memory is injected into the system prompt unless ``inject_into_prompt`` is False.
-    """
-
-    enabled: bool = Field(
-        default=False,
-        description="Master gate. If False the curator is a no-op (no extra LLM calls)",
-    )
-    entity: EntityMemoryConfig = Field(
-        default_factory=EntityMemoryConfig, description="Entity memory settings"
-    )
-    working: WorkingMemoryConfig = Field(
-        default_factory=WorkingMemoryConfig, description="Working memory settings"
-    )
-    cross_session: CrossSessionMemoryConfig = Field(
-        default_factory=CrossSessionMemoryConfig,
-        description="Cross-session memory (requires RunContext.user_id)",
+        description="Hard cap on stored entities (oldest dropped beyond cap)",
     )
 
     # Triggers
@@ -98,7 +60,7 @@ class SessionMemoryConfig(BaseModel):
     # Fetching / injection
     inject_into_prompt: bool = Field(
         default=True,
-        description="Inject stored entity/working memory into the system prompt",
+        description="Inject stored user facts into the system prompt",
     )
 
     # Curator (writer) configuration
@@ -108,7 +70,7 @@ class SessionMemoryConfig(BaseModel):
     )
     curator_prompt: str = Field(
         default="",
-        description="Custom curator prompt (empty = DEFAULT_SESSION_MEMORY_CURATOR_PROMPT)",
+        description="Custom curator prompt (empty = DEFAULT_MEMORY_CURATOR_PROMPT)",
     )
     curator_agent: Optional["AgentConfig"] = Field(
         default=None,
@@ -125,6 +87,6 @@ class SessionMemoryConfig(BaseModel):
 
     def get_curator_prompt(self) -> str:
         """Return the curator prompt, using the default if not overridden."""
-        from nexus.config.defaults import DEFAULT_SESSION_MEMORY_CURATOR_PROMPT
+        from nexus.config.defaults import DEFAULT_MEMORY_CURATOR_PROMPT
 
-        return self.curator_prompt or DEFAULT_SESSION_MEMORY_CURATOR_PROMPT
+        return self.curator_prompt or DEFAULT_MEMORY_CURATOR_PROMPT

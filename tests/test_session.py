@@ -29,10 +29,10 @@ async def test_memory_storage_adapter():
     assert loaded.agent_id == "agent-1"
 
     # Save updates
-    sess.working_memory = "New working notes"
+    sess.metadata["notes"] = "New working notes"
     await manager.save_session(sess)
     loaded = await manager.load_session("sess-1")
-    assert loaded.working_memory == "New working notes"
+    assert loaded.metadata["notes"] == "New working notes"
 
     # Append turn
     tc = ToolCallRecord(

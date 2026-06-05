@@ -1,6 +1,6 @@
 """Memory components for the Nexus Agent Framework.
 
-- ``MemoryCurator``: gated writer for per-session entity/working memory.
+- ``MemoryCurator``: gated writer for cross-session user facts.
 - ``CrossSessionMemoryStore``: durable profile facts keyed by tenant + user.
 """
 

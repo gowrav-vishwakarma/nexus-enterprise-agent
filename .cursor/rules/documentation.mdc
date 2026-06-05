@@ -1,0 +1,17 @@
+---
+description: Keep Nexus docs in sync when changing config, orchestration, or runner APIs
+globs:
+  - nexus/config/**
+  - nexus/orchestration/**
+  - nexus/runner/**
+  - nexus/multiagent/**
+  - examples/**
+  - .env.example
+---
+
+When editing Nexus configuration models, orchestration schema, or runner/orchestrator APIs:
+
+1. Update the matching page under `docs/reference/` (parameter tables: Name, Required?, Default, What it does).
+2. Update annotated examples in `docs/assets/` if signatures or defaults changed.
+3. Follow beginner-friendly rules in `docs/style-guide.md` and the sync table in `AGENTS.md`.
+4. Keep `README.md` lean; put new detail in `docs/`, not README.

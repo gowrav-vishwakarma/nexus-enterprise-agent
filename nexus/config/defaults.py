@@ -66,23 +66,16 @@ Goal: {{ persona.goal }}
 Background: {{ persona.backstory }}
 {% endif %}
 
-{% if cross_session_entity_memory %}
-## About this user (across conversations)
-{% for key, value in cross_session_entity_memory.items() %}
+{% if user_memory %}
+## About this user
+{% for key, value in user_memory.items() %}
 - {{ key }}: {{ value }}
 {% endfor %}
 {% endif %}
 
-{% if working_memory %}
-## Your Working Notes
-{{ working_memory }}
-{% endif %}
-
-{% if entity_memory %}
-## Known Facts (this conversation)
-{% for key, value in entity_memory.items() %}
-- {{ key }}: {{ value }}
-{% endfor %}
+{% if summary_text %}
+## Conversation Summary
+{{ summary_text }}
 {% endif %}
 
 Today's date: {{ current_date }}"""
@@ -97,29 +90,42 @@ Extract: names, numbers, dates, URLs, key findings, decisions made.
 Return ONLY valid JSON, no markdown formatting."""
 
 # Memory curator prompt - used by MemoryCurator (separate LLM call).
-# Placeholders {existing_entities}, {existing_working}, {conversation} are filled via
-# str.replace (NOT str.format), so literal JSON braces below are safe.
-DEFAULT_SESSION_MEMORY_CURATOR_PROMPT = """You are a memory curator for an AI agent. Read the recent conversation and decide what durable information is worth remembering for future turns. Keep memory MINIMAL and high-signal.
+# Placeholders {existing_entities}, {conversation} are filled via str.replace
+# (NOT str.format), so literal JSON braces below are safe.
+DEFAULT_MEMORY_CURATOR_PROMPT = """You are a memory curator for an AI agent. Read the recent conversation and decide what durable information is worth remembering across future chats. Keep memory MINIMAL and high-signal.
 
 Return ONLY a JSON object with this exact shape (no markdown fences, no commentary):
-{"entities": {"fact_key": "concise fact value"}, "working_memory": "short notes for the current task (or empty string)"}
+{"entities": {"fact_key": "concise fact value"}}
 
 Rules:
 - entities: durable, stable facts (names, ids, preferences, decisions). Use short, stable keys so updates overwrite cleanly. Omit ephemeral details.
-- working_memory: a brief scratchpad for the ACTIVE task. Return the full updated value, not a diff. Keep it short. Return "" to leave it unchanged.
-- If nothing is worth remembering, return {"entities": {}, "working_memory": ""}.
+- If nothing is worth remembering, return {"entities": {}}.
 - Prefer updating existing keys over adding near-duplicates.
 
 Existing entities (JSON, may be empty):
 {existing_entities}
 
-Existing working memory (may be empty):
-{existing_working}
-
 Recent conversation:
 {conversation}
 
 JSON:"""
+
+# Backward-compatible alias for imports that used the old name.
+DEFAULT_SESSION_MEMORY_CURATOR_PROMPT = DEFAULT_MEMORY_CURATOR_PROMPT
+
+# Context summarizer prompt - folds oldest turns into rolling summary_text.
+# Placeholders {existing_summary}, {turns_to_summarize} via str.replace.
+DEFAULT_CONTEXT_SUMMARY_PROMPT = """You are summarizing part of an ongoing agent conversation so older turns can be removed from context while preserving important facts.
+
+Write a concise factual summary of the turns below. If an existing summary is provided, merge new information into it (do not repeat verbatim). Keep names, numbers, decisions, and open tasks. Omit filler.
+
+Existing summary (may be empty):
+{existing_summary}
+
+Turns to fold into the summary:
+{turns_to_summarize}
+
+Updated summary:"""
 
 # Default tool call schema description for RCS
 DEFAULT_CONTEXT_UPDATES_PARAM_DESC = """_context_updates (list of dict, optional): Context compression updates for previous tool call results.
