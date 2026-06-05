@@ -89,6 +89,8 @@ async def test_agent_runner_loop():
         # Turn 0 verification
         assert sess.turns[0].user_message == "What is the weather?"
         assert len(sess.turns[0].tool_calls) == 1
+        assert sess.turns[0].tool_calls[0].tc_id == "TC1"
+        assert sess.turns[0].tool_calls[0].tc_index == 1
         assert sess.turns[0].tool_calls[0].tool_name == "global.web_search"
         assert sess.turns[0].tool_calls[0].raw_response == "Search result for weather"
         

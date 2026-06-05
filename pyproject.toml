@@ -90,4 +90,8 @@ line-length = 100
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not live_llm'"
+markers = [
+    "live_llm: real LLM API calls; opt-in only (pytest -m live_llm)",
+]
 

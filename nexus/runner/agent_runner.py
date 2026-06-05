@@ -552,7 +552,9 @@ class AgentRunner:
                         for u in updates if session.find_tc(u.tc_id)
                     )
 
-                    tc_id = f"TC{session.next_tc_index()}"
+                    session.next_tc_index()
+                    tc_index = session.tc_counter
+                    tc_id = f"TC{tc_index}"
 
                     if stream:
                         yield AgentStreamEvent(
@@ -626,7 +628,7 @@ class AgentRunner:
 
                     tc_record = ToolCallRecord(
                         tc_id=tc_id,
-                        tc_index=session.tc_counter,
+                        tc_index=tc_index,
                         tool_name=tc_req.tool_name,
                         tool_input=clean_args,
                         raw_response=result_str,
