@@ -155,6 +155,16 @@ class AgentRunner:
         """Resolve effective streaming mode from per-call override or config default."""
         return self.config.stream_output if stream is None else stream
 
+    def _session_lookup_kwargs(
+        self, session: Optional[AgentSession] = None
+    ) -> dict[str, Optional[str]]:
+        """Tenant/user hints for tenant-scoped storage adapters."""
+        return {
+            "tenant_id": self.run_context.tenant_id
+            or (session.tenant_id if session else None),
+            "user_id": self.run_context.user_id or (session.user_id if session else None),
+        }
+
     async def _load_cross_session_entity_memory(self) -> dict[str, str]:
         """Load cross-session facts for injection into the system prompt."""
         cross_cfg = self.config.session_memory.cross_session
@@ -181,7 +191,9 @@ class AgentRunner:
         sid = session_id or self.run_context.session_id
         session = None
         if sid:
-            session = await self.session_manager.load_session(sid)
+            session = await self.session_manager.load_session(
+                sid, **self._session_lookup_kwargs()
+            )
 
         if not session:
             session = await self.session_manager.create_session(
@@ -200,7 +212,9 @@ class AgentRunner:
         """Run memory curator after a turn if configured; reload session."""
         if self.memory_curator.should_trigger(turn_index, at_end=False):
             await self.memory_curator.curate(session, turn_index)
-            reloaded = await self.session_manager.load_session(session.session_id)
+            reloaded = await self.session_manager.load_session(
+                session.session_id, **self._session_lookup_kwargs(session)
+            )
             if reloaded is not None:
                 session = reloaded
             self._cross_session_entity_memory = await self._load_cross_session_entity_memory()
@@ -446,8 +460,14 @@ class AgentRunner:
                         duration_ms=int((time.time() - start_time) * 1000),
                         status="completed",
                     )
-                    await self.session_manager.append_turn(session.session_id, final_turn)
-                    session = await self.session_manager.load_session(session.session_id)
+                    await self.session_manager.append_turn(
+                        session.session_id,
+                        final_turn,
+                        **self._session_lookup_kwargs(session),
+                    )
+                    session = await self.session_manager.load_session(
+                        session.session_id, **self._session_lookup_kwargs(session)
+                    )
                     session = await self._maybe_curate_after_turn(session, turn_index)
                     turn_index += 1
                     break
@@ -578,8 +598,14 @@ class AgentRunner:
                     status="completed",
                 )
 
-                await self.session_manager.append_turn(session.session_id, turn_record)
-                session = await self.session_manager.load_session(session.session_id)
+                await self.session_manager.append_turn(
+                    session.session_id,
+                    turn_record,
+                    **self._session_lookup_kwargs(session),
+                )
+                session = await self.session_manager.load_session(
+                    session.session_id, **self._session_lookup_kwargs(session)
+                )
                 session = await self._maybe_curate_after_turn(session, turn_index)
 
                 await self.event_emitter.emit(
@@ -620,7 +646,9 @@ class AgentRunner:
 
         if status != "error" and self.memory_curator.active:
             try:
-                refreshed = await self.session_manager.load_session(session.session_id)
+                refreshed = await self.session_manager.load_session(
+                    session.session_id, **self._session_lookup_kwargs(session)
+                )
                 if refreshed is not None:
                     session = refreshed
                 final_turn_idx = max(turn_index - 1, 0)

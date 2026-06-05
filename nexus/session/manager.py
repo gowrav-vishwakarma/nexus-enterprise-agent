@@ -77,18 +77,35 @@ class SessionManager:
         await self._adapter.save_session(session)
         return session
 
-    async def load_session(self, session_id: str) -> Optional[AgentSession]:
+    async def load_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Optional[AgentSession]:
         """Load a session by ID."""
-        return await self._adapter.load_session(session_id)
+        return await self._adapter.load_session(
+            session_id, tenant_id=tenant_id, user_id=user_id
+        )
 
     async def save_session(self, session: AgentSession) -> None:
         """Save a session."""
         session.update_timestamp()
         await self._adapter.save_session(session)
 
-    async def append_turn(self, session_id: str, turn: TurnRecord) -> None:
+    async def append_turn(
+        self,
+        session_id: str,
+        turn: TurnRecord,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
         """Append a turn to an existing session."""
-        await self._adapter.append_turn(session_id, turn)
+        await self._adapter.append_turn(
+            session_id, turn, tenant_id=tenant_id, user_id=user_id
+        )
 
     async def update_tc_summary(
         self,
@@ -96,6 +113,9 @@ class SessionManager:
         tc_id: str,
         summarized_response: str,
         summarized_by_turn: int,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> None:
         """Update a tool call record's summary."""
         await self._adapter.update_tc_summary(
@@ -103,11 +123,21 @@ class SessionManager:
             tc_id=tc_id,
             summarized_response=summarized_response,
             summarized_by_turn=summarized_by_turn,
+            tenant_id=tenant_id,
+            user_id=user_id,
         )
 
-    async def delete_session(self, session_id: str) -> bool:
+    async def delete_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> bool:
         """Delete a session."""
-        await self._adapter.delete_session(session_id)
+        await self._adapter.delete_session(
+            session_id, tenant_id=tenant_id, user_id=user_id
+        )
         return True
 
     async def list_sessions(

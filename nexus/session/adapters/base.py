@@ -15,7 +15,13 @@ class StorageAdapter(ABC):
         ...
 
     @abstractmethod
-    async def load_session(self, session_id: str) -> Optional[AgentSession]:
+    async def load_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Optional[AgentSession]:
         """Load a session by ID."""
         ...
 
@@ -32,12 +38,25 @@ class StorageAdapter(ABC):
         ...
 
     @abstractmethod
-    async def delete_session(self, session_id: str) -> None:
+    async def delete_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
         """Delete a session."""
         ...
 
     @abstractmethod
-    async def append_turn(self, session_id: str, turn: TurnRecord) -> None:
+    async def append_turn(
+        self,
+        session_id: str,
+        turn: TurnRecord,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
         """Atomically append a turn to a session."""
         ...
 
@@ -48,6 +67,9 @@ class StorageAdapter(ABC):
         tc_id: str,
         summarized_response: str,
         summarized_by_turn: int,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> None:
         """Update a tool call record's summary field."""
         ...

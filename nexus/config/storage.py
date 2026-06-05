@@ -4,6 +4,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from nexus.storage.paths import get_data_root
+
 
 StorageAdapterType = Literal["memory", "file", "sqlite", "postgresql", "redis"]
 
@@ -29,7 +31,18 @@ class MemoryStorageConfig(BaseModel):
 class FileStorageConfig(BaseModel):
     """File-based storage configuration."""
 
-    base_path: str = Field(default="./nexus_sessions", description="Base directory for sessions")
+    data_root: str = Field(
+        default_factory=lambda: str(get_data_root()),
+        description="Tenant storage root (default ./tenants, override via NEXUS_DATA_ROOT)",
+    )
+    tenant_scoped: bool = Field(
+        default=True,
+        description="Store sessions under tenants/{tenant_id}/users/{user_id}/{session_id}/",
+    )
+    base_path: str = Field(
+        default="./nexus_sessions",
+        description="Legacy flat base directory when tenant_scoped=False",
+    )
     filename_template: str = Field(default="{session_id}.json", description="Filename template")
     overwrite_mode: Literal["full_rewrite", "append_jsonl"] = Field(
         default="full_rewrite", description="Write mode"
@@ -37,14 +50,47 @@ class FileStorageConfig(BaseModel):
     pretty_print: bool = Field(default=False, description="Pretty-print JSON")
     compression: Optional[Literal["gzip"]] = Field(None, description="Compression type")
 
+    def to_adapter_config(self) -> dict[str, Any]:
+        return {
+            "data_root": self.data_root,
+            "tenant_scoped": self.tenant_scoped,
+            "base_path": self.base_path,
+            "filename_template": self.filename_template,
+            "overwrite_mode": self.overwrite_mode,
+            "pretty_print": self.pretty_print,
+        }
+
 
 class SQLiteStorageConfig(BaseModel):
     """SQLite storage configuration."""
 
-    db_path: str = Field(default="./nexus_sessions.db", description="Database file path")
+    data_root: str = Field(
+        default_factory=lambda: str(get_data_root()),
+        description="Tenant storage root (default ./tenants, override via NEXUS_DATA_ROOT)",
+    )
+    tenant_scoped: bool = Field(
+        default=True,
+        description="Store sessions in tenants/{tenant_id}/users/{user_id}/sessions.db",
+    )
+    db_path: Optional[str] = Field(
+        default=None,
+        description="Single shared database path when tenant_scoped=False",
+    )
     table_prefix: str = Field(default="nexus_", description="Table name prefix")
     wal_mode: bool = Field(default=True, description="Enable WAL mode")
     auto_migrate: bool = Field(default=True, description="Auto-create tables")
+
+    def to_adapter_config(self) -> dict[str, Any]:
+        config: dict[str, Any] = {
+            "data_root": self.data_root,
+            "tenant_scoped": self.tenant_scoped,
+            "table_prefix": self.table_prefix,
+            "wal_mode": self.wal_mode,
+            "auto_migrate": self.auto_migrate,
+        }
+        if self.db_path is not None:
+            config["db_path"] = self.db_path
+        return config
 
 
 class PostgreSQLStorageConfig(BaseModel):

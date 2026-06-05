@@ -244,7 +244,6 @@ class ResolvedTenant(BaseModel):
 class NexusTenantConfigFactory:
     PLATFORM_OPENAI_KEY: SecretStr = SecretStr(os.getenv("PLATFORM_OPENAI_KEY", "mock-platform-key"))
     PLATFORM_ANTHROPIC_KEY: SecretStr = SecretStr(os.getenv("PLATFORM_ANTHROPIC_KEY", "mock-platform-key"))
-    SHARED_SQLITE_PATH: str = "./shared_sessions.db"
     SHARED_PG_DSN: SecretStr = SecretStr("postgresql://user:pass@localhost:5432/shared_db")
 
     # Custom LLM endpoint (LiteLLM proxy, LM Studio, or any OpenAI-compatible server)
@@ -322,11 +321,13 @@ class NexusTenantConfigFactory:
             )
 
         if limits.storage_adapter == "sqlite":
+            from nexus.storage.paths import get_data_root
+
             return SessionStorageConfig(
                 adapter="sqlite",
                 adapter_config={
-                    "db_path": cls.SHARED_SQLITE_PATH,
-                    "table_prefix": f"t_{tenant.tenant_id}_",
+                    "data_root": str(get_data_root()),
+                    "tenant_scoped": True,
                 },
             )
 
@@ -454,9 +455,7 @@ SHARED_TOOL_REGISTRY.register_plugin(WebSearchPlugin())
 SHARED_TOOL_REGISTRY.register_plugin(DatabasePlugin())
 SHARED_TOOL_REGISTRY.register_plugin(CalendarPlugin())
 
-SHARED_CROSS_SESSION_MEMORY_STORE = SQLiteCrossSessionMemoryStore(
-    db_path="./shared_user_memory.db"
-)
+SHARED_CROSS_SESSION_MEMORY_STORE = SQLiteCrossSessionMemoryStore()
 
 
 # ── Request / Response schemas ───────────────────────────────────────────────

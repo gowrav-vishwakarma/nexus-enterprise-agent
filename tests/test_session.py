@@ -9,6 +9,7 @@ from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, TurnRecord, ToolCallRecord
 from nexus.session.adapters.memory import MemoryStorageAdapter
 from nexus.session.adapters.file import FileStorageAdapter
+from nexus.storage.paths import session_file
 
 
 @pytest.mark.asyncio
@@ -63,26 +64,29 @@ async def test_memory_storage_adapter():
 
 
 @pytest.mark.asyncio
-async def test_file_storage_adapter():
-    """Test file storage adapter serialization and IO operations."""
+async def test_file_storage_adapter_tenant_scoped():
+    """Test tenant-scoped file storage layout."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        adapter = FileStorageAdapter(base_path=tmpdir, pretty_print=True)
+        adapter = FileStorageAdapter(data_root=tmpdir, pretty_print=True, tenant_scoped=True)
         manager = SessionManager(storage_adapter=adapter)
 
-        # Create session
-        sess = await manager.create_session(agent_id="agent-1", session_id="file-sess-1")
+        sess = await manager.create_session(
+            agent_id="agent-1",
+            session_id="file-sess-1",
+            tenant_id="t1",
+            user_id="u1",
+        )
         assert sess.session_id == "file-sess-1"
 
-        # Check file exists
-        file_path = os.path.join(tmpdir, "file-sess-1.json")
-        assert os.path.exists(file_path)
+        expected = session_file("t1", "u1", "file-sess-1", data_root=tmpdir)
+        assert expected.exists()
 
-        # Load session
-        loaded = await manager.load_session("file-sess-1")
+        loaded = await manager.load_session(
+            "file-sess-1", tenant_id="t1", user_id="u1"
+        )
         assert loaded is not None
         assert loaded.agent_id == "agent-1"
 
-        # Append turn and save
         tc = ToolCallRecord(
             tc_index=0,
             tool_name="run_code",
@@ -93,19 +97,43 @@ async def test_file_storage_adapter():
             user_message="run this code",
             tool_calls=[tc],
         )
-        await manager.append_turn("file-sess-1", turn)
-        
-        # Load and verify
-        loaded = await manager.load_session("file-sess-1")
+        await manager.append_turn(
+            "file-sess-1", turn, tenant_id="t1", user_id="u1"
+        )
+
+        loaded = await manager.load_session(
+            "file-sess-1", tenant_id="t1", user_id="u1"
+        )
         assert len(loaded.turns) == 1
         assert loaded.turns[0].tool_calls[0].tool_name == "run_code"
 
-        # Test listing
-        sessions = await manager.list_sessions(agent_id="agent-1")
+        sessions = await manager.list_sessions(
+            agent_id="agent-1", tenant_id="t1", user_id="u1"
+        )
         assert len(sessions) == 1
         assert sessions[0].session_id == "file-sess-1"
 
-        # Test delete
-        await manager.delete_session("file-sess-1")
-        assert not os.path.exists(file_path)
-        assert await manager.load_session("file-sess-1") is None
+        await manager.delete_session(
+            "file-sess-1", tenant_id="t1", user_id="u1"
+        )
+        assert not expected.exists()
+        assert await manager.load_session(
+            "file-sess-1", tenant_id="t1", user_id="u1"
+        ) is None
+
+
+@pytest.mark.asyncio
+async def test_file_storage_adapter_legacy_flat():
+    """Legacy flat layout escape hatch."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        adapter = FileStorageAdapter(
+            base_path=tmpdir, tenant_scoped=False, pretty_print=True
+        )
+        manager = SessionManager(storage_adapter=adapter)
+
+        sess = await manager.create_session(agent_id="agent-1", session_id="file-sess-1")
+        file_path = os.path.join(tmpdir, "file-sess-1.json")
+        assert os.path.exists(file_path)
+
+        loaded = await manager.load_session("file-sess-1")
+        assert loaded is not None

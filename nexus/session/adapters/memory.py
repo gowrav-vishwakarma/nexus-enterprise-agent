@@ -45,7 +45,13 @@ class MemoryStorageAdapter(StorageAdapter):
             self._sessions[session.session_id] = session
             self._evict_if_needed()
 
-    async def load_session(self, session_id: str) -> Optional[AgentSession]:
+    async def load_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Optional[AgentSession]:
         async with self._get_lock(session_id):
             session = self._sessions.get(session_id)
             if session and self._ttl_seconds:
@@ -75,11 +81,24 @@ class MemoryStorageAdapter(StorageAdapter):
         results.sort(key=lambda s: s.updated_at, reverse=True)
         return results[offset:offset + limit]
 
-    async def delete_session(self, session_id: str) -> None:
+    async def delete_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
         async with self._get_lock(session_id):
             self._sessions.pop(session_id, None)
 
-    async def append_turn(self, session_id: str, turn: TurnRecord) -> None:
+    async def append_turn(
+        self,
+        session_id: str,
+        turn: TurnRecord,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
         async with self._get_lock(session_id):
             session = self._sessions.get(session_id)
             if session:
@@ -92,6 +111,9 @@ class MemoryStorageAdapter(StorageAdapter):
         tc_id: str,
         summarized_response: str,
         summarized_by_turn: int,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> None:
         async with self._get_lock(session_id):
             session = self._sessions.get(session_id)

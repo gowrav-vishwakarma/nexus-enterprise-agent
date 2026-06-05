@@ -80,7 +80,7 @@ async def main():
         tool_registry=registry,
         storage_config=SessionStorageConfig(
             adapter="sqlite",  # use "memory" for throwaway local runs (lost on exit)
-            adapter_config={"db_path": "./sessions.db"},
+            adapter_config={"tenant_scoped": True},  # uses NEXUS_DATA_ROOT (default ./tenants)
         ),
         run_context=RunContext(tenant_id="demo", user_id="demo-user", session_id="sess-1"),
     )
@@ -167,13 +167,28 @@ After resolution, the runner syncs the chosen id back onto `RunContext`.
 
 ## Storage and session history
 
+### Tenant-scoped on-disk layout
+
+By default, file and SQLite adapters store data under **`./tenants`** (override with the **`NEXUS_DATA_ROOT`** env var):
+
+```text
+{NEXUS_DATA_ROOT}/
+  _index/sessions.json
+  {tenant_id}/users/{user_id}/
+    sessions.db              # SQLite session adapter
+    memory.db                # SQLiteCrossSessionMemoryStore
+    {session_id}/session.json  # file session adapter
+```
+
+Missing `tenant_id` or `user_id` map to `_default`. Set `tenant_scoped=False` on adapter config to use legacy flat paths (`./nexus_sessions/`, single `db_path`).
+
 ### Adapters
 
-| Adapter | Where data lives |
-|---------|------------------|
+| Adapter | Where data lives (tenant-scoped default) |
+|---------|------------------------------------------|
 | `memory` | In-process only; lost on exit |
-| `file` | One JSON file per session: `{session_id}.json` |
-| `sqlite` | One row per session; full session in a `data` JSON column |
+| `file` | `{tenant_id}/users/{user_id}/{session_id}/session.json` |
+| `sqlite` | `{tenant_id}/users/{user_id}/sessions.db` (one row per session) |
 
 Configure via `SessionStorageConfig` on the runner/orchestrator (see [What goes where](#what-goes-where)).
 
@@ -349,7 +364,7 @@ registry = ToolRegistry()
 
 storage_config = SessionStorageConfig(
     adapter="sqlite",
-    adapter_config={"db_path": "./sessions.db"},
+    adapter_config={"tenant_scoped": True},
 )
 
 # Member 1: OpenAI for search-heavy work
@@ -568,7 +583,7 @@ from nexus.config.memory import (
 )
 from nexus.memory import SQLiteCrossSessionMemoryStore
 
-CROSS_SESSION_STORE = SQLiteCrossSessionMemoryStore(db_path="./cross_session_memory.db")
+CROSS_SESSION_STORE = SQLiteCrossSessionMemoryStore()  # per-user memory.db under NEXUS_DATA_ROOT
 
 AgentConfig(
     name="assistant",

@@ -1,6 +1,7 @@
 """Tests for cross-session memory."""
 
 import json
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,7 +14,11 @@ from nexus.config.memory import (
 )
 from nexus.context.builder import ContextWindowBuilder
 from nexus.llm.response import LLMResponse, TokenUsage
-from nexus.memory.cross_session_store import InMemoryCrossSessionMemoryStore
+from nexus.memory.cross_session_store import (
+    InMemoryCrossSessionMemoryStore,
+    SQLiteCrossSessionMemoryStore,
+)
+from nexus.storage.paths import memory_db_path
 from nexus.runner.agent_runner import AgentRunner
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, TurnRecord
@@ -178,3 +183,40 @@ async def test_curator_promotes_to_cross_session_store():
 
     record = await store.load("t", "u1", "bot")
     assert record.entity_memory.get("contact") == "email"
+
+
+@pytest.mark.asyncio
+async def test_sqlite_cross_session_memory_tenant_scoped():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = SQLiteCrossSessionMemoryStore(data_root=tmpdir, tenant_scoped=True)
+        await store.merge_entities(
+            "tenant-a",
+            "user-1",
+            "agent",
+            {"preference": "email"},
+            max_entities=50,
+        )
+
+        db_path = memory_db_path("tenant-a", "user-1", data_root=tmpdir)
+        assert db_path.exists()
+
+        record = await store.load("tenant-a", "user-1", "agent")
+        assert record.entity_memory["preference"] == "email"
+
+        await store.merge_entities(
+            "tenant-a",
+            "user-2",
+            "agent",
+            {"preference": "sms"},
+            max_entities=50,
+        )
+        other_db = memory_db_path("tenant-a", "user-2", data_root=tmpdir)
+        assert other_db.exists()
+        assert other_db != db_path
+
+        user2 = await store.load("tenant-a", "user-2", "agent")
+        assert user2.entity_memory["preference"] == "sms"
+
+

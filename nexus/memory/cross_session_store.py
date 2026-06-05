@@ -131,7 +131,12 @@ class InMemoryCrossSessionMemoryStore:
 class SQLiteCrossSessionMemoryStore:
     """SQLite-backed cross-session memory store."""
 
-    def __init__(self, db_path: str = "./nexus_user_memory.db") -> None:
+    def __init__(
+        self,
+        db_path: Optional[str] = None,
+        data_root: Optional[str] = None,
+        tenant_scoped: bool = True,
+    ) -> None:
         try:
             import aiosqlite  # noqa: F401
         except ImportError as exc:
@@ -139,14 +144,30 @@ class SQLiteCrossSessionMemoryStore:
                 "aiosqlite is required for SQLiteCrossSessionMemoryStore. "
                 "Install it with: uv pip install aiosqlite"
             ) from exc
-        self.db_path = db_path
-        self._initialised = False
+        from pathlib import Path
 
-    async def _ensure_schema(self, db) -> None:
-        if not self._initialised:
+        from nexus.storage.paths import get_data_root, memory_db_path
+
+        self.tenant_scoped = tenant_scoped
+        self.data_root = Path(data_root) if data_root else get_data_root()
+        self.db_path = db_path
+        self._initialised_paths: set[str] = set()
+        self._memory_db_path = memory_db_path
+
+    def _resolve_db_path(self, tenant_id: Optional[str], user_id: str) -> str:
+        if not self.tenant_scoped:
+            if not self.db_path:
+                raise ValueError("db_path is required when tenant_scoped=False")
+            return self.db_path
+        path = self._memory_db_path(tenant_id, user_id, data_root=self.data_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return str(path)
+
+    async def _ensure_schema(self, db, db_file: str) -> None:
+        if db_file not in self._initialised_paths:
             await db.executescript(_CREATE_USER_MEMORY_SQL)
             await db.commit()
-            self._initialised = True
+            self._initialised_paths.add(db_file)
 
     async def load(
         self,
@@ -157,8 +178,9 @@ class SQLiteCrossSessionMemoryStore:
         import aiosqlite
 
         key = make_cross_session_memory_key(tenant_id, user_id, namespace)
-        async with aiosqlite.connect(self.db_path) as db:
-            await self._ensure_schema(db)
+        db_file = self._resolve_db_path(tenant_id, user_id)
+        async with aiosqlite.connect(db_file) as db:
+            await self._ensure_schema(db, db_file)
             async with db.execute(
                 "SELECT data FROM nexus_user_memory WHERE memory_key = ?",
                 (key,),
@@ -174,8 +196,9 @@ class SQLiteCrossSessionMemoryStore:
         record.touch()
         key = make_cross_session_memory_key(record.tenant_id, record.user_id, record.namespace)
         data = record.model_dump_json()
-        async with aiosqlite.connect(self.db_path) as db:
-            await self._ensure_schema(db)
+        db_file = self._resolve_db_path(record.tenant_id, record.user_id)
+        async with aiosqlite.connect(db_file) as db:
+            await self._ensure_schema(db, db_file)
             await db.execute(
                 """
                 INSERT INTO nexus_user_memory
