@@ -36,7 +36,7 @@ async def main() -> None:
         # run_context (required) — who is calling and which chat thread.
         run_context=RunContext(
             tenant_id="demo-tenant",   # optional, default: None — which customer/org
-            user_id="demo-user",       # optional, default: None — which person (needed for cross-chat memory)
+            user_id="demo-user",       # optional, default: None — scopes chat history + cross-session user_memory (tenant + user)
             session_id=session_id,     # optional, default: None — chat thread id; set BEFORE runtime for teams
             request_id=None,           # optional, default: None — your tracing/correlation id
             metadata={},               # optional, default: {} — extra key/value bag for tools

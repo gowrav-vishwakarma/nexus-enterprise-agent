@@ -22,7 +22,11 @@ async def main() -> None:
         help="Path to orchestration YAML manifest",
     )
     parser.add_argument("--tenant-id", default="demo-tenant")
-    parser.add_argument("--user-id", default="demo-user")
+    parser.add_argument(
+        "--user-id",
+        default="demo-user",
+        help="Scopes chat history and cross-session user_memory (tenant + user)",
+    )
     parser.add_argument("--session-id", default=None)
     parser.add_argument("message", nargs="?", default="Summarize recent framework releases.")
     args = parser.parse_args()

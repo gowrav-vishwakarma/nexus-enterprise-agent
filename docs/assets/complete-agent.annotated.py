@@ -133,7 +133,7 @@ async def main() -> None:
         ),
         run_context=RunContext(
             tenant_id="demo",                               # optional, default: empty RunContext
-            user_id="demo-user",
+            user_id="demo-user",                            # scopes chat history + cross-session user_memory (tenant + user)
             session_id="sess-1",
             metadata={},
         ),

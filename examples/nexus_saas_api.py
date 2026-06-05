@@ -1,7 +1,9 @@
 """NEXUS Framework — Multi-Tenant SaaS Example.
 
-Demonstrates plan-based feature gating, per-tenant storage,
-memory, RCS, and agent group configurations in a FastAPI environment.
+Demonstrates plan-based feature gating, per-tenant storage, cross-session
+user memory (``user_memory``), RCS, and agent group configurations in a
+FastAPI environment. Chat history and durable facts are scoped to tenant +
+user via ``X-Tenant-ID`` and ``X-User-ID``.
 """
 
 from __future__ import annotations
@@ -537,6 +539,9 @@ class ChatRequest(BaseModel):
 async def chat(
     body: ChatRequest,
     tenant_ctx: ResolvedTenant = Depends(get_resolved_tenant),
+    # Defaults to demo-user when omitted (fine for local demos). Production apps
+    # should send a stable id per signed-in user — chat history and cross-session
+    # user_memory are scoped to tenant + user, not tenant alone.
     x_user_id: str = Header(default="demo-user", alias="X-User-ID"),
 ):
     # Fetch database record for detailed options
@@ -607,7 +612,11 @@ async def get_session(
     tenant_ctx: ResolvedTenant = Depends(get_resolved_tenant),
     x_user_id: str = Header(default="demo-user", alias="X-User-ID"),
 ):
-    """Return the full persisted session JSON (turns, tool calls, memory, RCS totals)."""
+    """Return the persisted chat thread JSON (turns, tool calls, RCS totals).
+
+    Durable user facts (``user_memory``) live in the cross-session store, not in
+    this session payload. See ``GET`` handlers that pass ``user_id`` for scoping.
+    """
     manager = get_shared_session_manager(tenant_ctx.tenant_id, tenant_ctx.storage_config)
     session = await manager.load_session(
         session_id,
