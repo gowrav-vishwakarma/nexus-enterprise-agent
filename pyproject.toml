@@ -3,15 +3,27 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nexus-agent"
+name = "nexus-enterprise-agent"
 version = "0.1.0"
-description = "A SaaS-ready, context-efficient Python multi-agent framework"
+description = "Enterprise-ready, SaaS-native Python multi-agent framework"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "Nexus Team"}
 ]
 requires-python = ">=3.10"
+keywords = ["agents", "llm", "multi-agent", "saas", "orchestration"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
@@ -22,6 +34,11 @@ dependencies = [
     "tenacity>=8.0",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework"
+Repository = "https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework"
+Documentation = "https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework/tree/main/docs"
 
 [project.optional-dependencies]
 # Storage adapters
@@ -55,12 +72,12 @@ fastapi = [
 
 # All dependencies
 all = [
-    "nexus-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi]",
+    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi]",
 ]
 
 # Full test suite (all adapters + storage + FastAPI)
 test = [
-    "nexus-agent[dev,litellm,openai,anthropic,sqlite,postgres,redis,file,fastapi]",
+    "nexus-enterprise-agent[dev,litellm,openai,anthropic,sqlite,postgres,redis,file,fastapi]",
 ]
 
 # Dev / integration-test dependencies

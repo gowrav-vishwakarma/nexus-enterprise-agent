@@ -74,7 +74,7 @@ Use **one** `storage_config` for the whole team.
 Install extras:
 
 ```bash
-uv pip install "nexus-agent[postgres,redis]"
+uv pip install "nexus-enterprise-agent[postgres,redis]"
 ```
 
 You control DSN, schema, and table names. See [persistence-resolver guide](../guides/persistence-resolver.md).

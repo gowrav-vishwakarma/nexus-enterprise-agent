@@ -2022,7 +2022,7 @@ wheels = [
 ]
 
 [[package]]
-name = "nexus-agent"
+name = "nexus-enterprise-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -2162,8 +2162,8 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1" },
     { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.40" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "nexus-agent", extras = ["dev", "litellm", "openai", "anthropic", "sqlite", "postgres", "redis", "file", "fastapi"], marker = "extra == 'test'" },
-    { name = "nexus-agent", extras = ["sqlite", "postgres", "file", "openai", "anthropic", "gemini", "litellm", "groq", "ollama", "otel", "fastapi"], marker = "extra == 'all'" },
+    { name = "nexus-enterprise-agent", extras = ["dev", "litellm", "openai", "anthropic", "sqlite", "postgres", "redis", "file", "fastapi"], marker = "extra == 'test'" },
+    { name = "nexus-enterprise-agent", extras = ["sqlite", "postgres", "file", "openai", "anthropic", "gemini", "litellm", "groq", "ollama", "otel", "fastapi"], marker = "extra == 'all'" },
     { name = "ollama", marker = "extra == 'ollama'", specifier = ">=0.2" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.30" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.24" },

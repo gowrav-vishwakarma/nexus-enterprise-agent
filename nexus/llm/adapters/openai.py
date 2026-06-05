@@ -29,7 +29,7 @@ class OpenAIAdapter(LLMAdapter):
         except ImportError:
             raise ImportError(
                 "The 'openai' package is required to use the OpenAI adapter. "
-                "Install it using `pip install nexus-agent[openai]`"
+                "Install it using `pip install nexus-enterprise-agent[openai]`"
             )
 
         api_key_str = self.config.api_key.get_secret_value() if hasattr(self.config.api_key, "get_secret_value") else str(self.config.api_key)

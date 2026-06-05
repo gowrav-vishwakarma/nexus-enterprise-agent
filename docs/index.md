@@ -67,6 +67,20 @@ flowchart TD
 
 ## Install
 
+From PyPI:
+
+```bash
+pip install nexus-enterprise-agent
+```
+
+With extras (see [storage](reference/storage.md) and [environment](reference/environment.md)):
+
+```bash
+pip install "nexus-enterprise-agent[sqlite,litellm,fastapi]"
+```
+
+For local development:
+
 ```bash
 uv sync --extra dev --extra sqlite --extra file
 ```

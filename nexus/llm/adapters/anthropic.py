@@ -28,7 +28,7 @@ class AnthropicAdapter(LLMAdapter):
         except ImportError:
             raise ImportError(
                 "The 'anthropic' package is required to use the Anthropic adapter. "
-                "Install it using `pip install nexus-agent[anthropic]`"
+                "Install it using `pip install nexus-enterprise-agent[anthropic]`"
             )
 
         api_key_str = self.config.api_key.get_secret_value() if hasattr(self.config.api_key, "get_secret_value") else str(self.config.api_key)

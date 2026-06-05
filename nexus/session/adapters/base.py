@@ -13,7 +13,7 @@ Future adapters:
 When ``adapter=postgresql`` or ``adapter=redis`` is configured, use the
 implementations in ``nexus.session.adapters.postgresql`` and
 ``nexus.session.adapters.redis``. Install optional deps via
-``pip install nexus-agent[postgres,redis]``.
+``pip install nexus-enterprise-agent[postgres,redis]``.
 """
 
 from abc import ABC, abstractmethod

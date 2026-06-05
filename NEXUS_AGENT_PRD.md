@@ -2333,14 +2333,14 @@ mypy = ">=1.10"
 
 ### Install extras
 ```bash
-pip install nexus-agent                          # core only
-pip install nexus-agent[sqlite]                  # + SQLite adapter
-pip install nexus-agent[postgres]                # + PostgreSQL adapter
-pip install nexus-agent[redis]                   # + Redis adapter
-pip install nexus-agent[openai]                  # + OpenAI client
-pip install nexus-agent[anthropic]               # + Anthropic client
-pip install nexus-agent[fastapi]                 # + FastAPI helpers
-pip install nexus-agent[all]                     # everything
+pip install nexus-enterprise-agent                          # core only
+pip install nexus-enterprise-agent[sqlite]                  # + SQLite adapter
+pip install nexus-enterprise-agent[postgres]                # + PostgreSQL adapter
+pip install nexus-enterprise-agent[redis]                   # + Redis adapter
+pip install nexus-enterprise-agent[openai]                  # + OpenAI client
+pip install nexus-enterprise-agent[anthropic]               # + Anthropic client
+pip install nexus-enterprise-agent[fastapi]                 # + FastAPI helpers
+pip install nexus-enterprise-agent[all]                     # everything
 ```
 
 ---

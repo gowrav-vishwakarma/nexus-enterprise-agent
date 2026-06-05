@@ -153,6 +153,9 @@ agent_cache/
 api_keys.py
 secrets.py
 
+# Local PyPI publish script (contains API token)
+scripts/publish-pypi.sh
+
 # ============================================
 # Generated Files
 # ============================================

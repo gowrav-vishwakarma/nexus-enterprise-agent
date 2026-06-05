@@ -281,7 +281,7 @@ class PostgreSQLCrossSessionMemoryStore:
         except ImportError as exc:
             raise ImportError(
                 "asyncpg is required for PostgreSQLCrossSessionMemoryStore. "
-                "Install with: pip install nexus-agent[postgres]"
+                "Install with: pip install nexus-enterprise-agent[postgres]"
             ) from exc
 
         self.dsn = dsn
@@ -425,7 +425,7 @@ class RedisCrossSessionMemoryStore:
         except ImportError as exc:
             raise ImportError(
                 "redis is required for RedisCrossSessionMemoryStore. "
-                "Install with: pip install nexus-agent[redis]"
+                "Install with: pip install nexus-enterprise-agent[redis]"
             ) from exc
 
         self.memory_key_template = memory_key_template or "{prefix}xmem:{memory_key}"

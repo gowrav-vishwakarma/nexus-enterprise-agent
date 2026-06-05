@@ -40,7 +40,7 @@ class RedisStorageAdapter(StorageAdapter):
         if aioredis is None:
             raise ImportError(
                 "redis is required for RedisStorageAdapter. "
-                "Install with: pip install nexus-agent[redis]"
+                "Install with: pip install nexus-enterprise-agent[redis]"
             )
         self.key_prefix = key_prefix
         self.session_key_template = session_key_template or "{prefix}session:{session_id}"

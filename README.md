@@ -8,15 +8,49 @@ No global LLM settings. No shared agent singleton. Built for multi-tenant SaaS a
 
 ## Install
 
+Published on PyPI as [`nexus-enterprise-agent`](https://pypi.org/project/nexus-enterprise-agent/). Import in Python as `nexus`.
+
+**pip**
+
 ```bash
+pip install nexus-enterprise-agent
+```
+
+**uv**
+
+```bash
+uv add nexus-enterprise-agent
+```
+
+**Optional extras** — combine with commas inside brackets:
+
+| Extra | Adds |
+|-------|------|
+| `sqlite`, `postgres`, `redis`, `file` | Storage adapters |
+| `openai`, `anthropic`, `gemini`, `litellm`, `groq`, `ollama` | LLM provider clients |
+| `fastapi` | FastAPI + SSE helpers |
+| `otel` | OpenTelemetry exporters |
+| `all` | Everything above |
+
+```bash
+pip install "nexus-enterprise-agent[sqlite,litellm,fastapi]"
+```
+
+**From GitHub** (latest main, not a PyPI release):
+
+```bash
+pip install "git+https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework.git"
+```
+
+**Contributors** — clone and sync the repo:
+
+```bash
+git clone https://github.com/gowrav-vishwakarma/nexus-saas-agent-framework.git
+cd nexus-saas-agent-framework
 uv sync --extra dev --extra sqlite --extra file
 ```
 
-For the SaaS API example:
-
-```bash
-uv sync --extra fastapi --extra sqlite --extra litellm
-```
+For the SaaS API example, also add `--extra fastapi --extra litellm`.
 
 Copy [.env.example](.env.example) to `.env` and set your LLM API key.
 

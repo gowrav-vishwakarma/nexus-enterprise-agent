@@ -85,7 +85,7 @@ class PostgreSQLStorageAdapter(StorageAdapter):
         if asyncpg is None:
             raise ImportError(
                 "asyncpg is required for PostgreSQLStorageAdapter. "
-                "Install with: pip install nexus-agent[postgres]"
+                "Install with: pip install nexus-enterprise-agent[postgres]"
             )
         self.dsn = dsn
         self.pool_size = pool_size
