@@ -1,0 +1,23 @@
+version: "1"
+root: loop_a
+prompts_module: ./basic_prompts.py
+
+defaults:
+  llm:
+    provider: openai
+    model: gpt-4o-mini
+    api_key: test-key
+
+agents:
+  helper:
+    persona:
+      role: Helper
+      goal: Help
+
+groups:
+  loop_a:
+    pattern: pipeline
+    members: [loop_b]
+  loop_b:
+    pattern: pipeline
+    members: [loop_a]

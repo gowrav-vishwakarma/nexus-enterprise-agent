@@ -1,0 +1,49 @@
+version: "1"
+root: nested_team
+prompts_module: ./basic_prompts.py
+
+defaults:
+  llm:
+    provider: openai
+    model: gpt-4o-mini
+    api_key: test-key
+
+agents:
+  supervisor:
+    persona:
+      role: Supervisor
+      goal: Coordinate
+      prompt: researcher_system
+      prompt_args:
+        domain: ops
+
+  researcher:
+    tool_plugins: [fixture_search]
+    persona:
+      role: Researcher
+      goal: Gather
+      prompt: researcher_system
+      prompt_args:
+        domain: ops
+
+  analyst:
+    persona:
+      role: Analyst
+      goal: Analyze
+      prompt: analyst_system
+      prompt_args:
+        domain: ops
+
+plugins:
+  fixture_search: tests.fixtures.orchestration.test_plugin.FixtureSearchPlugin
+
+groups:
+  analysis_pipeline:
+    pattern: pipeline
+    session_id_prefix: pipe_
+    members: [researcher, analyst]
+
+  nested_team:
+    pattern: supervisor
+    session_id_prefix: team_
+    members: [supervisor, analysis_pipeline]

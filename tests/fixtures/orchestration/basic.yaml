@@ -1,0 +1,43 @@
+version: "1"
+prompts_module: ./basic_prompts.py
+root: research_pipeline
+
+defaults:
+  agent:
+    turns:
+      max_turns: 3
+  llm: &default_llm
+    provider: openai
+    model: ${ENV:ORCH_TEST_MODEL|gpt-4o-mini}
+    api_key: ${ENV:ORCH_TEST_API_KEY|test-key}
+
+storage:
+  adapter: memory
+
+plugins:
+  fixture_search: tests.fixtures.orchestration.test_plugin.FixtureSearchPlugin
+
+agents:
+  researcher:
+    llm: *default_llm
+    tool_plugins: [fixture_search]
+    persona:
+      role: Researcher
+      goal: Gather facts
+      prompt: researcher_system
+      prompt_args:
+        domain: finance
+
+  analyst:
+    llm: *default_llm
+    persona:
+      role: Analyst
+      goal: Analyze findings
+      prompt: analyst_system
+      prompt_args:
+        domain: finance
+
+groups:
+  research_pipeline:
+    pattern: pipeline
+    members: [researcher, analyst]

@@ -1,0 +1,20 @@
+version: "1"
+root: parallel_group
+prompts_module: ./basic_prompts.py
+
+defaults:
+  llm:
+    provider: openai
+    model: gpt-4o-mini
+    api_key: test-key
+
+agents:
+  worker:
+    persona:
+      role: Worker
+      goal: Work
+
+groups:
+  parallel_group:
+    pattern: parallel
+    members: [worker]

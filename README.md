@@ -462,6 +462,167 @@ Each config can use a **different** `LLMProviderConfig` (OpenAI, Anthropic, Lite
 
 ---
 
+## YAML orchestration bootstrap
+
+Define a full single- or multi-agent system in **one YAML file** plus a **companion Python prompts module**. Load the manifest once, then construct a per-request runtime with tenant/session context.
+
+```python
+from nexus import OrchestrationManifest, OrchestrationRuntime, RunContext
+
+manifest = OrchestrationManifest.load("examples/orchestration/research_team.yaml")
+
+runtime = OrchestrationRuntime.from_manifest(
+    manifest,
+    run_context=RunContext(
+        tenant_id="acme",
+        user_id="user-1",
+        session_id="group-sess-1",  # set before building orchestrator groups
+    ),
+    # tool_registry=SHARED_REGISTRY,           # optional: pre-registered plugins
+    # persistence_resolver=tenant_resolver,    # optional: override YAML storage
+)
+
+result = await runtime.run("Analyze Q4 revenue")
+```
+
+### File pairing
+
+| File | Purpose |
+|------|---------|
+| `research_team.yaml` | Agents, nested groups, defaults, storage, plugin import paths |
+| `research_team_prompts.py` | `PROMPTS` dict — Jinja strings or callables referenced by YAML |
+
+Default prompts path: `{manifest_stem}_prompts.py` beside the YAML (override with `prompts_module:`).
+
+### Prompt module contract
+
+Prompts are registered in a required `PROMPTS` dict (string Jinja templates or callables). See [Two-pass Jinja](#pass-1-variables-orchestration-init) above for available variables.
+
+```python
+PROMPTS = {
+    "researcher_system": "You are {{ role }} in {{ domain }}. Tenant: {{ tenant_id }}",
+    "analyst_system": lambda domain="general", **ctx: f"Analyst for {domain}",
+}
+```
+
+In YAML:
+
+```yaml
+persona:
+  role: Researcher
+  goal: Gather facts
+  prompt: researcher_system
+  prompt_args:
+    domain: finance
+```
+
+Pass-1 Jinja renders prompts with `prompt_args` + `RunContext` (`tenant_id`, `user_id`, `session_id`, …). Pass-2 rendering (memory injection) uses the existing system prompt pipeline.
+
+#### Pass-1 variables (orchestration init)
+
+Available in prompt templates and callables when the manifest is resolved:
+
+| Variable | Source |
+|----------|--------|
+| `role`, `goal`, `backstory` | YAML `persona` |
+| `tenant_id`, `user_id`, `session_id`, `request_id` | `RunContext` |
+| `metadata` | `RunContext.metadata` dict |
+| Custom keys | YAML `persona.prompt_args` |
+
+Pass-1 output is stored as `persona.system_prompt_template` on each agent.
+
+#### Pass-2 variables (each LLM turn)
+
+Rendered by [`render_system_prompt()`](nexus/utils/jinja.py) — same as the default Nexus system template:
+
+| Variable | Description |
+|----------|-------------|
+| `persona` | Dict with `role`, `goal`, `backstory`, … |
+| `working_memory` | Session scratchpad (when session memory enabled) |
+| `entity_memory` | Key/value facts for this conversation |
+| `cross_session_entity_memory` | Durable user facts across sessions |
+| `current_date` | Today's date (`YYYY-MM-DD`) |
+
+Include these blocks in your prompt templates so memory is injected on each turn. **Wrap pass-2 sections in `{% raw %}...{% endraw %}`** so pass-1 does not strip them when memory is still empty:
+
+```python
+_PASS2_MEMORY_BLOCKS = """{% raw %}
+{% if cross_session_entity_memory %}
+## About this user (across conversations)
+{% for key, value in cross_session_entity_memory.items() %}
+- {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+
+{% if working_memory %}
+## Your Working Notes
+{{ working_memory }}
+{% endif %}
+
+{% if entity_memory %}
+## Known Facts (this conversation)
+{% for key, value in entity_memory.items() %}
+- {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+
+Today's date: {{ current_date }}
+{% endraw %}"""
+
+RESEARCHER_SYSTEM = """You are {{ role }} focused on {{ domain }}.
+Goal: {{ goal }}
+{% if tenant_id %}Tenant: {{ tenant_id }}{% endif %}
+""" + _PASS2_MEMORY_BLOCKS
+
+PROMPTS = {"researcher_system": RESEARCHER_SYSTEM}
+```
+
+See [examples/orchestration/research_team_prompts.py](examples/orchestration/research_team_prompts.py) for the full multi-agent example (supervisor + pipeline, callable prompts, all pass-2 blocks).
+
+To populate memory fields at runtime, enable session memory on agents in YAML:
+
+```yaml
+agents:
+  researcher:
+    session_memory:
+      enabled: true
+      entity:
+        enabled: true
+      working:
+        enabled: true
+      cross_session:
+        enabled: true
+```
+
+### Env interpolation
+
+Use `${ENV:VAR}` or `${ENV:VAR|default}` anywhere in YAML strings:
+
+```yaml
+llm:
+  model: ${ENV:OPENAI_MODEL|gpt-4o}
+  api_key: ${ENV:OPENAI_API_KEY}
+```
+
+### Tool plugins (dual mode)
+
+1. Declare import paths in YAML (`plugins:`) — loader imports and registers them.
+2. Pass a pre-built `ToolRegistry` to `OrchestrationRuntime.from_manifest(...)` — manifest plugins are registered on top (SaaS pattern).
+
+Each agent's `tool_plugins` list remains an allow-list filter.
+
+### Storage
+
+YAML `storage:` provides defaults. Pass `persistence_resolver=` to override per tenant/user (see [examples/nexus_saas_api.py](examples/nexus_saas_api.py)).
+
+### Caveats
+
+- Set `RunContext.session_id` **before** constructing group runtimes — member session IDs are fixed at orchestrator init.
+- `parallel` / `swarm` patterns log a warning and fall back to `pipeline` until implemented.
+- Example CLI: [examples/orchestration/run_team.py](examples/orchestration/run_team.py)
+
+---
+
 ## Multi-agent groups
 
 `AgentGroupConfig` does **not** define an LLM for the whole group. It only defines orchestration: `pattern`, `members`, `max_turns`, group-level `rcs`, etc.

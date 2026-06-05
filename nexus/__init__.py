@@ -60,6 +60,7 @@ from nexus.memory import (
 from nexus.persistence import PersistenceBundle, PersistenceFactory, PersistenceResolver
 from nexus.multiagent.orchestrator import AgentOrchestrator
 from nexus.multiagent.results import AgentGroupResult
+from nexus.orchestration import OrchestrationManifest, OrchestrationRuntime
 from nexus.events import EventEmitted, NexusEventEmitter, NexusEventType, NexusEvent
 
 __version__ = "0.1.0"
@@ -108,6 +109,9 @@ __all__ = [
     # Multi-agent
     "AgentOrchestrator",
     "AgentGroupResult",
+    # Orchestration
+    "OrchestrationManifest",
+    "OrchestrationRuntime",
     # Events
     "NexusEventType",
     "NexusEvent",

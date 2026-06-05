@@ -1,0 +1,62 @@
+version: "1"
+prompts_module: ./research_team_prompts.py
+root: research_team
+
+defaults:
+  llm: &default_llm
+    provider: openai
+    model: ${ENV:OPENAI_MODEL|gpt-4o}
+    api_key: ${ENV:OPENAI_API_KEY|mock-key}
+  agent:
+    turns:
+      max_turns: 5
+
+storage:
+  adapter: sqlite
+  adapter_config:
+    data_root: ${ENV:NEXUS_DATA_ROOT|./data}
+
+plugins:
+  web_search: examples.nexus_saas_api.WebSearchPlugin
+  database: examples.nexus_saas_api.DatabasePlugin
+
+agents:
+  supervisor:
+    llm: *default_llm
+    persona:
+      role: Supervisor
+      goal: Coordinate the research team
+      prompt: supervisor_system
+      prompt_args:
+        domain: finance
+
+  researcher:
+    llm: *default_llm
+    tool_plugins: [web_search]
+    persona:
+      role: Researcher
+      goal: Gather facts from the web
+      prompt: researcher_system
+      prompt_args:
+        domain: finance
+
+  analyst:
+    llm: *default_llm
+    tool_plugins: [database]
+    persona:
+      role: Analyst
+      goal: Analyze structured data
+      prompt: analyst_system
+      prompt_args:
+        domain: finance
+
+groups:
+  analysis_pipeline:
+    pattern: pipeline
+    session_id_prefix: pipe_
+    members: [researcher, analyst]
+
+  research_team:
+    pattern: supervisor
+    session_id_prefix: team_
+    members: [supervisor, analysis_pipeline]

@@ -11,6 +11,7 @@ def render_system_prompt(
     cross_session_entity_memory: Optional[dict[str, str]] = None,
     current_date: str = "",
     template: Optional[str] = None,
+    extra_vars: Optional[dict[str, Any]] = None,
 ) -> str:
     """Render a system prompt from a persona dict and template.
 
@@ -21,6 +22,7 @@ def render_system_prompt(
         cross_session_entity_memory: Dict of durable facts (cross-session)
         current_date: Current date string
         template: Optional custom template override
+        extra_vars: Optional additional Jinja variables for pass-2 rendering
 
     Returns:
         Rendered system prompt string
@@ -34,10 +36,13 @@ def render_system_prompt(
     tmpl_str = template or persona.get("system_prompt_template", "")
     template = env.from_string(tmpl_str)
 
-    return template.render(
-        persona=persona,
-        working_memory=working_memory,
-        entity_memory=entity_memory,
-        cross_session_entity_memory=cross_session_entity_memory,
-        current_date=current_date,
-    )
+    render_vars: dict[str, Any] = {
+        "persona": persona,
+        "working_memory": working_memory,
+        "entity_memory": entity_memory,
+        "cross_session_entity_memory": cross_session_entity_memory,
+        "current_date": current_date,
+    }
+    if extra_vars:
+        render_vars.update(extra_vars)
+    return template.render(**render_vars)

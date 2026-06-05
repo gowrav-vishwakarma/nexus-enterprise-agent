@@ -1,0 +1,16 @@
+version: "1"
+root: missing_prompt_agent
+prompts_module: ./basic_prompts.py
+
+defaults:
+  llm:
+    provider: openai
+    model: gpt-4o-mini
+    api_key: test-key
+
+agents:
+  missing_prompt_agent:
+    persona:
+      role: Tester
+      goal: Test
+      prompt: does_not_exist
