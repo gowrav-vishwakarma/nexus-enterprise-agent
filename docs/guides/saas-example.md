@@ -62,10 +62,16 @@ X-User-ID: demo-user
 
 ## Headers
 
-| Header | What it does |
-|--------|--------------|
-| `X-Tenant-ID` | Which customer (required) |
-| `X-User-ID` | Which user (optional; needed for cross-chat memory) |
+| Header | Required? | Default (this example) | What it does |
+|--------|-----------|------------------------|--------------|
+| `X-Tenant-ID` | Yes | — | Which customer owns the request |
+| `X-User-ID` | No | `demo-user` | Which person within that tenant |
+
+The example API accepts requests without `X-User-ID` and falls back to `demo-user`. That is fine for local demos.
+
+For a real multi-user app, **always send a stable `X-User-ID` per signed-in user**. Chat history and cross-chat memory are scoped to **tenant + user**, not tenant alone. If every caller omits the header, they all share one `demo-user` bucket inside the tenant—including durable facts on Starter/Pro/Enterprise plans where `memory.enabled` is true.
+
+See [memory](../reference/memory.md) for how facts are stored and isolated.
 
 ## Config factory priority (LLM)
 

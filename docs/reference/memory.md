@@ -38,6 +38,19 @@ Set on `AgentConfig` as `memory`:
 | `curator_agent` | No | `None` | Full `AgentConfig` used as curator (advanced) |
 | `max_conversation_chars` | No | `6000` | Max chars fed to curator |
 
+## Isolation scope
+
+Cross-chat memory is **not** shared across an entire tenant. Facts are stored per **tenant + user + namespace**:
+
+| Scope | Shared across users in the same tenant? |
+|-------|----------------------------------------|
+| Tenant only | No |
+| Tenant + user | Yes (this is the unit of memory) |
+| Chat thread (`session_id`) | Yes — a user’s facts follow them into new threads |
+| Agent (`memory.namespace`, or agent name by default) | No — each agent keeps its own fact set |
+
+Pass `RunContext.tenant_id` and a stable `RunContext.user_id` on every run. In a SaaS API, map these from headers such as `X-Tenant-ID` and `X-User-ID` (see [SaaS example](../guides/saas-example.md)).
+
 ## Requirements
 
 When `memory.enabled` is True, you also need:
