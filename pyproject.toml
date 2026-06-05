@@ -68,11 +68,18 @@ fastapi = [
     "uvicorn>=0.30",
     "sse-starlette>=2.1",
     "python-dotenv>=1.0",
+    "python-multipart>=0.0.9",
+]
+
+# Realtime / voice / channels (transports + media providers are optional)
+realtime = [
+    "websockets>=12",
+    "httpx>=0.27",
 ]
 
 # All dependencies
 all = [
-    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi]",
+    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi,realtime]",
 ]
 
 # Full test suite (all adapters + storage + FastAPI)

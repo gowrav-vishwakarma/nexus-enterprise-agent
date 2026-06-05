@@ -112,3 +112,35 @@ groups:
     pattern: supervisor                 # supervisor delegates via delegate_to_* tools
     session_id_prefix: team_
     members: [supervisor, analysis_pipeline]  # nested group reference
+
+  # pattern: parallel runs all members concurrently on the same input and
+  # combines their replies. aggregation_strategy: concat (labelled) | first_complete
+  # analysis_panel:
+  #   pattern: parallel
+  #   aggregation_strategy: concat      # optional, default: supervisor
+  #   members: [researcher, analyst]
+
+# channels (optional, default: {})
+# Messaging channels (Telegram, WhatsApp, ...) normalized into agent input.
+# Each entry maps a channel name -> spec (adapter import path + secrets).
+# See docs/reference/realtime-agents.md.
+# channels:
+#   telegram_support:
+#     adapter: nexus.channels.adapters.telegram.TelegramAdapter
+#     token: ${ENV:TELEGRAM_BOT_TOKEN}
+
+# Realtime (voice/vision) agents are normal agents plus media keys
+# (modality, duplex, stt, tts, vad, s2s) with the text config under `agent:`.
+# They are loaded by RealtimeRuntime, not the text runtime.
+# See docs/reference/realtime-agents.md and examples/orchestration/ivr_support.yaml.
+# agents:
+#   ivr_support:
+#     modality: voice_cascaded          # voice_cascaded | voice_s2s | vision_text
+#     duplex: half                      # half (IVR) | full (barge-in)
+#     stt: {provider: deepgram, model: nova-3, api_key: ${ENV:DEEPGRAM_API_KEY}}
+#     tts: {provider: openai, voice: alloy, api_key: ${ENV:OPENAI_API_KEY}}
+#     vad: {provider: energy, silence_ms: 700}
+#     agent:                            # the underlying AgentConfig
+#       llm: *default_llm
+#       tool_plugins: [ivr_menu]
+#       persona: {role: IVR Agent, goal: Route callers}

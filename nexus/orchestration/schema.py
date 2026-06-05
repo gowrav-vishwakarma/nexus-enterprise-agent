@@ -36,6 +36,10 @@ class OrchestrationManifestSchema(BaseModel):
     )
     agents: dict[str, dict[str, Any]] = Field(default_factory=dict)
     groups: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    channels: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Channel name -> channel spec (adapter import path, root, secrets)",
+    )
 
     @field_validator("root")
     @classmethod

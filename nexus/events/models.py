@@ -57,6 +57,15 @@ class NexusEventType(str, Enum):
     AGENT_GROUP_COMPLETED = "agent_group.completed"
     AGENT_HANDOFF = "agent.handoff"
 
+    # Realtime / voice
+    REALTIME_SESSION_STARTED = "realtime.session_started"
+    REALTIME_SESSION_ENDED = "realtime.session_ended"
+    REALTIME_TRANSCRIBED = "realtime.transcribed"
+    REALTIME_BARGE_IN = "realtime.barge_in"
+    REALTIME_RESPONSE_COMPLETED = "realtime.response_completed"
+    REALTIME_ERROR = "realtime.error"
+    REALTIME_RECONNECT = "realtime.reconnect"
+
 
 class NexusEvent(BaseModel):
     """Base event model for all framework events."""

@@ -56,6 +56,7 @@ flowchart TD
 | Memory | [reference/memory.md](reference/memory.md) |
 | Context summary | [reference/context-summary.md](reference/context-summary.md) |
 | Multi-agent teams | [reference/multi-agent.md](reference/multi-agent.md) |
+| Voice, vision, channels | [reference/realtime-agents.md](reference/realtime-agents.md) |
 | Streaming | [reference/streaming.md](reference/streaming.md) |
 | Skills | [reference/skills.md](reference/skills.md) |
 | Environment variables | [reference/environment.md](reference/environment.md) |
@@ -77,6 +78,13 @@ With extras (see [storage](reference/storage.md) and [environment](reference/env
 
 ```bash
 pip install "nexus-enterprise-agent[sqlite,litellm,fastapi]"
+```
+
+For voice/vision and messaging channels, add the `realtime` extra (see
+[reference/realtime-agents.md](reference/realtime-agents.md)):
+
+```bash
+pip install "nexus-enterprise-agent[realtime,fastapi]"
 ```
 
 For local development:

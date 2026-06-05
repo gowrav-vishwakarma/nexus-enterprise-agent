@@ -49,6 +49,10 @@ class TurnRecord(BaseModel):
     total_tokens_in: int = Field(default=0, description="Tokens sent to LLM")
     total_tokens_out: int = Field(default=0, description="Tokens received from LLM")
     tokens_saved_this_turn: int = Field(default=0, description="Tokens removed via _context_updates")
+    media_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional media info for voice/AV/channel turns (modality, audio refs, transcript timing)",
+    )
     duration_ms: int = Field(default=0, description="Turn duration in milliseconds")
     timestamp: datetime = Field(default_factory=datetime.now)
     status: str = Field(

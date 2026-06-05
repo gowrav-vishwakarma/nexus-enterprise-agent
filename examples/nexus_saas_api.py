@@ -27,7 +27,7 @@ try:
 except ImportError:
     pass  # python-dotenv not installed, skip
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, SecretStr, Field
 
@@ -46,6 +46,8 @@ from nexus.session.manager import SessionManager
 from nexus.tools.context import RunContext
 from nexus.tools.registry import ToolRegistry
 from nexus.tools.decorators import tool, tool_plugin
+from nexus.realtime.input import UserInput
+from nexus.realtime.multimodal.runner import VisionAgentRunner
 
 logger = logging.getLogger(__name__)
 
@@ -601,6 +603,72 @@ async def chat(
         "response": result.final_response,
         "turns_used": result.turns_used,
         "tokens_saved_by_rcs": result.total_tokens_saved_by_rcs,
+        "plan": tenant_ctx.plan,
+        "user_id": x_user_id,
+    }
+
+
+@app.post("/v1/chat/vision")
+async def chat_vision(
+    message: str = Form(""),
+    image: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    tenant_ctx: ResolvedTenant = Depends(get_resolved_tenant),
+    x_user_id: str = Header(default="demo-user", alias="X-User-ID"),
+):
+    """Vision chat: send an image (multipart) plus optional text.
+
+    Separate route from ``/v1/chat`` so the text API is untouched. Uses the same
+    tenant scoping, persistence, and session conventions. Requires a vision-
+    capable LLM model on the tenant's plan (e.g. gpt-4o).
+    """
+    tenant_rec = MOCK_TENANTS_DB[tenant_ctx.tenant_id]
+
+    agent_config = NexusTenantConfigFactory.build_agent_config(
+        tenant=tenant_rec,
+        name="vision_assistant",
+        role="Vision Analyst",
+        goal="Describe and reason about images the user shares.",
+        tool_plugins=[],
+    )
+
+    run_context = RunContext(
+        tenant_id=tenant_ctx.tenant_id,
+        user_id=x_user_id,
+        session_id=session_id or str(uuid4()),
+    )
+
+    persistence = get_persistence_bundle(tenant_ctx.tenant_id, x_user_id)
+    session_manager = get_shared_session_manager(
+        tenant_ctx.tenant_id,
+        tenant_ctx.storage_config,
+    )
+
+    vision_runner = VisionAgentRunner(
+        config=agent_config,
+        tool_registry=SHARED_TOOL_REGISTRY,
+        storage_config=session_manager,
+        run_context=run_context,
+        cross_session_memory_store=persistence.cross_session_memory_store,
+    )
+
+    raw = await image.read()
+    user_input = UserInput.from_image_bytes(
+        raw,
+        text=message,
+        mime_type=image.content_type or "image/png",
+    )
+
+    result = await vision_runner.run(
+        user_input,
+        session_id=run_context.session_id,
+        stream=False,
+    )
+
+    return {
+        "session_id": result.session_id,
+        "response": result.final_response,
+        "turns_used": result.turns_used,
         "plan": tenant_ctx.plan,
         "user_id": x_user_id,
     }

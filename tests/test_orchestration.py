@@ -72,8 +72,25 @@ def test_reference_cycle_detection():
     assert "loop_a" in exc.value.cycle_path
 
 
+def test_parallel_pattern_is_implemented(caplog):
+    manifest = OrchestrationManifest.load(FIXTURES / "parallel.yaml")
+    resolver = ManifestResolver(
+        manifest.schema,
+        manifest.prompts,
+        RunContext(),
+    )
+    with caplog.at_level(logging.WARNING):
+        config = resolver.resolve_root()
+    assert isinstance(config, AgentGroupConfig)
+    # 'parallel' is now a first-class pattern; it must be preserved (no fallback).
+    assert config.pattern == "parallel"
+    assert not any("falling back to pipeline" in record.message for record in caplog.records)
+
+
 def test_unimplemented_pattern_warns_and_falls_back(caplog):
     manifest = OrchestrationManifest.load(FIXTURES / "parallel.yaml")
+    # Force the still-unimplemented 'swarm' pattern on the root group.
+    manifest.schema.groups[manifest.schema.root]["pattern"] = "swarm"
     resolver = ManifestResolver(
         manifest.schema,
         manifest.prompts,

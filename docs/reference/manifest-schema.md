@@ -22,6 +22,7 @@ Annotated examples: [../assets/complete-manifest.annotated.yaml](../assets/compl
 | `plugins` | No | `{}` | Plugin name → `module.path.ClassName` |
 | `agents` | No | `{}` | Named agent definitions |
 | `groups` | No | `{}` | Named team definitions |
+| `channels` | No | `{}` | Channel name → channel spec (adapter import path, secrets) — see [realtime-agents.md](realtime-agents.md) |
 
 ## `defaults` block
 
@@ -57,12 +58,36 @@ See [agent-config.md](agent-config.md) for nested fields (`turns`, `memory`, `rc
 
 | Name | Required? | Default | What it does |
 |------|-----------|---------|--------------|
-| `pattern` | No | `supervisor` | How members run: `supervisor`, `pipeline` (`parallel`/`swarm` fall back to pipeline) |
+| `pattern` | No | `supervisor` | How members run: `supervisor`, `pipeline`, `parallel` (`swarm` falls back to pipeline) |
 | `members` | No | `[]` | Agent names, inline agents, or nested group refs |
 | `session_id_prefix` | No | `""` | Prefix for member chat ids |
 | `max_turns` | No | `20` | Total turns across the group |
+| `aggregation_strategy` | No | `supervisor` | For `parallel`: `concat` (labelled join) or `first_complete` |
 | `description` | No | `None` | Human-readable description |
 | `stream_output` | No | `False` | Default streaming mode for the group |
+
+The `parallel` pattern runs all members concurrently on the same input and
+combines their replies (see `aggregation_strategy`). The `voice_team` pattern
+(loaded by `RealtimeRuntime`, not the text runtime) wires a voice responder with
+an optional context agent — see [realtime-agents.md](realtime-agents.md).
+
+## Realtime agent fields (voice / vision)
+
+A realtime agent is a normal agent plus media keys. These are read by
+`RealtimeRuntime` (the text runtime ignores them). The text agent config goes
+under an `agent:` block:
+
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| `modality` | No | `voice_cascaded` | `voice_cascaded` (STT→LLM→TTS), `voice_s2s` (speech-to-speech), `vision_text` |
+| `duplex` | No | `full` | `half` (IVR, strict turns) or `full` (barge-in) |
+| `stt` | No | mock | Speech-to-text: `provider`, `model`, `language`, `api_key` |
+| `tts` | No | mock | Text-to-speech: `provider`, `model`, `voice`, `api_key` |
+| `vad` | No | energy | Turn detection: `provider`, `silence_ms`, `threshold` |
+| `s2s` | No | openai_realtime | Speech-to-speech model: `provider`, `model`, `voice` |
+| `agent` | Yes | — | The underlying `AgentConfig` (persona, llm, tools, ...) |
+
+See [realtime-agents.md](realtime-agents.md) for full voice/channel docs.
 
 ## `llm` block (agent or defaults)
 

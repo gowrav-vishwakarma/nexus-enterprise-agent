@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 MemberConfig = Union[AgentConfig, AgentGroupConfig]
 
-_UNIMPLEMENTED_PATTERNS = frozenset({"parallel", "swarm"})
+_UNIMPLEMENTED_PATTERNS = frozenset({"swarm"})
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

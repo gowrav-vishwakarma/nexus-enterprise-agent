@@ -54,6 +54,29 @@ Layout under `NEXUS_DATA_ROOT`:
 
 When `NEXUS_LLM_BASE_URL` is set, the SaaS example routes all tenants through that endpoint.
 
+## Realtime / voice (app-level, optional)
+
+Used by the realtime examples and manifests. STT/TTS default to `mock` (no keys)
+so demos run offline. See [realtime-agents.md](realtime-agents.md).
+
+| Variable | What it does |
+|----------|--------------|
+| `NEXUS_STT_PROVIDER` | STT provider (`mock`, `openai`, `deepgram`) |
+| `NEXUS_STT_MODEL` | STT model (e.g. `nova-3`) |
+| `NEXUS_TTS_PROVIDER` | TTS provider (`mock`, `openai`) |
+| `NEXUS_TTS_MODEL` / `NEXUS_TTS_VOICE` | TTS model / voice |
+| `DEEPGRAM_API_KEY` | Deepgram STT key |
+| `OPENAI_VISION_MODEL` | Vision model for image attachments (default `gpt-4o`) |
+
+## Messaging channels (app-level, optional)
+
+| Variable | What it does |
+|----------|--------------|
+| `TELEGRAM_BOT_TOKEN` | Enables the Telegram channel adapter |
+| `WHATSAPP_TOKEN` | WhatsApp Cloud API access token |
+| `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp sender phone number id |
+| `WHATSAPP_VERIFY_TOKEN` | Webhook verification token (default `nexus-verify`) |
+
 ## Integration tests
 
 | Variable | What it does |

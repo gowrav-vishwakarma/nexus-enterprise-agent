@@ -1,0 +1,45 @@
+version: "1"
+prompts_module: ./ivr_support_prompts.py
+root: ivr_support
+
+defaults:
+  llm: &default_llm
+    provider: openai
+    model: ${ENV:OPENAI_MODEL|gpt-4o-mini}
+    api_key: ${ENV:OPENAI_API_KEY|mock-key}
+
+storage:
+  adapter: memory
+
+plugins:
+  ivr_menu: nexus.realtime.tools.ivr.IVRMenuPlugin
+
+# A half-duplex, cascaded voice agent for a phone IVR.
+# STT/TTS default to "mock" so the example runs without provider keys; set the
+# providers below (deepgram, openai, ...) for real audio.
+agents:
+  ivr_support:
+    modality: voice_cascaded
+    duplex: half
+    stt:
+      provider: ${ENV:NEXUS_STT_PROVIDER|mock}
+      model: ${ENV:NEXUS_STT_MODEL|nova-3}
+      language: en
+      api_key: ${ENV:DEEPGRAM_API_KEY|}
+    tts:
+      provider: ${ENV:NEXUS_TTS_PROVIDER|mock}
+      model: ${ENV:NEXUS_TTS_MODEL|tts-1}
+      voice: ${ENV:NEXUS_TTS_VOICE|alloy}
+      api_key: ${ENV:OPENAI_API_KEY|mock-key}
+    vad:
+      provider: energy
+      silence_ms: 700
+    agent:
+      llm: *default_llm
+      tool_plugins: [ivr_menu]
+      turns:
+        max_turns: 8
+      persona:
+        role: IVR Support Agent
+        goal: Route callers to the right department quickly and politely
+        prompt: ivr_system

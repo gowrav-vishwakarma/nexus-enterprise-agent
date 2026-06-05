@@ -1,0 +1,49 @@
+version: "1"
+prompts_module: ./voice_team_support_prompts.py
+root: support_team
+
+defaults:
+  llm: &default_llm
+    provider: openai
+    model: ${ENV:OPENAI_MODEL|gpt-4o-mini}
+    api_key: ${ENV:OPENAI_API_KEY|mock-key}
+
+storage:
+  adapter: memory
+
+# A voice team: the responder speaks with the caller while a context agent
+# silently looks up relevant info for each turn and feeds it to the responder.
+agents:
+  responder:
+    modality: voice_cascaded
+    duplex: full
+    stt:
+      provider: ${ENV:NEXUS_STT_PROVIDER|mock}
+    tts:
+      provider: ${ENV:NEXUS_TTS_PROVIDER|mock}
+    vad:
+      provider: energy
+    agent:
+      llm: *default_llm
+      persona:
+        role: Support Voice Agent
+        goal: Resolve the caller's issue using the provided context
+        prompt: responder_system
+
+  context_agent:
+    llm: *default_llm
+    persona:
+      role: Knowledge Assistant
+      goal: Provide concise, relevant facts for the caller's question
+      prompt: context_system
+
+groups:
+  support_team:
+    pattern: voice_team
+    duplex: full
+    context_injection_var: live_context
+    members:
+      - name: responder
+        role: responder
+      - name: context_agent
+        role: context_agent

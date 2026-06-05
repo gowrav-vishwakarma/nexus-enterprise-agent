@@ -25,6 +25,7 @@ LangGraph, CrewAI, AutoGen, OpenAI Agents SDK, Pydantic AI, and LangChain each s
 - **Context-first (RCS)** — the agent compresses old tool results inline via `_context_updates`; no extra LLM calls
 - **Config-driven teams** — YAML manifests for multi-agent orchestration; Python only for wiring and tools
 - **Provider-agnostic** — bring your own model; pluggable SQLite, Postgres, Redis, or file storage
+- **Voice, vision & channels** — optional cascaded/speech-to-speech voice, image input, IVR, and Telegram/WhatsApp on the same agent core ([docs](docs/reference/realtime-agents.md))
 
 Full landscape analysis and design rationale: [NEXUS_AGENT_PRD.md](NEXUS_AGENT_PRD.md).
 

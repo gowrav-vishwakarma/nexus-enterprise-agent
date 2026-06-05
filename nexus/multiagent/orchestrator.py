@@ -1,5 +1,6 @@
 """Agent orchestrator for executing multi-agent patterns."""
 
+import asyncio
 import logging
 import time
 from typing import Any, AsyncIterator, Optional, Union
@@ -9,7 +10,6 @@ from nexus.multiagent.results import AgentGroupResult
 from nexus.runner.agent_runner import AgentRunner
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
 from nexus.tools.context import RunContext
-from nexus.tools.decorators import tool
 from nexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,8 @@ class AgentOrchestrator:
             return await self._run_pipeline(user_message, start_time, stream=False)
         elif self.config.pattern == "supervisor":
             return await self._run_supervisor(user_message, start_time, stream=False)
+        elif self.config.pattern == "parallel":
+            return await self._run_parallel(user_message, start_time)
         else:
             return await self._run_pipeline(user_message, start_time, stream=False)
 
@@ -118,6 +120,9 @@ class AgentOrchestrator:
 
         if self.config.pattern == "supervisor":
             async for event in self._run_supervisor_stream(user_message):
+                yield event
+        elif self.config.pattern == "parallel":
+            async for event in self._run_parallel_stream(user_message):
                 yield event
         else:
             async for event in self._run_pipeline_stream(user_message):
@@ -275,6 +280,138 @@ class AgentOrchestrator:
         yield AgentStreamEvent(
             event_type="final_response",
             content=final_response,
+            data=group_result.model_dump(),
+        )
+
+    def _aggregate_parallel(
+        self, member_results: dict[str, Any], ordered_names: list[str]
+    ) -> Optional[str]:
+        """Combine parallel member outputs per the group's aggregation strategy."""
+        responses = [
+            (name, getattr(member_results.get(name), "final_response", None))
+            for name in ordered_names
+        ]
+        responses = [(n, r) for n, r in responses if r]
+        if not responses:
+            return None
+        if self.config.aggregation_strategy == "first_complete":
+            return responses[0][1]
+        # Default: concatenate labeled member outputs.
+        return "\n\n".join(f"[{name}]\n{resp}" for name, resp in responses)
+
+    async def _run_parallel(
+        self,
+        user_message: str,
+        start_time: float,
+    ) -> AgentGroupResult:
+        """Parallel pattern: run all members concurrently on the same input."""
+        names = list(self._members.keys())
+
+        async def run_member(name: str, member: Any) -> tuple[str, Any]:
+            res = await member.run(user_message, stream=False)
+            return name, res
+
+        gathered = await asyncio.gather(
+            *(run_member(n, m) for n, m in self._members.items()),
+            return_exceptions=True,
+        )
+
+        member_results: dict[str, Any] = {}
+        turns_used = total_tokens_in = total_tokens_out = total_tokens_saved = 0
+        for item in gathered:
+            if isinstance(item, Exception):
+                logger.error("Parallel member failed: %s", item)
+                return AgentGroupResult(
+                    session_id=self._root_session_id(),
+                    group_name=self.config.name,
+                    member_results=member_results,
+                    status="failed",
+                    error=str(item),
+                    duration_ms=int((time.time() - start_time) * 1000),
+                )
+            name, res = item
+            member_results[name] = res
+            turns_used += res.turns_used
+            total_tokens_in += res.total_tokens_in
+            total_tokens_out += res.total_tokens_out
+            total_tokens_saved += res.total_tokens_saved_by_rcs
+
+        return AgentGroupResult(
+            session_id=self._root_session_id(),
+            group_name=self.config.name,
+            final_response=self._aggregate_parallel(member_results, names),
+            member_results=member_results,
+            turns_used=turns_used,
+            total_tokens_in=total_tokens_in,
+            total_tokens_out=total_tokens_out,
+            total_tokens_saved_by_rcs=total_tokens_saved,
+            duration_ms=int((time.time() - start_time) * 1000),
+            status="completed",
+        )
+
+    async def _run_parallel_stream(
+        self, user_message: str
+    ) -> AsyncIterator[AgentStreamEvent]:
+        """Streaming parallel: multiplex member event streams concurrently."""
+        start_time = time.time()
+        names = list(self._members.keys())
+        queue: asyncio.Queue = asyncio.Queue()
+        member_results: dict[str, Any] = {}
+        _DONE = object()
+
+        async def pump(name: str, member: Any) -> None:
+            try:
+                async for event in member.run_stream(user_message, stream=True):
+                    await queue.put((name, event))
+            except Exception as exc:  # pragma: no cover - member failure
+                await queue.put((
+                    name,
+                    AgentStreamEvent(
+                        event_type="error",
+                        content=str(exc),
+                        data={"member": name, "status": "failed"},
+                    ),
+                ))
+            finally:
+                await queue.put((name, _DONE))
+
+        tasks = [asyncio.create_task(pump(n, m)) for n, m in self._members.items()]
+        remaining = len(tasks)
+        turns_used = total_tokens_in = total_tokens_out = total_tokens_saved = 0
+
+        while remaining > 0:
+            name, event = await queue.get()
+            if event is _DONE:
+                remaining -= 1
+                continue
+            yield self._tag_member_event(name, event)
+            if event.event_type == "final_response" and event.data:
+                member_results[name] = AgentRunResult(**event.data)
+                turns_used += event.data.get("turns_used", 0)
+                total_tokens_in += event.data.get("total_tokens_in", 0)
+                total_tokens_out += event.data.get("total_tokens_out", 0)
+                total_tokens_saved += event.data.get("total_tokens_saved_by_rcs", 0)
+
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+        group_result = AgentGroupResult(
+            session_id=self._root_session_id(),
+            group_name=self.config.name,
+            final_response=self._aggregate_parallel(member_results, names),
+            member_results=member_results,
+            turns_used=turns_used,
+            total_tokens_in=total_tokens_in,
+            total_tokens_out=total_tokens_out,
+            total_tokens_saved_by_rcs=total_tokens_saved,
+            duration_ms=int((time.time() - start_time) * 1000),
+            status="completed",
+        )
+
+        yield AgentStreamEvent(
+            event_type="final_response",
+            content=group_result.final_response,
             data=group_result.model_dump(),
         )
 

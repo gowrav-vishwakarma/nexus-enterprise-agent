@@ -29,9 +29,26 @@ Annotated references (not runnable as-is):
 
 | Path | What you will learn |
 |------|---------------------|
-| [examples/nexus_saas_api.py](../examples/nexus_saas_api.py) | FastAPI multi-tenant app, plan gating, streaming |
+| [examples/nexus_saas_api.py](../examples/nexus_saas_api.py) | FastAPI multi-tenant app, plan gating, streaming, `/v1/chat/vision` |
 
 Guide: [guides/saas-example.md](guides/saas-example.md).
+
+## Voice, realtime, and channels
+
+| Path | What you will learn |
+|------|---------------------|
+| [examples/orchestration/ivr_support.yaml](../examples/orchestration/ivr_support.yaml) | Half-duplex IVR voice agent (cascaded) |
+| [examples/orchestration/voice_assistant.yaml](../examples/orchestration/voice_assistant.yaml) | Full-duplex (barge-in) browser voice agent |
+| [examples/orchestration/voice_team_support.yaml](../examples/orchestration/voice_team_support.yaml) | Voice team: responder + context agent |
+| [examples/realtime_ivr_server.py](../examples/realtime_ivr_server.py) | Run the IVR pipeline locally (no keys needed) |
+| [examples/realtime_browser_voice.py](../examples/realtime_browser_voice.py) | Browser mic demo over WebSocket |
+| [examples/realtime_saas_api.py](../examples/realtime_saas_api.py) | Realtime SaaS API: sessions, voice WS, Twilio/SIP, channels, plan gating |
+
+Reference: [reference/realtime-agents.md](reference/realtime-agents.md).
+
+```bash
+uv run python examples/realtime_ivr_server.py "I want to pay my bill"
+```
 
 ## Python API (annotated)
 
@@ -49,7 +66,7 @@ Under `tests/fixtures/orchestration/`:
 |------|---------------|
 | `basic.yaml` | Minimal single agent |
 | `nested.yaml` | Nested groups |
-| `parallel.yaml` | Parallel pattern fallback |
+| `parallel.yaml` | Parallel pattern (runs members concurrently) |
 | `cycle.yaml` | Cycle detection error |
 
 ## Next steps

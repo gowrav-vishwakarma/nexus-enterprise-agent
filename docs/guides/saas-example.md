@@ -52,6 +52,18 @@ curl -X POST http://localhost:8000/v1/multi-agent/run \
   -d '{"message": "Research and analyze churn"}'
 ```
 
+**Vision chat (image upload):**
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/vision \
+  -H "X-Tenant-ID: pro_tenant_1" \
+  -F "message=What is in this image?" \
+  -F "image=@photo.png"
+```
+
+Requires the `python-multipart` dependency (included in the `fastapi` extra) and
+a vision-capable model on the tenant's plan.
+
 **Load team chat history:**
 
 ```http
@@ -94,8 +106,17 @@ See [streaming reference](../reference/streaming.md).
 | Storage | `TenantPersistenceResolver` → `storage_config` on runner |
 | Shared tools | `SHARED_TOOL_REGISTRY` + per-agent `tool_plugins` |
 
+## Voice and channels
+
+For voice (phone/browser), images, and messaging channels (Telegram/WhatsApp),
+see the realtime SaaS example `examples/realtime_saas_api.py` and
+[reference/realtime-agents.md](../reference/realtime-agents.md). It adds
+`/v1/realtime/*` (voice sessions + WebSocket), `/v1/realtime/twilio/*` (phone),
+and `/v1/channels/*` (messaging) with plan-tier gating.
+
 ## Next steps
 
 - [Architecture](../architecture.md)
+- [Voice, vision, channels](../reference/realtime-agents.md)
 - [Persistence resolver](persistence-resolver.md)
 - [Environment variables](../reference/environment.md)
