@@ -1,0 +1,51 @@
+version: "1"
+root: voice_local_indic
+
+# Hindi cascaded voice — Indic-Conformer STT + Indic Parler TTS + Ollama LLM.
+# Start stack:  local-ai-stack/run-cascade-indic.sh
+#
+#   STT : Indic-Conformer  http://localhost:8001/v1
+#   TTS : Indic Parler     http://localhost:8002/v1
+#   LLM : Ollama           http://localhost:11434/v1  (qwen, gemma, gpt-oss, …)
+
+storage:
+  adapter: memory
+
+agents:
+  voice_local_indic:
+    modality: voice_cascaded
+    duplex: full
+    stt:
+      provider: local
+      base_url: ${ENV:NEXUS_STT_BASE_URL|http://localhost:8001/v1}
+      model: ${ENV:NEXUS_STT_MODEL|indic-conformer-600m}
+      language: ${ENV:NEXUS_STT_LANGUAGE|hi}
+      sample_rate: 16000
+      api_key: ${ENV:NEXUS_STT_API_KEY|local}
+    tts:
+      provider: local
+      base_url: ${ENV:NEXUS_TTS_BASE_URL|http://localhost:8002/v1}
+      model: ${ENV:NEXUS_TTS_MODEL|indic-parler}
+      voice: ${ENV:NEXUS_TTS_VOICE|Divya}
+      audio_format: wav
+      sample_rate: ${ENV:NEXUS_TTS_SAMPLE_RATE|44100}
+      api_key: ${ENV:NEXUS_TTS_API_KEY|local}
+    vad:
+      provider: energy
+      silence_ms: 600
+      sample_rate: 16000
+    agent:
+      llm:
+        provider: openai
+        base_url: ${ENV:NEXUS_LLM_BASE_URL|http://localhost:11434/v1}
+        model: ${ENV:NEXUS_LLM_MODEL|gpt-oss:latest}
+        api_key: ${ENV:NEXUS_LLM_API_KEY|ollama}
+      turns:
+        max_turns: 6
+      persona:
+        role: Hindi Voice Assistant
+        goal: Have a natural Hindi spoken conversation and help the user concisely.
+        system_prompt: >
+          You are a friendly Hindi voice assistant running entirely offline.
+          Reply in Hindi (Devanagari) unless the user speaks English.
+          Keep replies short — they will be spoken aloud.

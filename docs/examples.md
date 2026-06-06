@@ -42,10 +42,12 @@ Guide: [guides/saas-example.md](guides/saas-example.md).
 | [examples/orchestration/voice_team_support.yaml](../examples/orchestration/voice_team_support.yaml) | Voice team: responder + context agent |
 | [examples/realtime_ivr_server.py](../examples/realtime_ivr_server.py) | Run the IVR pipeline locally (no keys needed) |
 | [examples/realtime_browser_voice.py](../examples/realtime_browser_voice.py) | Browser mic demo over WebSocket |
-| [examples/orchestration/voice_local.yaml](../examples/orchestration/voice_local.yaml) | Fully offline cascaded voice (self-hosted STT/LLM/TTS, BYOM) |
+| [examples/orchestration/voice_local.yaml](../examples/orchestration/voice_local.yaml) | English cascaded voice (Whisper + Kokoro + Ollama) |
+| [examples/orchestration/voice_local_indic.yaml](../examples/orchestration/voice_local_indic.yaml) | Hindi cascaded voice (Indic-Conformer + Indic Parler + Ollama) |
+| [examples/orchestration/VOICE_PROFILES.md](../examples/orchestration/VOICE_PROFILES.md) | Profile ↔ manifest map (24 GB VRAM, one at a time) |
 | [examples/realtime_local_voice.py](../examples/realtime_local_voice.py) | Run the all-local cascaded turn (`--check` probes servers) |
 | [examples/realtime_local_voice_ui.py](../examples/realtime_local_voice_ui.py) | Push-to-talk browser UI on local models (STT→LLM→TTS) |
-| [examples/orchestration/voice_s2s_local.yaml](../examples/orchestration/voice_s2s_local.yaml) | Real speech-to-speech via a self-hosted Kyutai Moshi server |
+| [examples/orchestration/voice_s2s_local.yaml](../examples/orchestration/voice_s2s_local.yaml) | Speech-to-speech via Moshi or Human-1 (`NEXUS_S2S_PROVIDER`) |
 | [examples/realtime_s2s_ui.py](../examples/realtime_s2s_ui.py) | Full-duplex speech-to-speech browser UI (Moshi) |
 | [examples/realtime_saas_api.py](../examples/realtime_saas_api.py) | Realtime SaaS API: sessions, voice WS, Twilio/SIP, channels, plan gating |
 

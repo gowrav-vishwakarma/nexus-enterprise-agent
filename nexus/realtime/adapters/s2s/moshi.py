@@ -46,12 +46,17 @@ def _require_deps():
 
 
 class MoshiS2S(SpeechToSpeechAdapter):
-    """Drive a self-hosted Kyutai Moshi server for full-duplex speech-to-speech."""
+    """Drive a self-hosted Kyutai Moshi-family server for full-duplex speech-to-speech.
+
+    Works with stock Moshi (Moshiko) and Hindi Human-1 — same WebSocket protocol,
+    different weights on the server side (see local-ai-stack run-s2s-*.sh).
+    """
 
     def __init__(self, config: S2SConfig, **kwargs) -> None:
         super().__init__(config, **kwargs)
         base = (config.base_url or "ws://localhost:8998").rstrip("/")
         self._url = base if base.endswith("/api/chat") else f"{base}/api/chat"
+        self._provider = (config.provider or "moshi").lower()
 
     @staticmethod
     def _pcm16_to_f32(data: bytes):
@@ -101,7 +106,8 @@ class MoshiS2S(SpeechToSpeechAdapter):
 
             sender = asyncio.create_task(_send_audio())
             yield RealtimeStreamEvent(
-                event_type="session_started", data={"modality": "voice_s2s", "provider": "moshi"}
+                event_type="session_started",
+                data={"modality": "voice_s2s", "provider": self._provider},
             )
             try:
                 async for message in ws:
@@ -127,7 +133,7 @@ class MoshiS2S(SpeechToSpeechAdapter):
                 # closes, so we never close mid-send (avoids a teardown race).
                 sender.cancel()
                 await asyncio.gather(sender, return_exceptions=True)
-        yield RealtimeStreamEvent(event_type="turn_end", data={"provider": "moshi"})
+        yield RealtimeStreamEvent(event_type="turn_end", data={"provider": self._provider})
 
     async def run_text(self, text: str) -> AsyncIterator[RealtimeStreamEvent]:
         """Moshi is audio-native; text-only turns aren't supported."""

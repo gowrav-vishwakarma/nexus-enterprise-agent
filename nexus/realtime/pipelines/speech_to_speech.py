@@ -95,7 +95,7 @@ class SpeechToSpeechPipeline:
             from nexus.realtime.adapters.s2s.mock import MockS2S
 
             return MockS2S(s2s, **kwargs)
-        if provider == "moshi":
+        if provider in ("moshi", "human-1", "human1"):
             from nexus.realtime.adapters.s2s.moshi import MoshiS2S
 
             return MoshiS2S(s2s, **kwargs)

@@ -79,7 +79,10 @@ Used by `voice_local.yaml`, `voice_s2s_local.yaml`, and the `realtime_local_voic
 | `NEXUS_STT_BASE_URL` | Local STT endpoint (e.g. `http://localhost:8001/v1`) |
 | `NEXUS_TTS_BASE_URL` | Local TTS endpoint (e.g. `http://localhost:8002/v1`) |
 | `NEXUS_LLM_BASE_URL` / `NEXUS_LLM_MODEL` | Local LLM (e.g. Ollama `http://localhost:11434/v1`, `gpt-oss:latest`) |
-| `NEXUS_S2S_PROVIDER` / `NEXUS_S2S_BASE_URL` | Speech-to-speech (e.g. `moshi`, `ws://localhost:8998`) |
+| `NEXUS_S2S_PROVIDER` / `NEXUS_S2S_BASE_URL` | Speech-to-speech (`moshi`, `human-1`, `ws://localhost:8998`) |
+| `NEXUS_LLM_MODEL` | Local LLM id (`gpt-oss:latest`, `qwen2.5:7b`, …) |
+| `NEXUS_STT_LANGUAGE` | STT language code for Indic-Conformer (e.g. `hi`) |
+| `NEXUS_TTS_VOICE` | Indic Parler speaker (`Divya`, `Rohit`, …) |
 
 ## Messaging channels (app-level, optional)
 

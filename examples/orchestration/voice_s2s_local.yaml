@@ -5,9 +5,10 @@ root: voice_s2s_local
 # The model runs separately (see local-ai-stack/run-s2s-moshi.sh); the framework
 # only opens a local WebSocket. No paid API, no mock.
 #
-# Swap models later by changing `provider` + `base_url` and adding an adapter:
-#   provider: moshi   -> ws://localhost:8998   (this file)
-#   provider: local   -> any OpenAI-Realtime-compatible local server
+# Swap S2S backends via env (one server at a time on :8998 — see local-ai-stack):
+#   NEXUS_S2S_PROVIDER=moshi     + run-s2s-moshi.sh    (English Moshi baseline)
+#   NEXUS_S2S_PROVIDER=human-1   + run-s2s-human1.sh   (Hindi Human-1)
+#   provider: local            -> OpenAI-Realtime-compatible server
 
 storage:
   adapter: memory

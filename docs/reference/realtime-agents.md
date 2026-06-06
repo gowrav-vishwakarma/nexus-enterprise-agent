@@ -112,10 +112,12 @@ Tool names are sanitized for the realtime API (`plugin.tool` → `plugin-tool`) 
 mapped back automatically when executing.
 
 S2S providers: `mock`, `openai`/`openai_realtime` (also `local`/`openai_compatible`
-for any server speaking the OpenAI Realtime protocol), and **`moshi`** for a
-self-hosted [Kyutai Moshi](https://github.com/kyutai-labs/moshi) server. Adding a
-new duplex model is just a new `SpeechToSpeechAdapter` + a provider name — the
-pipeline, transports, and browser keep speaking plain PCM.
+for any server speaking the OpenAI Realtime protocol), **`moshi`** for a
+self-hosted [Kyutai Moshi](https://github.com/kyutai-labs/moshi) server, and
+**`human-1`** for the Hindi [Human-1](https://huggingface.co/JoshTalksAI/Human-1)
+server (same Moshi WebSocket protocol, different weights). Adding a new duplex
+model is just a new `SpeechToSpeechAdapter` + a provider name — the pipeline,
+transports, and browser keep speaking plain PCM.
 
 The `moshi` adapter is a thin, torch-free client (the model runs in a separate
 server); install its extra:
@@ -245,14 +247,15 @@ A typical fully-local mapping:
 | Capability | Server | Endpoint | Provider in manifest |
 |-----------|--------|----------|----------------------|
 | LLM | Ollama / vLLM / llama.cpp | `http://localhost:11434/v1` | `openai` + `base_url` |
-| STT | faster-whisper / speaches | `http://localhost:8001/v1` | `local` + `base_url` |
-| TTS | Kokoro / speaches | `http://localhost:8002/v1` | `local` + `base_url` |
-| S2S | Kyutai Moshi | `ws://localhost:8998` | `moshi` + `base_url` |
+| STT | faster-whisper / Indic-Conformer | `http://localhost:8001/v1` | `local` + `base_url` |
+| TTS | Kokoro / Indic Parler | `http://localhost:8002/v1` | `local` + `base_url` |
+| S2S | Kyutai Moshi / Human-1 | `ws://localhost:8998` | `moshi` or `human-1` + `base_url` |
 
 Example manifests and runnable demos:
 
-- [`voice_local.yaml`](../../examples/orchestration/voice_local.yaml) — cascaded, all-local.
-- [`voice_s2s_local.yaml`](../../examples/orchestration/voice_s2s_local.yaml) — real S2S via Moshi.
+- [`voice_local.yaml`](../../examples/orchestration/voice_local.yaml) — English cascaded (Whisper + Kokoro + Ollama).
+- [`voice_local_indic.yaml`](../../examples/orchestration/voice_local_indic.yaml) — Hindi cascaded (Indic-Conformer + Indic Parler + Ollama).
+- [`voice_s2s_local.yaml`](../../examples/orchestration/voice_s2s_local.yaml) — S2S via Moshi or Human-1 (`NEXUS_S2S_PROVIDER`).
 - `examples/realtime_local_voice.py` — CLI turn (`--check` probes the servers).
 - `examples/realtime_local_voice_ui.py` — push-to-talk browser UI (cascaded).
 - `examples/realtime_s2s_ui.py` — full-duplex browser UI (Moshi S2S).
@@ -264,9 +267,11 @@ uv run --extra fastapi uvicorn examples.realtime_local_voice_ui:app --port 8080
 uv run --extra fastapi --extra moshi uvicorn examples.realtime_s2s_ui:app --port 8081
 ```
 
-> **GPU note:** on a single 24 GB card, run one heavy GPU workload at a time —
-> the cascaded LLM (e.g. Ollama gpt-oss ~13 GB) and Moshi (~16 GB) don't co-fit.
-> Free one before starting the other (e.g. `ollama stop <model>`).
+> **GPU note (24 GB):** run **one profile at a time** — never cascade + S2S together.
+> In `local-ai-stack`, use `./stop-all.sh` before switching profiles:
+> `run-cascade-oss.sh`, `run-cascade-indic.sh`, `run-s2s-moshi.sh`, or
+> `run-s2s-human1.sh`. See `profiles.env.example` and `benchmarks/RESULTS.template.md`
+> in that folder for the A/B workflow.
 
 ## Next steps
 

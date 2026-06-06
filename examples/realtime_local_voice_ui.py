@@ -17,6 +17,7 @@ Then open http://localhost:8080/ and allow microphone access.
 from __future__ import annotations
 
 import base64
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -26,7 +27,12 @@ from nexus.orchestration.manifest import OrchestrationManifest
 from nexus.realtime.runtime import RealtimeRuntime
 from nexus.tools.context import RunContext
 
-MANIFEST = Path(__file__).parent / "orchestration" / "voice_local.yaml"
+MANIFEST = Path(
+    os.environ.get(
+        "NEXUS_VOICE_MANIFEST",
+        str(Path(__file__).parent / "orchestration" / "voice_local.yaml"),
+    )
+)
 
 app = FastAPI(title="NEXUS Local Voice (cascaded)")
 _runtime: RealtimeRuntime | None = None
