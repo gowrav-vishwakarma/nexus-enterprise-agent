@@ -44,6 +44,7 @@ Guide: [guides/saas-example.md](guides/saas-example.md).
 | [examples/realtime_browser_voice.py](../examples/realtime_browser_voice.py) | Browser mic demo over WebSocket |
 | [examples/orchestration/voice_local.yaml](../examples/orchestration/voice_local.yaml) | English cascaded voice (Whisper + Kokoro + Ollama) |
 | [examples/orchestration/voice_local_indic.yaml](../examples/orchestration/voice_local_indic.yaml) | Hindi cascaded voice (Indic-Conformer + Indic Parler + Ollama) |
+| [examples/orchestration/voice_local_indic_kokoro.yaml](../examples/orchestration/voice_local_indic_kokoro.yaml) | Hindi cascaded voice (Indic-Conformer + Kokoro Hindi + Ollama) |
 | [examples/orchestration/VOICE_PROFILES.md](../examples/orchestration/VOICE_PROFILES.md) | Profile ↔ manifest map (24 GB VRAM, one at a time) |
 | [examples/realtime_local_voice.py](../examples/realtime_local_voice.py) | Run the all-local cascaded turn (`--check` probes servers) |
 | [examples/realtime_local_voice_ui.py](../examples/realtime_local_voice_ui.py) | Push-to-talk browser UI on local models (STT→LLM→TTS) |

@@ -24,8 +24,9 @@ class OpenAISTT(STTAdapter):
         """Send the audio blob to the transcription endpoint and return text."""
         import httpx
 
-        ext = mime_type.split("/")[-1] if "/" in mime_type else "wav"
-        files = {"file": (f"audio.{ext}", io.BytesIO(audio), mime_type)}
+        ext = mime_type.split("/")[-1].split(";")[0] if "/" in mime_type else "wav"
+        clean_mime = mime_type.split(";")[0] if ";" in mime_type else mime_type
+        files = {"file": (f"audio.{ext}", io.BytesIO(audio), clean_mime)}
         data = {"model": self._model}
         if self.config.language:
             data["language"] = self.config.language
@@ -38,6 +39,12 @@ class OpenAISTT(STTAdapter):
                 data=data,
                 files=files,
             )
-            resp.raise_for_status()
+            if resp.is_error:
+                detail = resp.text
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:  # noqa: BLE001
+                    pass
+                raise RuntimeError(str(detail))
             payload = resp.json()
         return (payload.get("text") or "").strip()

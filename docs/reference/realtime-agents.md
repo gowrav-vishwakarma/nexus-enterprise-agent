@@ -248,13 +248,14 @@ A typical fully-local mapping:
 |-----------|--------|----------|----------------------|
 | LLM | Ollama / vLLM / llama.cpp | `http://localhost:11434/v1` | `openai` + `base_url` |
 | STT | faster-whisper / Indic-Conformer | `http://localhost:8001/v1` | `local` + `base_url` |
-| TTS | Kokoro / Indic Parler | `http://localhost:8002/v1` | `local` + `base_url` |
+| TTS | Kokoro / Indic Parler / Kokoro Hindi | `http://localhost:8002/v1` | `local` + `base_url` |
 | S2S | Kyutai Moshi / Human-1 | `ws://localhost:8998` | `moshi` or `human-1` + `base_url` |
 
 Example manifests and runnable demos:
 
 - [`voice_local.yaml`](../../examples/orchestration/voice_local.yaml) — English cascaded (Whisper + Kokoro + Ollama).
 - [`voice_local_indic.yaml`](../../examples/orchestration/voice_local_indic.yaml) — Hindi cascaded (Indic-Conformer + Indic Parler + Ollama).
+- [`voice_local_indic_kokoro.yaml`](../../examples/orchestration/voice_local_indic_kokoro.yaml) — Hindi cascaded (Indic-Conformer + Kokoro Hindi + Ollama).
 - [`voice_s2s_local.yaml`](../../examples/orchestration/voice_s2s_local.yaml) — S2S via Moshi or Human-1 (`NEXUS_S2S_PROVIDER`).
 - `examples/realtime_local_voice.py` — CLI turn (`--check` probes the servers).
 - `examples/realtime_local_voice_ui.py` — push-to-talk browser UI (cascaded).
@@ -269,8 +270,9 @@ uv run --extra fastapi --extra moshi uvicorn examples.realtime_s2s_ui:app --port
 
 > **GPU note (24 GB):** run **one profile at a time** — never cascade + S2S together.
 > In `local-ai-stack`, use `./stop-all.sh` before switching profiles:
-> `run-cascade-oss.sh`, `run-cascade-indic.sh`, `run-s2s-moshi.sh`, or
-> `run-s2s-human1.sh`. See `profiles.env.example` and `benchmarks/RESULTS.template.md`
+> `run-cascade-oss.sh`, `run-cascade-indic.sh`, `run-cascade-indic-kokoro.sh`,
+> `run-s2s-moshi.sh`, or `run-s2s-human1.sh`. See `profiles.env.example` and
+> `benchmarks/RESULTS.template.md`
 > in that folder for the A/B workflow.
 
 ## Next steps

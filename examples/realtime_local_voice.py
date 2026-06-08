@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 
 from nexus.orchestration.manifest import OrchestrationManifest
+from nexus.realtime.audio import merge_wav_chunks
 from nexus.realtime.runtime import RealtimeRuntime
 from nexus.tools.context import RunContext
 
@@ -84,7 +85,7 @@ async def run_turn(wav: str | None) -> None:
     if audio_chunks:
         out = Path("local_voice_out.wav")
         # The TTS server returns encoded WAV bytes; save the spoken reply.
-        out.write_bytes(b"".join(audio_chunks))
+        out.write_bytes(merge_wav_chunks(audio_chunks))
         print(f"  [tts] wrote {out} ({out.stat().st_size} bytes of spoken audio)")
 
 

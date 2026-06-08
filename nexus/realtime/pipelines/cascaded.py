@@ -27,7 +27,7 @@ from nexus.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-_SENTENCE_BOUNDARIES = (".", "!", "?", "\n", ";")
+_SENTENCE_BOUNDARIES = (".", "!", "?", "\n", ";", "।")
 
 
 def _first_boundary(text: str) -> int:
@@ -102,6 +102,7 @@ class CascadedVoicePipeline:
         do_speak = self._speak if speak is None else speak
         sentence_buffer = ""
         final_text: Optional[str] = None
+        spoke_audio = False
 
         async for ev in self.runner.run_stream(text, session_id=session_id, stream=True):
             if ev.event_type == "content" and ev.content:
@@ -116,6 +117,7 @@ class CascadedVoicePipeline:
                         sentence_buffer = sentence_buffer[idx + 1 :]
                         if sentence:
                             audio = await self.tts.synthesize(sentence)
+                            spoke_audio = True
                             yield RealtimeStreamEvent.audio_chunk(audio, text=sentence)
             elif ev.event_type == "tool_call":
                 yield RealtimeStreamEvent(event_type="tool_call", data=ev.data)
@@ -129,7 +131,13 @@ class CascadedVoicePipeline:
         # Flush any trailing partial sentence.
         if do_speak and sentence_buffer.strip():
             audio = await self.tts.synthesize(sentence_buffer.strip())
+            spoke_audio = True
             yield RealtimeStreamEvent.audio_chunk(audio, text=sentence_buffer.strip())
+
+        # Some LLM streams only surface text on final_response; still speak it.
+        if do_speak and not spoke_audio and final_text and final_text.strip():
+            audio = await self.tts.synthesize(final_text.strip())
+            yield RealtimeStreamEvent.audio_chunk(audio, text=final_text.strip())
 
         terminal = bool(self.run_context.metadata.get("ivr_terminal"))
         yield RealtimeStreamEvent(

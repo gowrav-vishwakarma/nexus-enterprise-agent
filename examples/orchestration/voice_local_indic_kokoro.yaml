@@ -1,18 +1,18 @@
 version: "1"
-root: voice_local_indic
+root: voice_local_indic_kokoro
 
-# Hindi cascaded voice — Indic-Conformer STT + Indic Parler TTS + Ollama LLM.
-# Start stack:  local-ai-stack/run-cascade-indic.sh
+# Hindi cascaded voice — Indic-Conformer STT + Kokoro Hindi TTS + Ollama LLM.
+# Start stack:  local-ai-stack/run-cascade-indic-kokoro.sh
 #
 #   STT : Indic-Conformer  http://localhost:8001/v1
-#   TTS : Indic Parler     http://localhost:8002/v1
+#   TTS : Kokoro Hindi     http://localhost:8002/v1  (hf_alpha / hm_omega)
 #   LLM : Ollama           http://localhost:11434/v1  (qwen, gemma, gpt-oss, …)
 
 storage:
   adapter: memory
 
 agents:
-  voice_local_indic:
+  voice_local_indic_kokoro:
     modality: voice_cascaded
     duplex: full
     stt:
@@ -25,10 +25,10 @@ agents:
     tts:
       provider: local
       base_url: ${ENV:NEXUS_TTS_BASE_URL|http://localhost:8002/v1}
-      model: ${ENV:NEXUS_TTS_MODEL|indic-parler}
-      voice: ${ENV:NEXUS_TTS_VOICE|Divya}
+      model: ${ENV:NEXUS_TTS_MODEL|kokoro}
+      voice: ${ENV:NEXUS_TTS_VOICE|hf_alpha}
       audio_format: wav
-      sample_rate: ${ENV:NEXUS_TTS_SAMPLE_RATE|44100}
+      sample_rate: ${ENV:NEXUS_TTS_SAMPLE_RATE|24000}
       api_key: ${ENV:NEXUS_TTS_API_KEY|local}
     vad:
       provider: energy

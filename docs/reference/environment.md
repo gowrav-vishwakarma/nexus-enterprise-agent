@@ -82,7 +82,7 @@ Used by `voice_local.yaml`, `voice_s2s_local.yaml`, and the `realtime_local_voic
 | `NEXUS_S2S_PROVIDER` / `NEXUS_S2S_BASE_URL` | Speech-to-speech (`moshi`, `human-1`, `ws://localhost:8998`) |
 | `NEXUS_LLM_MODEL` | Local LLM id (`gpt-oss:latest`, `qwen2.5:7b`, …) |
 | `NEXUS_STT_LANGUAGE` | STT language code for Indic-Conformer (e.g. `hi`) |
-| `NEXUS_TTS_VOICE` | Indic Parler speaker (`Divya`, `Rohit`, …) |
+| `NEXUS_TTS_VOICE` | TTS voice: Indic Parler (`Divya`, `Rohit`, …) or Kokoro Hindi (`hf_alpha`, `hm_omega`) |
 
 ## Messaging channels (app-level, optional)
 
