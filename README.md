@@ -116,22 +116,25 @@ uv run python examples/orchestration/run_team.py "Analyze Q4 revenue"
 **Shared — `myapp/tools.py`** (identical for both ways)
 
 ```python
+from nexus.tools.context import RunContext
 from nexus.tools.decorators import tool, tool_plugin
 
 @tool_plugin("lookup")
 class LookupPlugin:
-    @tool()
-    def lookup_account(self, account_id: str) -> str:
-        """Look up a customer account."""
-        return f"Account {account_id}: active, plan=pro"
+    @tool(name="lookup_account", description="Look up a customer account by id.")
+    def lookup_account(self, account_id: str, ctx: RunContext) -> str:
+        # account_id — filled in by the LLM when it calls the tool
+        # ctx — injected by Nexus from run_context= on the orchestrator
+        return f"[tenant={ctx.tenant_id}] Account {account_id}: active, plan=pro"
 
 @tool_plugin("echo")
 class EchoPlugin:
-    @tool()
-    def echo(self, message: str) -> str:
-        """Echo a message for confirmation."""
-        return f"Echo: {message}"
+    @tool(name="echo")
+    def echo(self, message: str, ctx: RunContext) -> str:
+        return f"Echo for user {ctx.user_id}: {message}"
 ```
+
+Typed args like `account_id` and `message` become the JSON schema the LLM fills in. A `RunContext` parameter is never sent to the model — Nexus injects it from `run_context=RunContext(tenant_id=..., user_id=..., session_id=...)` in the `chat()` handlers below. Use `@tool(name=..., description=..., requires_approval=...)` to configure tool metadata. Details: [docs/reference/tools.md](docs/reference/tools.md), [docs/reference/run-context.md](docs/reference/run-context.md).
 
 ### Way 1 — Programmatic Python
 

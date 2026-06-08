@@ -56,6 +56,29 @@ class WebSearchPlugin:
 registry.register_plugin(WebSearchPlugin())  # → web_search.search
 ```
 
+## RunContext injection
+
+Tools often need request-scoped data (tenant id, user id, plan tier) that the LLM should not choose. Declare a `RunContext` parameter on the tool function — Nexus strips it from the schema sent to the model and injects it at execution time from `run_context=` on `AgentRunner`, `AgentOrchestrator`, or `OrchestrationRuntime`.
+
+```python
+from nexus.tools.context import RunContext
+from nexus.tools.decorators import tool, tool_plugin
+
+@tool_plugin(name="lookup")
+class LookupPlugin:
+    @tool(name="lookup_account", description="Look up a customer account by id.")
+    def lookup_account(self, account_id: str, ctx: RunContext) -> str:
+        plan = ctx.get("plan_tier", "free")
+        return f"[tenant={ctx.tenant_id}, plan={plan}] Account {account_id}: active"
+```
+
+| Parameter kind | Who sets it | Visible to LLM? |
+|----------------|-------------|-----------------|
+| Typed tool args (e.g. `account_id: str`) | LLM in the tool call | Yes |
+| `RunContext` (any param name) | Your app via `run_context=` | No |
+
+The parameter can be named `ctx`, `context`, or anything else — only the type `RunContext` matters. Read extra per-request values from `ctx.metadata` with `ctx.get("key")`. Full field list: [run-context.md](run-context.md).
+
 ## tool_plugins allow-list
 
 | Value | Effect |
