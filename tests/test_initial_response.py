@@ -130,7 +130,8 @@ def test_seed_language_metadata():
 
 
 @pytest.mark.asyncio
-async def test_session_runs_initial_response_before_audio():
+async def test_session_runs_initial_response_on_full_duplex_connect():
+    """Full duplex: greeting runs concurrently with the audio loop (interruptible)."""
     cfg = _rt_config(
         initial_response=InitialResponseConfig(
             mode="proactive",

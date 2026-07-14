@@ -14,7 +14,9 @@ The **Voice Lab** is a full-duplex browser UI for testing the Nexus voice stack 
 
 - Mic button → live conversation (VAD → STT → agent → TTS)
 - Audio playback of TTS responses
-- Barge-in support (full duplex)
+- Barge-in support (full duplex) — mic stays open while the assistant speaks;
+  start talking to interrupt. Browser echo cancellation + a short mute after
+  playback ends reduce speaker echo false triggers
 - Settings panel showing env config + media server health
 - Event log for debugging
 
@@ -172,7 +174,12 @@ agent's `tts.sample_rate` (the rate sent to the browser). Both default to
 
 ## Connect greeting (`initial_response`)
 
-When the manifest sets `initial_response.mode` to `proactive` or `ivr`, the WebSocket session speaks that greeting **before** listening for microphone input. Configure in [`voice_grpc.yaml`](../../examples/orchestration/voice_grpc.yaml) (commented Hindi/English/LLM examples) or [`ivr_support.yaml`](../../examples/orchestration/ivr_support.yaml) (enabled bilingual IVR connect menu: `en` + `hi`).
+When the manifest sets `initial_response.mode` to `proactive` or `ivr`, the WebSocket
+session speaks that greeting at connect. On **full duplex**, listening starts
+immediately so the greeting is interruptible (barge-in). On **half duplex** (IVR),
+the greeting finishes before the mic is processed. Configure in
+[`voice_grpc.yaml`](../../examples/orchestration/voice_grpc.yaml) or
+[`ivr_support.yaml`](../../examples/orchestration/ivr_support.yaml).
 
 - `via_llm: false` + `text` — deterministic TTS in `reply_language` (`hi`, `en`, …)
 - `via_llm: true` + `llm_trigger` — LLM generates the opening (persona + tools apply; supports hi/en/gu/…)

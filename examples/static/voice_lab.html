@@ -131,13 +131,15 @@ function ensurePlay() {
   if (!playCtx) { playCtx = new AudioContext({ sampleRate: PLAY_SR }); playHead = playCtx.currentTime; }
   if (playCtx.state === 'suspended') playCtx.resume();
 }
+function isPlaying() {
+  return sources.length > 0 || ttsPlaying > 0;
+}
 function playPcm(buf) {
   ensurePlay();
   const i16 = new Int16Array(buf);
   if (!i16.length) return;
   log('pcm bytes ' + buf.byteLength);
   ttsPlaying++;
-  micMuteUntil = performance.now() + 800;
   const f32 = new Float32Array(i16.length);
   for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
   const ab = playCtx.createBuffer(1, f32.length, PLAY_SR);
@@ -153,8 +155,9 @@ function playPcm(buf) {
     sources = sources.filter(s => s !== src);
     if (sources.length === 0) {
       ttsPlaying = 0;
-      // Brief grace after playback so speaker echo does not trigger barge-in.
-      micMuteUntil = performance.now() + 400;
+      // Short grace after natural end so speaker echo does not start a fake turn.
+      // Mic stays open during playback so the user can barge-in.
+      micMuteUntil = performance.now() + 250;
     }
   };
   if (speechEndAt !== null) {
@@ -162,7 +165,7 @@ function playPcm(buf) {
     document.getElementById('mLatency').textContent = s.toFixed(2);
     speechEndAt = null;
   }
-  setStatus('ok', 'Assistant speaking…');
+  setStatus('ok', 'Assistant speaking… (talk to interrupt)');
 }
 function stopPlay() {
   sources.forEach(s => { try { s.stop(); } catch(e) {} });
@@ -219,8 +222,9 @@ async function startMic() {
   micNode = new AudioWorkletNode(micCtx, 'mic-sender');
   micNode.port.onmessage = (e) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    // Mute mic uplink while assistant audio plays (prevents echo false barge-in).
-    if (ttsPlaying > 0 || performance.now() < micMuteUntil) return;
+    // Keep mic open during TTS so the server can detect barge-in (same as ankpal-voice).
+    // Only mute briefly after playback ends to ignore speaker echo settling.
+    if (!isPlaying() && performance.now() < micMuteUntil) return;
     ws.send(e.data);
   };
   src.connect(micNode);
@@ -280,6 +284,15 @@ async function startCall() {
       if (msg.content) agentBuf = msg.content;
       flushAgentBubble();
       setStatus('ok', 'Listening…');
+    } else if (t === 'event' && msg.data?.vad === 'speech_start') {
+      // Stop local TTS as soon as VAD hears the user — even if the agent turn
+      // already finished generating (audio may still be draining from the queue).
+      if (isPlaying()) {
+        stopPlay();
+        flushAgentBubble();
+        setStatus('ok', 'Interrupted — listening');
+        log('speech_start → stop playback', 'b');
+      }
     } else if (t === 'barge_in') {
       flushAgentBubble();
       stopPlay();

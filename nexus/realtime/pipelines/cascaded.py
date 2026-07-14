@@ -557,6 +557,15 @@ class CascadedVoicePipeline:
             finally:
                 await out_q.put(RESP_DONE)
 
+        async def run_initial() -> None:
+            try:
+                async for ev in self.run_initial_response(session_id=session_id):
+                    await out_q.put(ev)
+            except asyncio.CancelledError:
+                raise
+            finally:
+                await out_q.put(RESP_DONE)
+
         async def reader() -> None:
             async for frame in audio_in:
                 ev = self.vad.process_frame(frame)
@@ -576,6 +585,12 @@ class CascadedVoicePipeline:
                     utterance = self.vad.take_utterance()
                     state["response_task"] = asyncio.create_task(run_response(utterance))
             await out_q.put(DONE)
+
+        # Speak connect greeting concurrently so the user can barge-in over it.
+        # Schedule before the mic reader so an already-closed input cannot race
+        # past us and skip the greeting entirely.
+        if self.config.effective_initial_response().mode != "none":
+            state["response_task"] = asyncio.create_task(run_initial())
 
         reader_task = asyncio.create_task(reader())
         yield RealtimeStreamEvent(event_type="session_started", data={"duplex": "full"})

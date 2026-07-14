@@ -89,8 +89,12 @@ class RealtimeSession:
     async def run_audio(self) -> None:
         """Stream audio from the transport through the pipeline until it ends."""
         try:
+            # Half-duplex (IVR): speak connect greeting before listening.
+            # Full-duplex: the pipeline starts listening immediately and runs the
+            # initial response as an interruptible concurrent task.
+            duplex = getattr(getattr(self.pipeline, "config", None), "duplex", "full")
             run_initial = getattr(self.pipeline, "run_initial_response", None)
-            if run_initial is not None:
+            if run_initial is not None and duplex != "full":
                 async for event in run_initial(session_id=self.session_id):
                     await self._dispatch(event)
             async for event in self.pipeline.process_audio_stream(
