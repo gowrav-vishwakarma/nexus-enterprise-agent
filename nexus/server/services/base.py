@@ -66,10 +66,3 @@ async def serve_grpc(
     await server.start()
     logger.info("gRPC server listening on %s", listen)
     return server
-
-
-_shared_pool = EnginePool()
-
-
-def get_pool() -> EnginePool:
-    return _shared_pool

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus Voice Lab</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a23; --border: #262b38;
+    --text: #e8eaf0; --muted: #8a90a3;
+    --accent: #4f8cff; --green: #34c77b; --red: #ef5466; --yellow: #e8b93c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: Inter, system-ui, sans-serif; min-height: 100vh;
+    display: grid; grid-template-columns: 320px 1fr 360px; gap: 12px; padding: 12px;
+  }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+           padding: 14px; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 10px; }
+  .call { align-items: center; gap: 14px; }
+  .btn-call { width: 96px; height: 96px; border-radius: 50%; border: none; cursor: pointer;
+              background: var(--accent); color: #fff; font-size: 30px; }
+  .btn-call.on { background: var(--red); }
+  .status { font-size: 13px; color: var(--muted); text-align: center; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+  .status.ok .dot { background: var(--green); }
+  .status.warn .dot { background: var(--yellow); }
+  .cfg { font-size: 11px; color: var(--muted); line-height: 1.55; width: 100%; }
+  .cfg b { color: var(--text); font-weight: 600; }
+  .srv { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .srv .ok { color: var(--green); } .srv .bad { color: var(--red); }
+  .chat { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 88%; padding: 9px 12px; border-radius: 10px; font-size: 14px; line-height: 1.45; }
+  .msg.user { align-self: flex-end; background: var(--accent); }
+  .msg.agent { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); }
+  .tag { font-size: 9px; opacity: .65; text-transform: uppercase; display: block; margin-bottom: 3px; }
+  .logs { flex: 1; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 10px;
+          line-height: 1.55; color: var(--muted); white-space: pre-wrap; }
+  .logs .e { color: var(--red); } .logs .b { color: var(--yellow); }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; }
+  .metric { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; text-align: center; }
+  .metric .v { font-size: 18px; font-weight: 600; }
+  .metric .l { font-size: 9px; color: var(--muted); text-transform: uppercase; }
+  button.refresh { margin-top: 8px; padding: 6px 10px; font-size: 11px; border-radius: 6px;
+                   border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="panel call">
+  <h2>Nexus Voice Lab</h2>
+  <button class="btn-call" id="btnCall" title="Start / stop voice session">🎤</button>
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready</span></div>
+  <div class="metrics">
+    <div class="metric"><div class="v" id="mLatency">--</div><div class="l">latency (s)</div></div>
+    <div class="metric"><div class="v" id="mTurns">0</div><div class="l">turns</div></div>
+  </div>
+  <div class="cfg" id="cfg">Loading config…</div>
+  <button class="refresh" id="btnRefresh">Refresh status</button>
+</div>
+
+<div class="panel">
+  <h2>Conversation</h2>
+  <div class="chat" id="chat"></div>
+</div>
+
+<div class="panel">
+  <h2>Events</h2>
+  <div class="logs" id="logs"></div>
+</div>
+
+<script>
+const MIC_SR = 16000;
+let PLAY_SR = 24000;
+let ws = null, micCtx = null, micStream = null, micNode = null;
+let playCtx = null, playHead = 0, sources = [];
+let active = false, turns = 0, agentBuf = '', speechEndAt = null;
+
+const btn = document.getElementById('btnCall');
+const statusEl = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+const chat = document.getElementById('chat');
+const logs = document.getElementById('logs');
+
+function setStatus(cls, text) {
+  statusEl.className = 'status ' + cls;
+  statusText.textContent = text;
+}
+function log(line, cls='') {
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = line;
+  logs.appendChild(d);
+  logs.scrollTop = logs.scrollHeight;
+  while (logs.childNodes.length > 300) logs.removeChild(logs.firstChild);
+}
+function addMsg(role, text) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + role;
+  d.innerHTML = `<span class="tag">${role === 'user' ? 'You' : 'Assistant'}</span>${text}`;
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function ensurePlay() {
+  if (!playCtx) { playCtx = new AudioContext({ sampleRate: PLAY_SR }); playHead = playCtx.currentTime; }
+  if (playCtx.state === 'suspended') playCtx.resume();
+}
+function playPcm(buf) {
+  ensurePlay();
+  const i16 = new Int16Array(buf);
+  if (!i16.length) return;
+  log('pcm bytes ' + buf.byteLength);
+  const f32 = new Float32Array(i16.length);
+  for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+  const ab = playCtx.createBuffer(1, f32.length, PLAY_SR);
+  ab.getChannelData(0).set(f32);
+  const src = playCtx.createBufferSource();
+  src.buffer = ab;
+  src.connect(playCtx.destination);
+  const t = Math.max(playCtx.currentTime + 0.02, playHead);
+  src.start(t);
+  playHead = t + ab.duration;
+  sources.push(src);
+  src.onended = () => { sources = sources.filter(s => s !== src); };
+  if (speechEndAt !== null) {
+    const s = (performance.now() - speechEndAt) / 1000;
+    document.getElementById('mLatency').textContent = s.toFixed(2);
+    speechEndAt = null;
+  }
+  setStatus('ok', 'Assistant speaking…');
+}
+function stopPlay() {
+  sources.forEach(s => { try { s.stop(); } catch(e) {} });
+  sources = [];
+  if (playCtx) playHead = playCtx.currentTime;
+}
+
+async function loadStatus() {
+  const res = await fetch('/api/status');
+  const data = await res.json();
+  PLAY_SR = data.playback?.sample_rate || data.audio?.play_sample_rate || PLAY_SR;
+  const lines = [
+    `<b>Manifest</b> ${data.manifest}`,
+    `<b>Agent</b> ${data.agent}`,
+    `<b>LLM</b> ${data.llm?.model} @ ${data.llm?.base_url || 'default'}`,
+    `<b>STT</b> ${data.stt?.provider} → ${data.stt?.server_ref || data.stt?.base_url || '-'}`,
+    `<b>TTS</b> ${data.tts?.provider} → ${data.tts?.server_ref || '-'}`,
+    `<b>VAD</b> ${data.vad?.provider}`,
+    `<b>Tenant</b> ${data.tenant_id} / ${data.user_id}`,
+  ];
+  if (data.servers?.length) {
+    lines.push('<b>Media servers</b>');
+    data.servers.forEach(s => {
+      lines.push(`<span class="srv"><span>${s.name} (${s.engine})</span><span class="${s.healthy?'ok':'bad'}">${s.healthy?'ok':'down'}</span></span>`);
+    });
+  }
+  document.getElementById('cfg').innerHTML = lines.join('<br>');
+  if (!data.media_ready) setStatus('warn', 'Some media servers down');
+}
+
+document.getElementById('btnRefresh').onclick = () => loadStatus().catch(e => log('status error: '+e, 'e'));
+
+async function startMic() {
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+  });
+  micCtx = new AudioContext({ sampleRate: MIC_SR });
+  const src = micCtx.createMediaStreamSource(micStream);
+  const code = `class MicSender extends AudioWorkletProcessor {
+    process(inputs) {
+      const ch = inputs[0][0];
+      if (ch) {
+        const i16 = new Int16Array(ch.length);
+        for (let i = 0; i < ch.length; i++)
+          i16[i] = Math.max(-32768, Math.min(32767, ch[i] * 32768));
+        this.port.postMessage(i16.buffer, [i16.buffer]);
+      }
+      return true;
+    }
+  }
+  registerProcessor('mic-sender', MicSender);`;
+  await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], {type:'application/javascript'})));
+  micNode = new AudioWorkletNode(micCtx, 'mic-sender');
+  micNode.port.onmessage = (e) => {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+  };
+  src.connect(micNode);
+}
+
+async function startCall() {
+  setStatus('', 'Connecting…');
+  const sess = await fetch('/v1/realtime/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'lab', 'X-User-ID': 'tester' },
+    body: JSON.stringify({}),
+  });
+  if (!sess.ok) throw new Error(await sess.text());
+  const info = await sess.json();
+  PLAY_SR = info.playback?.sample_rate || info.audio?.play_sample_rate || PLAY_SR;
+  log('session ' + info.session_id);
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + info.ws_path);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = async () => {
+    try {
+      await startMic();
+      ensurePlay();
+      if (playCtx && playCtx.state === 'suspended') await playCtx.resume();
+    } catch (err) {
+      setStatus('warn', 'Mic denied'); ws.close(); return;
+    }
+    active = true;
+    btn.classList.add('on');
+    agentBuf = '';
+    setStatus('ok', 'Listening — speak now');
+    log('connected full-duplex');
+  };
+  ws.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) { playPcm(ev.data); return; }
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    const t = msg.event_type || msg.type;
+    log(JSON.stringify(msg));
+    if (t === 'transcript_final' && msg.content) {
+      addMsg('user', msg.content);
+      speechEndAt = performance.now();
+      turns++;
+      document.getElementById('mTurns').textContent = String(turns);
+      agentBuf = '';
+    } else if (t === 'content' && msg.content) {
+      agentBuf += msg.content;
+    } else if (t === 'final_response') {
+      if (agentBuf.trim()) addMsg('agent', agentBuf.trim());
+      agentBuf = '';
+      setStatus('ok', 'Listening…');
+    } else if (t === 'barge_in') {
+      stopPlay();
+      agentBuf = '';
+      setStatus('ok', 'Interrupted — listening');
+      log('barge-in', 'b');
+    } else if (t === 'error') {
+      log('ERROR: ' + (msg.content || JSON.stringify(msg.data)), 'e');
+    }
+  };
+  ws.onclose = () => endCall(false);
+  ws.onerror = () => { log('websocket error', 'e'); endCall(false); };
+}
+
+function endCall(closeWs=true) {
+  if (closeWs && ws) try { ws.close(); } catch(e) {}
+  ws = null; active = false;
+  if (micNode) { try { micNode.disconnect(); } catch(e) {} micNode = null; }
+  if (micCtx) { try { micCtx.close(); } catch(e) {} micCtx = null; }
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  micStream = null;
+  stopPlay();
+  btn.classList.remove('on');
+  setStatus('', 'Disconnected');
+}
+
+btn.onclick = () => active ? endCall() : startCall().catch(e => { log(String(e), 'e'); setStatus('warn', String(e)); });
+loadStatus().catch(e => log('status: '+e, 'e'));
+</script>
+</body>
+</html>

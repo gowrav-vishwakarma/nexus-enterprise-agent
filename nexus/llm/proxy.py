@@ -1,5 +1,6 @@
 """LLM proxy to orchestrate multiple providers."""
 
+import inspect
 import logging
 from typing import Any, AsyncIterator, Optional
 
@@ -79,14 +80,18 @@ class LLMProxy:
         max_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> AsyncIterator[LLMStreamChunk]:
-        """Execute a streaming chat completion call with the configured adapter."""
-        return await self._adapter.chat_stream(
+        """Yield stream chunks from the configured adapter."""
+        stream = self._adapter.chat_stream(
             messages=messages,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
-            **kwargs
+            **kwargs,
         )
+        if inspect.iscoroutine(stream):
+            stream = await stream
+        async for chunk in stream:
+            yield chunk
 
     def count_tokens(self, messages: list[dict[str, Any]], tools: Optional[list[dict[str, Any]]] = None) -> int:
         """Count tokens in messages and tools using the adapter's implementation."""

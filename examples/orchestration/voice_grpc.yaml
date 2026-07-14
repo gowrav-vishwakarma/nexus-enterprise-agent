@@ -1,23 +1,30 @@
 version: "1"
 root: voice_grpc
 
-# Voice agent using Nexus gRPC media servers + liteLLM for LLM.
-# Start media servers:  uv run python -m nexus.server up -c examples/servers.yaml
-# LLM: external via liteLLM proxy or direct endpoint (not hosted by nexus.server)
+# Full-stack voice lab manifest — real gRPC media servers + liteLLM LLM.
+# Start: ./scripts/run_voice_lab.sh
 
 servers:
   indic_stt:
     kind: stt
-    engine: mock
-    port: 50051
+    engine: ${ENV:STT_ENGINE|conformer}
+    port: ${ENV:STT_PORT|50051}
+    device: ${ENV:STT_DEVICE|cpu}
+    extra:
+      model_id: ${ENV:STT_MODEL_ID|ai4bharat/indic-conformer-600m-multilingual}
+      decoding: ${ENV:STT_DECODING|rnnt}
   indic_tts:
     kind: tts
-    engine: mock
-    port: 50052
+    engine: ${ENV:TTS_ENGINE|parler}
+    port: ${ENV:TTS_PORT|50052}
+    device: ${ENV:TTS_DEVICE|cuda}
+    replicas: ${ENV:TTS_REPLICAS|2}
+    extra:
+      model_id: ${ENV:TTS_MODEL_ID|ai4bharat/indic-parler-tts}
   silero_vad:
     kind: vad
-    engine: mock
-    port: 50053
+    engine: ${ENV:VAD_ENGINE|silero}
+    port: ${ENV:VAD_PORT|50053}
 
 defaults:
   llm_fast: &llm_fast
@@ -26,8 +33,8 @@ defaults:
     base_url: ${ENV:LITELLM_BASE_URL|http://localhost:4000}
     api_key: ${ENV:LITELLM_API_KEY|}
     default_params:
-      max_tokens: 150
-      temperature: 0.7
+      max_tokens: ${ENV:VOICE_LLM_MAX_TOKENS|400}
+      temperature: ${ENV:VOICE_LLM_TEMPERATURE|0.4}
 
 storage:
   adapter: memory
@@ -39,22 +46,24 @@ agents:
     stt:
       provider: nexus_server
       server_ref: indic_stt
-      language: hi
+      language: ${ENV:STT_LANGUAGE|hi}
       sample_rate: 16000
     tts:
       provider: nexus_server
       server_ref: indic_tts
-      sample_rate: 24000
+      voice: ${ENV:TTS_VOICE|Divya speaks in a clear expressive voice at a moderate pace.}
+      sample_rate: ${ENV:TTS_SAMPLE_RATE|24000}
     vad:
-      provider: energy
-      silence_ms: 600
+      provider: ${ENV:VAD_PROVIDER|energy}
+      server_ref: silero_vad
+      silence_ms: ${ENV:MIN_SILENCE_MS|600}
+      sample_rate: 16000
     agent:
       llm: *llm_fast
       turns:
-        max_turns: 6
+        max_turns: ${ENV:VOICE_MAX_TURNS|12}
       persona:
-        role: Hindi Voice Assistant
-        goal: Natural spoken Hindi conversation
+        role: ${ENV:VOICE_AGENT_ROLE|Voice Assistant}
+        goal: Natural spoken conversation
         system_prompt: >
-          Reply in Hindi unless the user speaks English.
-          Keep replies short — they will be spoken aloud.
+          ${ENV:VOICE_SYSTEM_PROMPT|You are a helpful voice assistant. Reply concisely in the user's language. Keep answers short — they will be spoken aloud. Never use markdown.}

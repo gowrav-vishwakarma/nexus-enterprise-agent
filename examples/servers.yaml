@@ -1,31 +1,39 @@
 servers:
   indic_stt:
     kind: stt
-    engine: mock
+    engine: ${ENV:STT_ENGINE|conformer}
     host: 127.0.0.1
     port: ${ENV:STT_PORT|50051}
-    device: cpu
+    device: ${ENV:STT_DEVICE|cpu}
     extra:
-      model_id: ai4bharat/indic-conformer-600m-multilingual
-      decoding: rnnt
+      model_id: ${ENV:STT_MODEL_ID|ai4bharat/indic-conformer-600m-multilingual}
+      decoding: ${ENV:STT_DECODING|rnnt}
 
   indic_tts:
     kind: tts
-    engine: mock
+    engine: ${ENV:TTS_ENGINE|parler}
     host: 127.0.0.1
     port: ${ENV:TTS_PORT|50052}
-    device: cpu
-    replicas: 2
+    device: ${ENV:TTS_DEVICE|cuda}
+    replicas: ${ENV:TTS_REPLICAS|2}
+    extra:
+      model_id: ${ENV:TTS_MODEL_ID|ai4bharat/indic-parler-tts}
+      dtype: ${ENV:TTS_DTYPE|bfloat16}
 
   silero_vad:
     kind: vad
-    engine: mock
+    engine: ${ENV:VAD_ENGINE|silero}
     host: 127.0.0.1
     port: ${ENV:VAD_PORT|50053}
+    extra:
+      threshold: ${ENV:VAD_THRESHOLD|0.5}
+      min_silence_ms: ${ENV:MIN_SILENCE_MS|300}
 
   whisper_lid:
     kind: lid
-    engine: mock
+    engine: ${ENV:LID_ENGINE|faster_whisper}
     host: 127.0.0.1
     port: ${ENV:LID_PORT|50054}
-    device: cpu
+    device: ${ENV:LID_DEVICE|cpu}
+    extra:
+      model_size: ${ENV:LID_MODEL|small}

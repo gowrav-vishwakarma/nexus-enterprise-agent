@@ -13,6 +13,7 @@ from typing import Any
 import grpc
 import yaml
 
+from nexus.orchestration.env import interpolate_env
 from nexus.server.config import LauncherConfig, ModelServerSpec, ServersConfig
 from nexus.server.pool import EnginePool, get_pool
 from nexus.server.registry import ServerRegistry
@@ -34,6 +35,7 @@ _BUILDERS = {
 
 def load_servers_config(path: str | Path) -> ServersConfig:
     data = yaml.safe_load(Path(path).read_text()) or {}
+    data = interpolate_env(data)
     if "servers" in data:
         return ServersConfig.model_validate(data)
     return ServersConfig(servers={k: ModelServerSpec.model_validate(v) for k, v in data.items()})

@@ -24,6 +24,7 @@ Usage examples in LLMProviderConfig:
     LLMProviderConfig(provider="gemini", model="gemini-2.0-flash-exp", api_key="...")
 """
 
+import inspect
 import json
 import logging
 from typing import Any, AsyncIterator, Optional
@@ -256,14 +257,18 @@ class LiteLLMAdapter(LLMAdapter):
     ) -> AsyncIterator[LLMStreamChunk]:
         """Streaming chat via LiteLLM — yields LLMStreamChunk deltas."""
         if self._proxy_delegate is not None:
-            async for chunk in self._proxy_delegate.chat_stream(
+            stream = self._proxy_delegate.chat_stream(
                 messages=messages,
                 tools=tools,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stop_sequences=stop_sequences,
                 **kwargs,
-            ):
+            )
+            # OpenAI/Anthropic historically returned a coroutine of an async iterator.
+            if inspect.iscoroutine(stream):
+                stream = await stream
+            async for chunk in stream:
                 yield chunk
             return
 

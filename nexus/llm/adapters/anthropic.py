@@ -230,51 +230,45 @@ class AnthropicAdapter(LLMAdapter):
 
         try:
             stream = await client.messages.create(**params, stream=True)
-            
-            async def generator():
-                current_tool_index = 0
-                async for event in stream:
-                    # Anthropic yields delta events
-                    # We map them to LLMStreamChunk
-                    if event.type == "content_block_start":
-                        block = event.content_block
-                        if block.type == "tool_use":
-                            yield LLMStreamChunk(
-                                tool_calls=[{
-                                    "index": current_tool_index,
-                                    "id": block.id,
-                                    "name": block.name,
-                                    "arguments": "",
-                                }]
-                            )
-                    elif event.type == "content_block_delta":
-                        delta = event.delta
-                        if delta.type == "text_delta":
-                            yield LLMStreamChunk(content=delta.text)
-                        elif delta.type == "input_json_delta":
-                            yield LLMStreamChunk(
-                                tool_calls=[{
-                                    "index": current_tool_index,
-                                    "arguments": delta.partial_json,
-                                }]
-                            )
-                    elif event.type == "content_block_stop":
-                        # Move tool index when block stops
-                        current_tool_index += 1
-                    elif event.type == "message_delta":
-                        # Final stop reason and usage
-                        usage = None
-                        if hasattr(event, "usage") and event.usage:
-                            usage = TokenUsage(
-                                prompt_tokens=event.usage.input_tokens,
-                                completion_tokens=event.usage.output_tokens,
-                                total_tokens=event.usage.input_tokens + event.usage.output_tokens
-                            )
-                        yield LLMStreamChunk(
-                            finish_reason=event.delta.stop_reason,
-                            usage=usage
-                        )
-            return generator()
         except Exception as e:
             logger.error("Anthropic Streaming API call failed: %s", e)
             raise
+
+        current_tool_index = 0
+        async for event in stream:
+            if event.type == "content_block_start":
+                block = event.content_block
+                if block.type == "tool_use":
+                    yield LLMStreamChunk(
+                        tool_calls=[{
+                            "index": current_tool_index,
+                            "id": block.id,
+                            "name": block.name,
+                            "arguments": "",
+                        }]
+                    )
+            elif event.type == "content_block_delta":
+                delta = event.delta
+                if delta.type == "text_delta":
+                    yield LLMStreamChunk(content=delta.text)
+                elif delta.type == "input_json_delta":
+                    yield LLMStreamChunk(
+                        tool_calls=[{
+                            "index": current_tool_index,
+                            "arguments": delta.partial_json,
+                        }]
+                    )
+            elif event.type == "content_block_stop":
+                current_tool_index += 1
+            elif event.type == "message_delta":
+                usage = None
+                if hasattr(event, "usage") and event.usage:
+                    usage = TokenUsage(
+                        prompt_tokens=event.usage.input_tokens,
+                        completion_tokens=event.usage.output_tokens,
+                        total_tokens=event.usage.input_tokens + event.usage.output_tokens
+                    )
+                yield LLMStreamChunk(
+                    finish_reason=event.delta.stop_reason,
+                    usage=usage
+                )

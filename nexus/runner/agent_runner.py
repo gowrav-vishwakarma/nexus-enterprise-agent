@@ -1,5 +1,6 @@
 """Agent Runner orchestrating the main agentic loop with RCS."""
 
+import inspect
 import json
 import logging
 import time
@@ -372,7 +373,9 @@ class AgentRunner:
                 yield llm_response
                 return
 
-            raw_stream = await self.llm_proxy.chat_stream(messages=messages, tools=tools)
+            raw_stream = self.llm_proxy.chat_stream(messages=messages, tools=tools)
+            if inspect.iscoroutine(raw_stream):
+                raw_stream = await raw_stream
             content_parts: list[str] = []
             content_buffer: list[str] = []
             tool_calls_acc: dict[int, dict[str, Any]] = {}

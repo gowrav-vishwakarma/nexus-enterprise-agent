@@ -54,6 +54,21 @@ class OpenAIAdapter(LLMAdapter):
 
         return self._async_client
 
+    def _apply_proxy_defaults(self, params: dict[str, Any]) -> None:
+        """Tune OpenAI-compatible proxy calls for voice-friendly replies.
+
+        Reasoning Qwen variants stream only ``reasoning_content`` and leave
+        ``content`` empty unless thinking is disabled via chat template kwargs.
+        """
+        base_url = self.config.base_url or ""
+        if not base_url or "api.openai.com" in base_url:
+            return
+        extra = dict(params.get("extra_body") or {})
+        template_kwargs = dict(extra.get("chat_template_kwargs") or {})
+        template_kwargs.setdefault("enable_thinking", False)
+        extra["chat_template_kwargs"] = template_kwargs
+        params["extra_body"] = extra
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -84,8 +99,8 @@ class OpenAIAdapter(LLMAdapter):
             params["tools"] = format_openai_tools(tools)
 
         # Merge extra params from config and kwargs
-        params.update(self.config.extra_headers)
         params.update(kwargs)
+        self._apply_proxy_defaults(params)
 
         try:
             response = await client.chat.completions.create(**params)
@@ -136,6 +151,7 @@ class OpenAIAdapter(LLMAdapter):
         tools: Optional[list[dict[str, Any]]] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        stop_sequences: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> Any:
         client = self._get_client()
@@ -153,50 +169,51 @@ class OpenAIAdapter(LLMAdapter):
             params["temperature"] = temperature
         if max_tokens is not None:
             params["max_tokens"] = max_tokens
+        if stop_sequences:
+            params["stop"] = stop_sequences
         
         if tools:
             params["tools"] = format_openai_tools(tools)
 
-        # Merge extra params from config and kwargs
+        # Merge extra params from config and kwargs (OpenAI uses "stop", not stop_sequences)
+        kwargs.pop("stop_sequences", None)
         params.update(kwargs)
+        self._apply_proxy_defaults(params)
 
         try:
             stream = await client.chat.completions.create(**params)
-            
-            async def generator():
-                async for chunk in stream:
-                    if not chunk.choices:
-                        continue
-                    
-                    choice = chunk.choices[0]
-                    delta = choice.delta
-                    
-                    tool_calls = []
-                    if delta.tool_calls:
-                        for tc_chunk in delta.tool_calls:
-                            # We yield delta tool call info
-                            tool_calls.append({
-                                "index": tc_chunk.index,
-                                "id": tc_chunk.id,
-                                "name": tc_chunk.function.name if tc_chunk.function else None,
-                                "arguments": tc_chunk.function.arguments if tc_chunk.function else None,
-                            })
-
-                    usage = None
-                    if hasattr(chunk, "usage") and chunk.usage:
-                        usage = TokenUsage(
-                            prompt_tokens=chunk.usage.prompt_tokens,
-                            completion_tokens=chunk.usage.completion_tokens,
-                            total_tokens=chunk.usage.total_tokens,
-                        )
-
-                    yield LLMStreamChunk(
-                        content=delta.content,
-                        tool_calls=tool_calls,
-                        usage=usage,
-                        finish_reason=choice.finish_reason,
-                    )
-            return generator()
         except Exception as e:
             logger.error("OpenAI Streaming API call failed: %s", e)
             raise
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+
+            choice = chunk.choices[0]
+            delta = choice.delta
+
+            tool_calls = []
+            if delta.tool_calls:
+                for tc_chunk in delta.tool_calls:
+                    tool_calls.append({
+                        "index": tc_chunk.index,
+                        "id": tc_chunk.id,
+                        "name": tc_chunk.function.name if tc_chunk.function else None,
+                        "arguments": tc_chunk.function.arguments if tc_chunk.function else None,
+                    })
+
+            usage = None
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage = TokenUsage(
+                    prompt_tokens=chunk.usage.prompt_tokens,
+                    completion_tokens=chunk.usage.completion_tokens,
+                    total_tokens=chunk.usage.total_tokens,
+                )
+
+            yield LLMStreamChunk(
+                content=delta.content,
+                tool_calls=tool_calls,
+                usage=usage,
+                finish_reason=choice.finish_reason,
+            )

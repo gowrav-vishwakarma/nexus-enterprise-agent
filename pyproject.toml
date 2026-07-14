@@ -65,7 +65,8 @@ otel = [
 # FastAPI integration
 fastapi = [
     "fastapi>=0.111",
-    "uvicorn>=0.30",
+    "uvicorn[standard]>=0.30",
+    "websockets>=12",
     "sse-starlette>=2.1",
     "python-dotenv>=1.0",
     "python-multipart>=0.0.9",
@@ -89,6 +90,7 @@ grpc = [
 server = [
     "nexus-enterprise-agent[grpc]",
     "torch>=2.0",
+    "torchaudio>=2.0",
     "numpy>=1.26",
     "transformers>=4.46",
     "faster-whisper>=1.0",

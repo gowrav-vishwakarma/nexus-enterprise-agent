@@ -7,7 +7,7 @@ import pytest
 from nexus.config.llm import LLMProviderConfig
 from nexus.llm.adapters.litellm import LiteLLMAdapter, build_litellm_model_string
 from nexus.llm.proxy import LLMProxy
-from nexus.llm.response import LLMResponse, ToolCallRequest
+from nexus.llm.response import LLMResponse, LLMStreamChunk, TokenUsage, ToolCallRequest
 from nexus.llm.tool_format import format_openai_tools, tool_calls_to_openai_messages
 
 
@@ -237,3 +237,150 @@ def test_tool_calls_openai_serialization():
     assert serialized[0]["type"] == "function"
     assert serialized[0]["function"]["name"] == "calendar.get_events"
     assert serialized[0]["function"]["arguments"] == "{}"
+
+
+# ── Streaming via OpenAI proxy delegate (base_url path) ───────────────────────
+
+@pytest.mark.asyncio
+async def test_litellm_proxy_delegate_chat_stream_async_gen():
+    """litellm+base_url must iterate OpenAI-delegate async generators."""
+    config = LLMProviderConfig(
+        provider="litellm",
+        model="openai/qwen",
+        api_key="sk-test",
+        base_url="http://localhost:4000",
+    )
+    adapter = LiteLLMAdapter(config)
+    assert adapter._proxy_delegate is not None
+
+    async def fake_stream(*_a, **_k):
+        yield LLMStreamChunk(content="Namaste")
+        yield LLMStreamChunk(content=None, finish_reason="stop")
+
+    adapter._proxy_delegate.chat_stream = fake_stream  # type: ignore[method-assign]
+
+    chunks = [
+        c async for c in adapter.chat_stream(messages=[{"role": "user", "content": "hi"}])
+    ]
+    assert [c.content for c in chunks if c.content] == ["Namaste"]
+    assert chunks[-1].finish_reason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_litellm_proxy_delegate_chat_stream_legacy_coro():
+    """Regression: delegate that returns a coroutine-wrapped iterator still works."""
+    config = LLMProviderConfig(
+        provider="litellm",
+        model="openai/qwen",
+        api_key="sk-test",
+        base_url="http://localhost:4000",
+    )
+    adapter = LiteLLMAdapter(config)
+
+    async def legacy_chat_stream(*_a, **_k):
+        async def gen():
+            yield LLMStreamChunk(content="ok")
+            yield LLMStreamChunk(finish_reason="stop")
+
+        return gen()
+
+    adapter._proxy_delegate.chat_stream = legacy_chat_stream  # type: ignore[method-assign]
+
+    chunks = [
+        c async for c in adapter.chat_stream(messages=[{"role": "user", "content": "hi"}])
+    ]
+    assert chunks[0].content == "ok"
+
+
+@pytest.mark.asyncio
+async def test_openai_proxy_disables_reasoning_for_qwen():
+    """Proxy-hosted Qwen must disable thinking so content is speakable."""
+    from nexus.llm.adapters.openai import OpenAIAdapter
+
+    config = LLMProviderConfig(
+        provider="openai",
+        model="openai/qwen",
+        api_key="sk-test",
+        base_url="http://localhost:4000",
+    )
+    adapter = OpenAIAdapter(config)
+    params: dict = {"model": "openai/qwen", "messages": []}
+    adapter._apply_proxy_defaults(params)
+    assert params["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
+
+
+@pytest.mark.asyncio
+async def test_litellm_proxy_delegate_chat_stream_maps_stop_sequences():
+    """OpenAI delegate must map stop_sequences → stop for streaming calls."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    config = LLMProviderConfig(
+        provider="litellm",
+        model="openai/qwen",
+        api_key="sk-test",
+        base_url="http://localhost:4000",
+    )
+    adapter = LiteLLMAdapter(config)
+    delegate = adapter._proxy_delegate
+    assert delegate is not None
+
+    mock_stream = MagicMock()
+
+    async def _aiter():
+        yield MagicMock(choices=[])
+
+    mock_stream.__aiter__ = lambda self: _aiter()
+    delegate._async_client = MagicMock()
+    delegate._async_client.chat.completions.create = AsyncMock(return_value=mock_stream)
+
+    async for _ in adapter.chat_stream(
+        messages=[{"role": "user", "content": "hi"}],
+        stop_sequences=["END"],
+    ):
+        pass
+
+    call_kwargs = delegate._async_client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["stop"] == ["END"]
+    assert "stop_sequences" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_agent_runner_litellm_proxy_stream_e2e():
+    """Full AgentRunner path: litellm+base_url → OpenAI delegate → streamed reply."""
+    from nexus.config.agent import AgentConfig
+    from nexus.runner.agent_runner import AgentRunner
+    from nexus.session.manager import SessionManager
+
+    config = LLMProviderConfig(
+        provider="litellm",
+        model="openai/qwen",
+        api_key="sk-test",
+        base_url="http://45.194.3.236:4000/",
+    )
+    from nexus.tools.registry import ToolRegistry
+
+    runner = AgentRunner(
+        AgentConfig(name="voice_grpc", llm=config),
+        tool_registry=ToolRegistry(),
+        storage_config=SessionManager(),
+    )
+    adapter = runner.llm_proxy._adapter
+    assert isinstance(adapter, LiteLLMAdapter)
+    assert adapter._proxy_delegate is not None
+
+    async def fake_stream(*_a, **_k):
+        yield LLMStreamChunk(content="Hello")
+        yield LLMStreamChunk(content=".")
+        yield LLMStreamChunk(
+            finish_reason="stop",
+            usage=TokenUsage(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+        )
+
+    adapter._proxy_delegate.chat_stream = fake_stream  # type: ignore[method-assign]
+
+    events = [ev async for ev in runner.run_stream("halod", stream=True)]
+    types = [e.event_type for e in events]
+    assert "error" not in types
+    assert "final_response" in types
+    final = next(e for e in events if e.event_type == "final_response")
+    assert final.content == "Hello."

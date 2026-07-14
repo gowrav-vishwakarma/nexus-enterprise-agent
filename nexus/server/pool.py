@@ -54,3 +54,11 @@ class TTSReplicaPool:
     @property
     def sample_rate(self) -> int:
         return self._replicas[0].sample_rate if self._replicas else 24000
+
+
+_shared_pool = EnginePool()
+
+
+def get_pool() -> EnginePool:
+    """Return the process-wide shared engine pool."""
+    return _shared_pool

@@ -87,3 +87,7 @@ uv run python -m grpc_tools.protoc \
 ```
 
 Then fix the import in `media_pb2_grpc.py` to `from nexus.server.proto import media_pb2 as media__pb2`.
+
+## Browser testing
+
+Use the [Voice Lab](voice-lab.md) (`./scripts/run_voice_lab.sh`) for full-duplex browser testing with real media servers and env-driven config.

@@ -5,6 +5,8 @@ from __future__ import annotations
 import struct
 from collections.abc import Iterator
 
+from typing import Any
+
 import numpy as np
 
 from nexus.server.engines.base import (
@@ -20,6 +22,9 @@ from nexus.server.engines.base import (
 class MockSTTEngine(STTEngine):
     meta = EngineMeta(id="mock", label="Mock STT", kind="stt", languages=("en", "hi"))
 
+    def __init__(self, **kwargs: Any) -> None:
+        pass
+
     def transcribe(self, audio: np.ndarray, sample_rate: int, language: str) -> str:
         duration = len(audio) / max(sample_rate, 1)
         return f"mock transcript ({language}, {duration:.1f}s)"
@@ -29,10 +34,16 @@ class MockTTSEngine(TTSEngine):
     meta = EngineMeta(id="mock", label="Mock TTS", kind="tts", sample_rate=24000)
     sample_rate = 24000
 
+    def __init__(self, **kwargs: Any) -> None:
+        pass
+
     def synthesize(self, text: str, language: str, voice: str | None = None) -> np.ndarray:
-        # 0.1s of silence per word
-        n = max(2400, len(text.split()) * 2400)
-        return np.zeros(n, dtype=np.float32)
+        # Audible test tone so Voice Lab / mock gRPC TTS is hearable (not silence).
+        sr = self.sample_rate
+        duration = max(0.25, min(2.5, len(text) * 0.04))
+        n = int(sr * duration)
+        t = np.arange(n, dtype=np.float32) / sr
+        return (0.25 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
 
     def synthesize_stream(
         self,
@@ -43,14 +54,12 @@ class MockTTSEngine(TTSEngine):
         chunk_s: float = 0.35,
         should_stop=None,
     ) -> Iterator[np.ndarray]:
+        audio = self.synthesize(text, language, voice)
         chunk_samples = int(self.sample_rate * chunk_s)
-        total = max(chunk_samples, len(text) * 400)
-        emitted = 0
-        while emitted < total:
+        for start in range(0, len(audio), chunk_samples):
             if should_stop and should_stop():
                 break
-            yield np.zeros(chunk_samples, dtype=np.float32)
-            emitted += chunk_samples
+            yield audio[start : start + chunk_samples]
 
 
 class _MockVADSession(VADSession):
@@ -90,6 +99,9 @@ class _MockVADSession(VADSession):
 class MockVADEngine(VADEngine):
     meta = EngineMeta(id="mock", label="Mock VAD", kind="vad", sample_rate=16000)
 
+    def __init__(self, **kwargs: Any) -> None:
+        pass
+
     def create_session(self) -> VADSession:
         return _MockVADSession()
 
@@ -98,6 +110,9 @@ class MockLIDEngine(LIDEngine):
     meta = EngineMeta(
         id="mock", label="Mock LID", kind="lid", languages=("en", "hi", "gu")
     )
+
+    def __init__(self, **kwargs: Any) -> None:
+        pass
 
     def detect(
         self, audio: np.ndarray, sample_rate: int, fallback_language: str = "hi"
