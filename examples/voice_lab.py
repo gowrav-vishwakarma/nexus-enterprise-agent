@@ -173,11 +173,11 @@ async def api_status() -> JSONResponse:
     media_ready = True
     if _registry:
         refs = _media_server_refs()
-        if refs:
-            await _registry.check_all(refs)
+        # Health-check every configured server for the status panel (not only STT/TTS refs).
+        await _registry.check_all()
         for row in _registry.list_servers():
             servers_info.append(row)
-            if row["name"] in refs and not row["healthy"]:
+            if refs and row["name"] in refs and not row["healthy"]:
                 media_ready = False
     stt = cfg.effective_stt()
     tts = cfg.effective_tts()

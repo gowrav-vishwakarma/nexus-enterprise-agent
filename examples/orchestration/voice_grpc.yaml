@@ -88,6 +88,7 @@ agents:
     vad:
       provider: ${ENV:VAD_PROVIDER|energy}
       server_ref: silero_vad
+      threshold: ${ENV:VAD_THRESHOLD|0.04}
       silence_ms: ${ENV:MIN_SILENCE_MS|600}
       sample_rate: 16000
     agent:
