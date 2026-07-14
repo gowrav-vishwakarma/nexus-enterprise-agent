@@ -16,8 +16,4 @@ def __getattr__(name: str):
         from nexus.realtime.transport.sip import TwilioMediaStreamTransport
 
         return TwilioMediaStreamTransport
-    if name == "LiveKitTransport":
-        from nexus.realtime.transport.webrtc import LiveKitTransport
-
-        return LiveKitTransport
     raise AttributeError(f"module 'nexus.realtime.transport' has no attribute {name!r}")

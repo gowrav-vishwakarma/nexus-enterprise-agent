@@ -309,8 +309,9 @@ await session.run_audio()
 |-----------|----------|
 | `WebSocketTransport` | Browser PCM16 |
 | `TwilioMediaStreamTransport` | Phone via Twilio/SIP (mu-law 8 kHz) |
-| `LiveKitTransport` | WebRTC |
 | `InMemoryTransport` | Tests |
+
+Media servers (STT/TTS/VAD/LID) connect via gRPC — see [model-servers.md](model-servers.md).
 
 **Production wiring:** [realtime_saas_api.py](../../examples/realtime_saas_api.py) — sessions, voice WebSocket, Twilio.
 

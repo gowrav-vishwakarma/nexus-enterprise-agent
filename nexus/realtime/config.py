@@ -21,13 +21,14 @@ DuplexMode = Literal["half", "full"]
 class STTConfig(BaseModel):
     """Speech-to-text adapter configuration."""
 
-    provider: str = Field(default="mock", description="STT provider, e.g. deepgram, openai, mock")
+    provider: str = Field(default="mock", description="STT provider, e.g. deepgram, openai, mock, nexus_server")
     model: Optional[str] = Field(default=None, description="Provider model, e.g. nova-3")
     language: str = Field(default="en", description="Primary language code")
     sample_rate: int = Field(default=16000, description="Input audio sample rate (Hz)")
     interim_results: bool = Field(default=True, description="Emit partial transcripts")
     api_key: SecretStr = Field(default=SecretStr(""), description="Provider API key")
-    base_url: Optional[str] = Field(default=None, description="Custom endpoint override")
+    base_url: Optional[str] = Field(default=None, description="Custom endpoint override (host:port or URL)")
+    server_ref: Optional[str] = Field(default=None, description="Logical name in servers: config")
     extra: dict[str, Any] = Field(default_factory=dict, description="Provider-specific options")
 
     def get_api_key(self) -> str:
@@ -38,14 +39,15 @@ class STTConfig(BaseModel):
 class TTSConfig(BaseModel):
     """Text-to-speech adapter configuration."""
 
-    provider: str = Field(default="mock", description="TTS provider, e.g. openai, cartesia, mock")
+    provider: str = Field(default="mock", description="TTS provider, e.g. openai, cartesia, mock, nexus_server")
     model: Optional[str] = Field(default=None, description="Provider model, e.g. tts-1")
     voice: Optional[str] = Field(default=None, description="Voice id/name")
     sample_rate: int = Field(default=24000, description="Output audio sample rate (Hz)")
     audio_format: str = Field(default="pcm16", description="Output encoding, e.g. pcm16, mp3")
     speed: float = Field(default=1.0, description="Speaking rate multiplier")
     api_key: SecretStr = Field(default=SecretStr(""), description="Provider API key")
-    base_url: Optional[str] = Field(default=None, description="Custom endpoint override")
+    base_url: Optional[str] = Field(default=None, description="Custom endpoint override (host:port or URL)")
+    server_ref: Optional[str] = Field(default=None, description="Logical name in servers: config")
     extra: dict[str, Any] = Field(default_factory=dict, description="Provider-specific options")
 
     def get_api_key(self) -> str:
@@ -56,11 +58,13 @@ class TTSConfig(BaseModel):
 class VADConfig(BaseModel):
     """Voice-activity-detection / turn-detection configuration."""
 
-    provider: str = Field(default="energy", description="VAD provider: energy (built-in) or silero")
+    provider: str = Field(default="energy", description="VAD provider: energy, silero, nexus_server")
     threshold: float = Field(default=0.02, description="Energy/probability threshold for speech")
     silence_ms: int = Field(default=700, description="Trailing silence that ends a turn (ms)")
     min_speech_ms: int = Field(default=200, description="Minimum speech length to count as a turn (ms)")
     sample_rate: int = Field(default=16000, description="Audio sample rate (Hz)")
+    base_url: Optional[str] = Field(default=None, description="gRPC endpoint host:port")
+    server_ref: Optional[str] = Field(default=None, description="Logical name in servers: config")
     extra: dict[str, Any] = Field(default_factory=dict, description="Provider-specific options")
 
 

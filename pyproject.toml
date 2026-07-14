@@ -77,8 +77,25 @@ realtime = [
     "httpx>=0.27",
 ]
 
+# gRPC client for Nexus media servers (lightweight — no torch)
+grpc = [
+    "grpcio>=1.60",
+    "grpcio-tools>=1.60",
+    "protobuf>=5.26",
+    "numpy>=1.26",
+]
+
+# Nexus media model servers (GPU engines — heavy; install parler-tts separately for indic TTS)
+server = [
+    "nexus-enterprise-agent[grpc]",
+    "torch>=2.0",
+    "numpy>=1.26",
+    "transformers>=4.46",
+    "faster-whisper>=1.0",
+    "onnxruntime>=1.17",
+]
+
 # Kyutai Moshi speech-to-speech client (the MODEL runs in a separate server).
-# Light, torch-free: just the WebSocket + Opus codec the adapter needs.
 moshi = [
     "websockets>=12",
     "sphn>=0.1.4",
@@ -87,12 +104,12 @@ moshi = [
 
 # All dependencies
 all = [
-    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi,realtime,moshi]",
+    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi,realtime,moshi,grpc]",
 ]
 
-# Full test suite (all adapters + storage + FastAPI)
+# Full test suite (all adapters + storage + FastAPI + gRPC)
 test = [
-    "nexus-enterprise-agent[dev,litellm,openai,anthropic,sqlite,postgres,redis,file,fastapi]",
+    "nexus-enterprise-agent[dev,litellm,openai,anthropic,sqlite,postgres,redis,file,fastapi,grpc]",
 ]
 
 # Dev / integration-test dependencies
@@ -125,5 +142,6 @@ asyncio_mode = "auto"
 addopts = "-m 'not live_llm'"
 markers = [
     "live_llm: real LLM API calls; opt-in only (pytest -m live_llm)",
+    "live_gpu: real GPU model server smoke tests; opt-in only",
 ]
 

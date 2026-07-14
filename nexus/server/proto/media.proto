@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package nexus.media.v1;
+
+// Shared request context propagated from RunContext.
+message RequestContext {
+  string tenant_id = 1;
+  string user_id = 2;
+  string session_id = 3;
+  string request_id = 4;
+}
+
+message AudioFrame {
+  bytes pcm = 1;           // PCM16 mono
+  int32 sample_rate = 2;   // Hz, default 16000
+  bool is_final = 3;       // true on last frame of an utterance/stream
+}
+
+message TranscriptEvent {
+  string text = 1;
+  bool is_final = 2;
+  float confidence = 3;
+  string language = 4;
+}
+
+message TtsRequest {
+  string text = 1;
+  string language = 2;
+  string voice = 3;
+  bool is_final = 4;       // true when no more text for this synthesis turn
+}
+
+message AudioChunk {
+  bytes pcm = 1;
+  int32 sample_rate = 2;
+  string text = 3;         // source sentence (optional)
+}
+
+message VadEvent {
+  enum EventType {
+    SPEECH_START = 0;
+    SPEECH_END = 1;
+  }
+  EventType event_type = 1;
+  bytes utterance_pcm = 2; // populated on SPEECH_END
+  int32 sample_rate = 3;
+}
+
+message LidRequest {
+  bytes pcm = 1;
+  int32 sample_rate = 2;
+  string fallback_language = 3;
+}
+
+message LidResponse {
+  string language = 1;
+  float confidence = 2;
+  string english_text = 3; // set when language is English
+}
+
+message HealthRequest {}
+message HealthResponse {
+  string status = 1;       // "ok" | "loading" | "error"
+  string engine = 2;
+  string message = 3;
+}
+
+message MetaRequest {}
+message MetaResponse {
+  string kind = 1;         // stt | tts | vad | lid
+  string engine = 2;
+  string model_id = 3;
+  int32 sample_rate = 4;
+  repeated string languages = 5;
+}
+
+service SttService {
+  rpc StreamTranscribe(stream AudioFrame) returns (stream TranscriptEvent);
+  rpc Transcribe(AudioFrame) returns (TranscriptEvent);
+}
+
+service TtsService {
+  rpc StreamSynthesize(stream TtsRequest) returns (stream AudioChunk);
+  rpc Synthesize(TtsRequest) returns (AudioChunk);
+}
+
+service VadService {
+  rpc StreamVad(stream AudioFrame) returns (stream VadEvent);
+}
+
+service LidService {
+  rpc DetectLanguage(LidRequest) returns (LidResponse);
+}
+
+service HealthService {
+  rpc Check(HealthRequest) returns (HealthResponse);
+  rpc Meta(MetaRequest) returns (MetaResponse);
+}

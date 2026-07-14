@@ -180,7 +180,8 @@ A transport moves audio/events between the client and the pipeline.
 | `InMemoryTransport` | tests, local simulation | — |
 | `WebSocketTransport` | browser / generic WS (PCM16) | — |
 | `TwilioMediaStreamTransport` | phone via Twilio/SIP (mu-law 8 kHz) | — |
-| `LiveKitTransport` | WebRTC | `livekit` |
+
+Media (STT/TTS/VAD/LID) can run as separate gRPC servers — see [model-servers.md](../guides/model-servers.md).
 
 `RealtimeSession` binds a pipeline to a transport and pumps audio both ways:
 

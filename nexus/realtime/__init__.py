@@ -4,7 +4,7 @@ This package adds voice (cascaded STT->LLM->TTS and speech-to-speech), vision
 (image input), half/full duplex, IVR, and multi-agent voice teams -- all on top
 of the unchanged text :class:`~nexus.runner.agent_runner.AgentRunner`.
 
-Heavy/optional providers (websockets, livekit, deepgram, ...) are imported
+Heavy/optional providers (websockets, deepgram, grpc media servers, ...) are imported
 lazily inside their adapters, so importing this package never requires them.
 Install extras with ``pip install nexus-enterprise-agent[realtime]``.
 """

@@ -51,6 +51,7 @@ class CascadedVoicePipeline:
         stt: Optional[STTAdapter] = None,
         tts: Optional[TTSAdapter] = None,
         vad: Optional[VADAdapter] = None,
+        server_registry: Optional[Any] = None,
     ) -> None:
         self.config = config
         self.duplex = config.duplex
@@ -66,9 +67,17 @@ class CascadedVoicePipeline:
             cross_session_memory_store=cross_session_memory_store,
         )
         self.run_context = self.runner.run_context
-        self.stt = stt or build_stt(config.effective_stt())
-        self.tts = tts or build_tts(config.effective_tts())
-        self.vad = vad or build_vad(config.effective_vad())
+        _registry = server_registry
+        _ctx = self.run_context
+        self.stt = stt or build_stt(
+            config.effective_stt(), registry=_registry, run_context=_ctx
+        )
+        self.tts = tts or build_tts(
+            config.effective_tts(), registry=_registry, run_context=_ctx
+        )
+        self.vad = vad or build_vad(
+            config.effective_vad(), registry=_registry, run_context=_ctx
+        )
         self._speak = config.modality == "voice_cascaded"
 
     def _maybe_register_ivr(self) -> None:

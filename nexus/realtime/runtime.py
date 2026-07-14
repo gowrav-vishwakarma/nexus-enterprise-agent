@@ -25,8 +25,8 @@ from nexus.realtime.config import (
     VADConfig,
     VoiceTeamConfig,
 )
-from nexus.tools.context import RunContext
-from nexus.tools.registry import ToolRegistry
+from nexus.server.config import ModelServerSpec, ServersConfig
+from nexus.server.registry import ServerRegistry
 
 _REALTIME_KEYS = {"modality", "duplex", "stt", "tts", "vad", "s2s"}
 
@@ -139,6 +139,17 @@ class RealtimeRuntime:
             persistence_resolver,
             cross_session_enabled=cross_session_enabled,
         )
+        self._server_registry = self._build_server_registry(manifest)
+
+    def _build_server_registry(self, manifest: OrchestrationManifest) -> Optional[ServerRegistry]:
+        servers = manifest.schema.servers
+        if not servers:
+            return None
+        specs = {
+            name: ModelServerSpec(**spec) if isinstance(spec, dict) else spec
+            for name, spec in servers.items()
+        }
+        return ServerRegistry(ServersConfig(servers=specs))
 
     @classmethod
     def from_manifest(
@@ -194,6 +205,7 @@ class RealtimeRuntime:
             run_context=self.run_context,
             cross_session_memory_store=self._persistence.cross_session_memory_store,
             event_emitter=self.event_emitter,
+            server_registry=self._server_registry,
         )
 
     def build_voice_team(self, name: Optional[str] = None):

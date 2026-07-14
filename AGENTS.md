@@ -16,7 +16,7 @@ Follow [docs/style-guide.md](docs/style-guide.md). Write for beginners. Define t
 | `.env.example` | `docs/reference/environment.md` |
 | `examples/orchestration/*` | `docs/getting-started.md`, `docs/examples.md` |
 | `examples/nexus_saas_api.py` | `docs/guides/saas-example.md` |
-| Public exports in `nexus/__init__.py` | `docs/index.md` if the main API surface changed |
+| `nexus/server/*` or `nexus/orchestration/schema.py` `servers:` | `docs/reference/server.md`, `docs/guides/model-servers.md`, `examples/servers.yaml` |
 
 ## README policy
 

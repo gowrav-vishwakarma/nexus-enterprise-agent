@@ -1,0 +1,31 @@
+servers:
+  indic_stt:
+    kind: stt
+    engine: mock
+    host: 127.0.0.1
+    port: ${ENV:STT_PORT|50051}
+    device: cpu
+    extra:
+      model_id: ai4bharat/indic-conformer-600m-multilingual
+      decoding: rnnt
+
+  indic_tts:
+    kind: tts
+    engine: mock
+    host: 127.0.0.1
+    port: ${ENV:TTS_PORT|50052}
+    device: cpu
+    replicas: 2
+
+  silero_vad:
+    kind: vad
+    engine: mock
+    host: 127.0.0.1
+    port: ${ENV:VAD_PORT|50053}
+
+  whisper_lid:
+    kind: lid
+    engine: mock
+    host: 127.0.0.1
+    port: ${ENV:LID_PORT|50054}
+    device: cpu

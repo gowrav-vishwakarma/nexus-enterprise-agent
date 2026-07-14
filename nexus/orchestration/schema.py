@@ -40,6 +40,10 @@ class OrchestrationManifestSchema(BaseModel):
         default_factory=dict,
         description="Channel name -> channel spec (adapter import path, root, secrets)",
     )
+    servers: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Named media model servers (STT/TTS/VAD/LID gRPC)",
+    )
 
     @field_validator("root")
     @classmethod
