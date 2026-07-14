@@ -20,6 +20,7 @@ Annotated examples: [../assets/complete-manifest.annotated.yaml](../assets/compl
 | `defaults` | No | empty | Shared blocks merged into agents/groups |
 | `storage` | No | `adapter: memory` | Where chat history is saved |
 | `plugins` | No | `{}` | Plugin name → `module.path.ClassName` |
+| `servers` | No | `{}` | Named gRPC media servers (STT/TTS/VAD/LID) — see [server.md](server.md) |
 | `agents` | No | `{}` | Named agent definitions |
 | `groups` | No | `{}` | Named team definitions |
 | `channels` | No | `{}` | Channel name → channel spec (adapter import path, secrets) — see [realtime-agents.md](realtime-agents.md) |
@@ -81,9 +82,9 @@ under an `agent:` block:
 |------|-----------|---------|--------------|
 | `modality` | No | `voice_cascaded` | `voice_cascaded` (STT→LLM→TTS), `voice_s2s` (speech-to-speech), `vision_text` |
 | `duplex` | No | `full` | `half` (IVR, strict turns) or `full` (barge-in) |
-| `stt` | No | mock | Speech-to-text: `provider`, `model`, `language`, `api_key` |
-| `tts` | No | mock | Text-to-speech: `provider`, `model`, `voice`, `api_key` |
-| `vad` | No | energy | Turn detection: `provider`, `silence_ms`, `threshold` |
+| `stt` | No | mock | Speech-to-text: `provider`, `server_ref`, `language`, `sample_rate` |
+| `tts` | No | mock | Text-to-speech: `provider`, `server_ref`, `voice`, `sample_rate` |
+| `vad` | No | energy | Turn detection: `provider`, `server_ref`, `silence_ms`, `threshold` |
 | `s2s` | No | openai_realtime | Speech-to-speech model: `provider`, `model`, `voice` |
 | `agent` | Yes | — | The underlying `AgentConfig` (persona, llm, tools, ...) |
 

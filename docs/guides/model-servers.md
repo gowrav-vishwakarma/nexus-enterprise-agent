@@ -30,6 +30,7 @@ uv run python -m nexus.server health -c examples/servers.yaml
 | `port` | Yes | — | gRPC port |
 | `device` | No | — | `cpu`, `cuda`, `cuda:0`, etc. |
 | `replicas` | No | `1` | TTS replica count for concurrent synthesis |
+| `sample_rate` | No | — | Native audio rate (Hz); match the agent's `tts.sample_rate` (Parler = 44100) |
 | `extra` | No | `{}` | Engine-specific options (`model_id`, `decoding`, …) |
 
 ### Agent manifest references

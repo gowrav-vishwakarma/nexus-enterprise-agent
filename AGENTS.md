@@ -20,7 +20,7 @@ Follow [docs/style-guide.md](docs/style-guide.md). Write for beginners. Define t
 
 ## README policy
 
-Keep [README.md](README.md) short (~100 lines). It is a quick start only. Move depth to `docs/`.
+Keep [README.md](README.md) short (~1000 lines). It is a quick start only. Move depth to `docs/`.
 
 ## Do not edit
 

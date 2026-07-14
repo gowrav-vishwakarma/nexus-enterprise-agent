@@ -29,11 +29,11 @@ agents:
     llm: *llm_smart
     tool_plugins: [erp_tools]
 
-  voice_assistant:
+  voice_grpc:
     modality: voice_cascaded
     agent:
       llm: *llm_fast
-      tool_plugins: [erp_tools]   # same or different tools
+      tool_plugins: [voice_tools]
 ```
 
 ## Supported external setups

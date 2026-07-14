@@ -17,9 +17,11 @@ and RCS all work the same. These features live in two optional packages:
 Install the optional extras:
 
 ```bash
-pip install "nexus-enterprise-agent[realtime]"      # websockets + httpx
-# providers as needed, e.g. deepgram (STT), openai (TTS/Realtime/Whisper)
+pip install "nexus-enterprise-agent[realtime,grpc,fastapi,litellm]"   # Voice Lab
+pip install "nexus-enterprise-agent[server,grpc]"                     # GPU media servers
 ```
+
+**Start here for browser voice testing:** [Voice Lab guide](../guides/voice-lab.md) — `./scripts/run_voice_lab.sh`.
 
 ## Key terms
 
@@ -65,10 +67,40 @@ The SaaS example exposes this at `POST /v1/chat/vision` (multipart upload).
 text reply is synthesized sentence-by-sentence, so audio starts before the full
 reply is ready.
 
-```python
-from nexus.realtime import CascadedVoicePipeline, RealtimeAgentConfig
+### gRPC media servers (canonical)
 
-pipeline = CascadedVoicePipeline(rt_config, storage_config=session_manager)
+STT, TTS, and VAD can run as separate **gRPC media servers** managed by
+`nexus.server`. In the manifest, declare them under `servers:` and reference
+them from the agent via `provider: nexus_server` and `server_ref`:
+
+```yaml
+servers:
+  indic_stt: {kind: stt, engine: conformer, port: 50051}
+  indic_tts: {kind: tts, engine: parler, port: 50052, sample_rate: 44100}
+
+agents:
+  voice_grpc:
+    modality: voice_cascaded
+    stt: {provider: nexus_server, server_ref: indic_stt, language: hi}
+    tts: {provider: nexus_server, server_ref: indic_tts, sample_rate: 44100}
+    agent: {llm: ..., persona: {prompt: voice_system}}
+```
+
+Start servers: `uv run python -m nexus.server up -c examples/servers.yaml`
+
+Test in browser: `./scripts/run_voice_lab.sh` → http://localhost:8787
+
+Guides: [voice-lab.md](../guides/voice-lab.md), [model-servers.md](../guides/model-servers.md).
+
+### Python API
+
+```python
+from nexus.realtime.runtime import RealtimeRuntime
+from nexus.realtime import CascadedVoicePipeline, RealtimeSession
+from nexus.realtime.transport.websocket import WebSocketTransport
+
+runtime = RealtimeRuntime.from_manifest(manifest, run_context=ctx)
+pipeline = runtime.build_pipeline("voice_grpc")
 
 # Already-transcribed text:
 async for ev in pipeline.process_text("book a flight", session_id="s1"):
@@ -81,6 +113,13 @@ async for ev in pipeline.process_audio_stream(audio_frames, session_id="s1"):
     ...
 ```
 
+Bind to a transport with `RealtimeSession`:
+
+```python
+session = RealtimeSession(pipeline, WebSocketTransport(websocket), session_id="call-1")
+await session.run_audio()
+```
+
 Each step yields a `RealtimeStreamEvent` (`transcript_final`, `content`,
 `audio_out`, `tool_call`, `barge_in`, `final_response`, ...).
 
@@ -88,16 +127,15 @@ Each step yields a `RealtimeStreamEvent` (`transcript_final`, `content`,
 
 | Stage | Providers | Notes |
 |-------|-----------|-------|
-| STT | `mock`, `openai` (Whisper), `deepgram`, `local`/`openai_compatible`/`speaches` | Deepgram supports streaming partials |
-| TTS | `mock`, `openai`, `local`/`openai_compatible`/`kokoro`/`speaches` | Streams per sentence |
-| VAD | `energy` (built-in), `silero` | `energy` needs no extra deps |
+| STT | `nexus_server`, `mock`, `openai` (Whisper), `deepgram`, `local` | `nexus_server` connects to gRPC media servers |
+| TTS | `nexus_server`, `mock`, `openai`, `local`/`kokoro` | `nexus_server` connects to gRPC media servers |
+| VAD | `energy` (built-in), `silero`, `nexus_server` | `energy` needs no extra deps |
 
 `mock` providers run with no keys (handy for tests/demos): mock STT decodes bytes
 as UTF-8 text; mock TTS returns `b"AUDIO:" + text`.
 
-The `local` / `openai_compatible` aliases use the same OpenAI REST shape as
-`openai` — just set `base_url` to your own server for a fully self-hosted, no-paid-API
-setup (see [Self-hosted / offline-first](#self-hosted--offline-first-byom)).
+Cloud providers (`deepgram`, `openai`) work without gRPC servers — set
+`provider`, `model`, and `api_key` directly in the manifest.
 
 ## Speech-to-speech (S2S)
 
@@ -241,44 +279,33 @@ uv run --extra fastapi --extra realtime --extra openai \
 
 ## Self-hosted / offline-first (BYOM)
 
-Nexus is **offline-first and bring-your-own-model**: every media adapter takes a
-`base_url`, so you can run all models yourself and call them over local,
-OpenAI-compatible HTTP/WS — no paid API. The framework stays lean (no `torch`);
-the models run as **separate servers** (e.g. an Ollama/vLLM/llama.cpp + STT/TTS
-stack, kept in its own folder).
+Nexus is **bring-your-own-model**: each media stage can run locally. The
+**canonical path** is gRPC media servers + liteLLM for the LLM:
 
-A typical fully-local mapping:
-
-| Capability | Server | Endpoint | Provider in manifest |
-|-----------|--------|----------|----------------------|
-| LLM | Ollama / vLLM / llama.cpp | `http://localhost:11434/v1` | `openai` + `base_url` |
-| STT | faster-whisper / Indic-Conformer | `http://localhost:8001/v1` | `local` + `base_url` |
-| TTS | Kokoro / Indic Parler / Kokoro Hindi | `http://localhost:8002/v1` | `local` + `base_url` |
-| S2S | Kyutai Moshi / Human-1 | `ws://localhost:8998` | `moshi` or `human-1` + `base_url` |
+| Capability | How | Config |
+|-----------|-----|--------|
+| STT | gRPC server (`conformer`, `faster_whisper`, `mock`) | `servers:` + `stt.server_ref` |
+| TTS | gRPC server (`parler`, `kokoro`, `mock`) | `servers:` + `tts.server_ref` |
+| VAD | gRPC server (`silero`) or built-in `energy` | `vad.server_ref` or `vad.provider: energy` |
+| LLM | liteLLM proxy / Ollama / vLLM | `llm.base_url` + `llm.model` |
 
 Example manifests and runnable demos:
 
-- [`voice_local.yaml`](../../examples/orchestration/voice_local.yaml) — English cascaded (Whisper + Kokoro + Ollama).
-- [`voice_local_indic.yaml`](../../examples/orchestration/voice_local_indic.yaml) — Hindi cascaded (Indic-Conformer + Indic Parler + Ollama).
-- [`voice_local_indic_kokoro.yaml`](../../examples/orchestration/voice_local_indic_kokoro.yaml) — Hindi cascaded (Indic-Conformer + Kokoro Hindi + Ollama).
-- [`voice_s2s_local.yaml`](../../examples/orchestration/voice_s2s_local.yaml) — S2S via Moshi or Human-1 (`NEXUS_S2S_PROVIDER`).
-- `examples/realtime_local_voice.py` — CLI turn (`--check` probes the servers).
-- `examples/realtime_local_voice_ui.py` — push-to-talk browser UI (cascaded).
-- `examples/realtime_s2s_ui.py` — full-duplex browser UI (Moshi S2S).
+- [`voice_grpc.yaml`](../../examples/orchestration/voice_grpc.yaml) — gRPC cascaded voice (Indic-Conformer + Parler + liteLLM).
+- [`servers.yaml`](../../examples/servers.yaml) — gRPC media server config.
+- [`voice_lab.py`](../../examples/voice_lab.py) + [`run_voice_lab.sh`](../../scripts/run_voice_lab.sh) — browser Voice Lab.
+- [`voice_s2s_local.yaml`](../../examples/orchestration/voice_s2s_local.yaml) — S2S via Moshi or Human-1.
+- [`realtime_s2s_ui.py`](../../examples/realtime_s2s_ui.py) — full-duplex browser UI (Moshi S2S).
 
 ```bash
-# cascaded talk-in-browser (STT + Ollama + TTS):
-uv run --extra fastapi uvicorn examples.realtime_local_voice_ui:app --port 8080
-# full-duplex speech-to-speech (Moshi):
+# Voice Lab (cascaded STT + LLM + TTS in browser):
+./scripts/run_voice_lab.sh
+
+# Speech-to-speech (Moshi):
 uv run --extra fastapi --extra moshi uvicorn examples.realtime_s2s_ui:app --port 8081
 ```
 
-> **GPU note (24 GB):** run **one profile at a time** — never cascade + S2S together.
-> In `local-ai-stack`, use `./stop-all.sh` before switching profiles:
-> `run-cascade-oss.sh`, `run-cascade-indic.sh`, `run-cascade-indic-kokoro.sh`,
-> `run-s2s-moshi.sh`, or `run-s2s-human1.sh`. See `profiles.env.example` and
-> `benchmarks/RESULTS.template.md`
-> in that folder for the A/B workflow.
+> **GPU note:** run one heavy profile at a time — do not cascade + S2S together on limited VRAM.
 
 ## Next steps
 

@@ -175,12 +175,12 @@ async def _noop():
 def test_plan_gating():
     from examples.realtime_saas_api import RealtimeAccessError, check_realtime_access
 
-    feats = check_realtime_access("pro", "voice_assistant", "voice_cascaded")
+    feats = check_realtime_access("pro", "voice_grpc", "voice_cascaded")
     assert feats["max_concurrent"] == 10
 
     with pytest.raises(RealtimeAccessError):
-        check_realtime_access("starter", "voice_assistant")  # not allowed on starter
+        check_realtime_access("starter", "voice_grpc")  # not allowed on starter
     with pytest.raises(RealtimeAccessError):
-        check_realtime_access("pro", "voice_assistant", "voice_s2s")  # s2s is enterprise
+        check_realtime_access("pro", "voice_grpc", "voice_s2s")  # s2s is enterprise
     with pytest.raises(RealtimeAccessError):
         check_realtime_access("nonexistent", "ivr_support")

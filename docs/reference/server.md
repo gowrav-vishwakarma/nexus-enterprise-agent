@@ -10,6 +10,7 @@
 | `port` | Yes | — | gRPC port (1–65535) |
 | `device` | No | — | GPU/CPU device string passed to engine |
 | `replicas` | No | `1` | Number of TTS engine instances |
+| `sample_rate` | No | — | Native audio rate (Hz) the engine produces/consumes; keep in sync with the agent's `tts.sample_rate` |
 | `extra` | No | `{}` | Engine kwargs (`model_id`, `decoding`, `threshold`, …) |
 
 ## gRPC services

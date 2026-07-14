@@ -16,6 +16,9 @@ servers:
     port: ${ENV:TTS_PORT|50052}
     device: ${ENV:TTS_DEVICE|cuda}
     replicas: ${ENV:TTS_REPLICAS|2}
+    # Native output rate of the engine (Parler = 44100). Keep the agent's
+    # tts.sample_rate in sync so browser playback isn't pitch-shifted.
+    sample_rate: ${ENV:TTS_SAMPLE_RATE|44100}
     extra:
       model_id: ${ENV:TTS_MODEL_ID|ai4bharat/indic-parler-tts}
       dtype: ${ENV:TTS_DTYPE|bfloat16}

@@ -86,7 +86,13 @@ grpc = [
     "numpy>=1.26",
 ]
 
-# Nexus media model servers (GPU engines — heavy; install parler-tts separately for indic TTS)
+# Nexus media model servers (GPU engines — heavy).
+# NOTE: the Indic Parler TTS engine is NOT listed here on purpose. parler-tts
+# depends (transitively) on protobuf<5, which is incompatible with the gRPC
+# stubs (protobuf>=5). Install it separately AFTER syncing, then repin protobuf:
+#   uv pip install parler-tts
+#   uv pip install "protobuf>=5.26"
+# Model weights (ai4bharat/indic-parler-tts) download automatically on first use.
 server = [
     "nexus-enterprise-agent[grpc]",
     "torch>=2.0",

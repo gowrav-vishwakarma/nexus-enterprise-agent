@@ -3,7 +3,20 @@ root: voice_grpc
 
 # Full-stack voice lab manifest — real gRPC media servers + liteLLM LLM.
 # Start: ./scripts/run_voice_lab.sh
+#
+# Companion files (loaded automatically by matching filename):
+#   voice_grpc_prompts.py  -> persona system prompt (PROMPTS["voice_system"])
+#   voice_grpc_tools.py     -> dummy date/time tools (VoiceToolsPlugin)
 
+# Python module holding the PROMPTS dict (defaults to <manifest>_prompts.py).
+prompts_module: ./voice_grpc_prompts.py
+
+# ---------------------------------------------------------------------------
+# Media servers (STT / TTS / VAD). The KEY (indic_stt, indic_tts, ...) is an
+# arbitrary label you choose — it is only referenced by `server_ref` below.
+# Rename freely, or add more servers (e.g. an English TTS) and point a
+# different agent's `server_ref` at it. See the commented `en_tts` example.
+# ---------------------------------------------------------------------------
 servers:
   indic_stt:
     kind: stt
@@ -19,12 +32,25 @@ servers:
     port: ${ENV:TTS_PORT|50052}
     device: ${ENV:TTS_DEVICE|cuda}
     replicas: ${ENV:TTS_REPLICAS|2}
+    # Native output rate of the engine. Parler = 44100, kokoro/mock = 24000.
+    # This must match the `tts.sample_rate` used by the agent below.
+    sample_rate: ${ENV:TTS_SAMPLE_RATE|44100}
     extra:
       model_id: ${ENV:TTS_MODEL_ID|ai4bharat/indic-parler-tts}
   silero_vad:
     kind: vad
     engine: ${ENV:VAD_ENGINE|silero}
     port: ${ENV:VAD_PORT|50053}
+
+  # --- Example: add an English TTS server and switch tts.server_ref to it ---
+  # en_tts:
+  #   kind: tts
+  #   engine: kokoro          # any registered engine plugin
+  #   port: 50062
+  #   device: ${ENV:TTS_DEVICE|cpu}
+  #   sample_rate: 24000
+  #   extra:
+  #     model_id: hexgrad/Kokoro-82M
 
 defaults:
   llm_fast: &llm_fast
@@ -39,6 +65,10 @@ defaults:
 storage:
   adapter: memory
 
+# Plugin name -> import path. The agent below opts in via `tool_plugins`.
+plugins:
+  voice_tools: examples.orchestration.voice_grpc_tools.VoiceToolsPlugin
+
 agents:
   voice_grpc:
     modality: voice_cascaded
@@ -52,7 +82,9 @@ agents:
       provider: nexus_server
       server_ref: indic_tts
       voice: ${ENV:TTS_VOICE|Divya speaks in a clear expressive voice at a moderate pace.}
-      sample_rate: ${ENV:TTS_SAMPLE_RATE|24000}
+      # Playback rate sent to the browser. Keep in sync with the server's
+      # native rate above (Parler = 44100).
+      sample_rate: ${ENV:TTS_SAMPLE_RATE|44100}
     vad:
       provider: ${ENV:VAD_PROVIDER|energy}
       server_ref: silero_vad
@@ -60,10 +92,11 @@ agents:
       sample_rate: 16000
     agent:
       llm: *llm_fast
+      tool_plugins: [voice_tools]
       turns:
         max_turns: ${ENV:VOICE_MAX_TURNS|12}
       persona:
         role: ${ENV:VOICE_AGENT_ROLE|Voice Assistant}
         goal: Natural spoken conversation
-        system_prompt: >
-          ${ENV:VOICE_SYSTEM_PROMPT|You are a helpful voice assistant. Reply concisely in the user's language. Keep answers short — they will be spoken aloud. Never use markdown.}
+        # System prompt lives in voice_grpc_prompts.py (PROMPTS["voice_system"]).
+        prompt: voice_system

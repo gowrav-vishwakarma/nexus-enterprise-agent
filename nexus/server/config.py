@@ -18,6 +18,11 @@ class ModelServerSpec(BaseModel):
     port: int = Field(..., ge=1, le=65535)
     device: Optional[str] = Field(default=None, description="cuda:0, cpu, etc.")
     replicas: int = Field(default=1, ge=1, description="TTS replica count")
+    sample_rate: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Native audio sample rate (Hz) the engine produces/consumes",
+    )
     extra: dict[str, Any] = Field(default_factory=dict, description="Engine-specific options")
 
     @property

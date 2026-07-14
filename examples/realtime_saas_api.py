@@ -60,7 +60,7 @@ from nexus.tools.registry import ToolRegistry
 
 ORCH_DIR = pathlib.Path(__file__).parent / "orchestration"
 MANIFESTS = {
-    "voice_assistant": ORCH_DIR / "voice_assistant.yaml",
+    "voice_grpc": ORCH_DIR / "voice_grpc.yaml",
     "ivr_support": ORCH_DIR / "ivr_support.yaml",
 }
 
@@ -74,12 +74,12 @@ REALTIME_PLANS: dict[str, dict] = {
         "max_concurrent": 2,
     },
     "pro": {
-        "agents": ["ivr_support", "voice_assistant"],
+        "agents": ["ivr_support", "voice_grpc"],
         "modalities": ["voice_cascaded"],
         "max_concurrent": 10,
     },
     "enterprise": {
-        "agents": ["ivr_support", "voice_assistant"],
+        "agents": ["ivr_support", "voice_grpc"],
         "modalities": ["voice_cascaded", "voice_s2s"],
         "max_concurrent": 100,
     },
@@ -119,7 +119,7 @@ def _load_manifest(agent: str) -> OrchestrationManifest:
 
 
 class RealtimeSessionRequest(BaseModel):
-    agent: str = "voice_assistant"
+    agent: str = "voice_grpc"
     modality: str = "voice_cascaded"
     session_id: Optional[str] = None
 
@@ -134,8 +134,8 @@ async def create_realtime_session(
 ):
     """Bootstrap a realtime session and return how to connect.
 
-    In production this is where you would mint a short-lived token (e.g. a
-    LiveKit access token or an ephemeral client secret). Here we return the
+    In production this is where you would mint a short-lived token (e.g. an
+    ephemeral WebSocket secret or signed session URL). Here we return the
     WebSocket URL and the audio format the browser should stream.
     """
     if body.agent not in MANIFESTS:
@@ -171,7 +171,7 @@ async def realtime_ws(websocket: WebSocket, session_id: str):
     """
     await websocket.accept()
     params = websocket.query_params
-    agent = params.get("agent", "voice_assistant")
+    agent = params.get("agent", "voice_grpc")
     tenant_id = params.get("tenant_id", "demo")
     user_id = params.get("user_id", "demo-user")
     plan = params.get("plan", "pro")

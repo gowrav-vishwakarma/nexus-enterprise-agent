@@ -86,6 +86,45 @@ After resolution, the runner copies the chosen id back onto `RunContext`.
 
 Both paths use the same underlying types. See [getting-started.md](getting-started.md) and [getting-started-python.md](getting-started-python.md).
 
+## Voice agents (RealtimeRuntime)
+
+Text agents use `OrchestrationRuntime` or `AgentRunner`. Voice agents use
+`RealtimeRuntime`, which wraps the same `AgentConfig` with media settings
+(STT, TTS, VAD, duplex mode).
+
+| Approach | Best when |
+|----------|-----------|
+| YAML manifest + `RealtimeRuntime` | You declare `servers:`, `modality: voice_cascaded`, and `server_ref` in config |
+| Python `CascadedVoicePipeline` | You build the pipeline in code and attach a transport yourself |
+
+```mermaid
+flowchart LR
+  browser[Browser mic]
+  ws[WebSocketTransport]
+  session[RealtimeSession]
+  pipeline[CascadedVoicePipeline]
+  grpc[gRPC media servers]
+  llm[LLM via liteLLM]
+
+  browser --> ws --> session --> pipeline
+  pipeline --> grpc
+  pipeline --> llm
+```
+
+**Canonical example:** [Voice Lab](../guides/voice-lab.md) — `./scripts/run_voice_lab.sh` starts gRPC media servers and a browser UI at http://localhost:8787.
+
+- Manifest: `examples/orchestration/voice_grpc.yaml`
+- Media servers: `examples/servers.yaml`
+- Python wiring: `examples/voice_lab.py`
+
+**Alternate voice patterns** (still on the same core):
+
+- Half-duplex IVR: `ivr_support.yaml`
+- Voice teams: `voice_team_support.yaml`
+- Speech-to-speech: `voice_s2s_local.yaml`
+
+See [pipelines guide](../guides/pipelines.md) and [realtime-agents reference](reference/realtime-agents.md).
+
 ## Related guides
 
 - [Pipelines](../guides/pipelines.md) — which pipeline to run (text, voice, teams)
