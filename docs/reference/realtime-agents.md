@@ -3,6 +3,10 @@
 **Who this is for:** Developers adding voice (phone/browser), images, or
 messaging channels (Telegram/WhatsApp) to Nexus agents.
 
+**Start here for pipeline choice:** [Pipelines guide](../guides/pipelines.md) has a
+decision table (cascaded STT→LLM→TTS vs S2S vs channels) and links to every runnable
+example. This page is the full provider and API reference.
+
 Everything here is built **on top of the unchanged text `AgentRunner`**. A voice
 agent is "just an agent config plus a modality", so your personas, tools, memory,
 and RCS all work the same. These features live in two optional packages:

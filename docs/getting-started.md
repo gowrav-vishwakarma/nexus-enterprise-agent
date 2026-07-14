@@ -148,8 +148,26 @@ You can also pass a pre-built `ToolRegistry` to `from_manifest()` — YAML plugi
 
 Python walkthrough: [getting-started-python.md](getting-started-python.md).
 
+## Voice and realtime (optional)
+
+Nexus supports text agents first, but the same manifest can add voice:
+
+- **Cascaded voice (STT → LLM → TTS)** — modular stages; good for local models and phone IVR.
+- **Speech-to-speech (S2S)** — one realtime audio model with bridged tools.
+
+Start with the [pipelines guide](guides/pipelines.md) for a decision table and runnable examples, then [realtime-agents reference](reference/realtime-agents.md) for providers and env vars.
+
+Quick local try:
+
+```bash
+uv run python examples/realtime_local_voice.py --check
+uv run python examples/realtime_local_voice.py --wav path/to/sample.wav
+```
+
 ## Next steps
 
+- [Pipelines guide](guides/pipelines.md) — text, multi-agent, voice, channels: which to use
+- [Runtime control](guides/runtime-control.md) — take charge when tools or tenant state change
 - [Manifest schema reference](reference/manifest-schema.md)
 - [Architecture](architecture.md)
 - [Multi-agent patterns](reference/multi-agent.md)

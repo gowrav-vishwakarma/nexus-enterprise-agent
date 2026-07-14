@@ -24,7 +24,7 @@ There is no global settings object. Each agent can use a different LLM (large la
 2. [Getting started (YAML)](getting-started.md) — Fastest path: manifest + prompts + run.
 3. [Getting started (Python)](getting-started-python.md) — Build everything in code.
 4. [Reference](reference/manifest-schema.md) — Every parameter and default.
-5. [Guides](guides/saas-example.md) — Multi-tenant SaaS example and advanced topics.
+5. [Guides](guides/pipelines.md) — Pipelines, runtime control, SaaS, and prompts.
 
 ```mermaid
 flowchart TD
@@ -55,9 +55,12 @@ flowchart TD
 | Tools | [reference/tools.md](reference/tools.md) |
 | Memory | [reference/memory.md](reference/memory.md) |
 | Context summary | [reference/context-summary.md](reference/context-summary.md) |
+| Pipelines (text, voice, teams) | [guides/pipelines.md](guides/pipelines.md) |
+| Runtime control | [guides/runtime-control.md](guides/runtime-control.md) |
 | Multi-agent teams | [reference/multi-agent.md](reference/multi-agent.md) |
 | Voice, vision, channels | [reference/realtime-agents.md](reference/realtime-agents.md) |
 | Streaming | [reference/streaming.md](reference/streaming.md) |
+| Events and observability | [reference/events.md](reference/events.md) |
 | Skills | [reference/skills.md](reference/skills.md) |
 | Environment variables | [reference/environment.md](reference/environment.md) |
 | SaaS example | [guides/saas-example.md](guides/saas-example.md) |

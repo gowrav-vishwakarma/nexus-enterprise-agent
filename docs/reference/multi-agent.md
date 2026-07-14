@@ -15,7 +15,7 @@
 |---------|--------|--------------|
 | `supervisor` | Implemented | Lead agent delegates to members |
 | `pipeline` | Implemented | Members run sequentially |
-| `parallel` | Not yet | Falls back to pipeline with warning |
+| `parallel` | Implemented | All members run on the same input; outputs merged per `aggregation_strategy` |
 | `swarm` | Not yet | Falls back to pipeline with warning |
 
 ## AgentGroupConfig
@@ -82,6 +82,8 @@ HTTP example in [SaaS guide](../guides/saas-example.md).
 
 ## Next steps
 
+- [Pipelines guide](../guides/pipelines.md) — when to use supervisor vs pipeline vs parallel
+- [Runtime control](../guides/runtime-control.md) — delegation vs deterministic workflows
 - [Getting started (YAML)](../getting-started.md)
 - [Storage](storage.md)
 - [Manifest schema](manifest-schema.md)

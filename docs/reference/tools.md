@@ -38,7 +38,7 @@ registry.register_tool(echo)  # → global.echo
 | `name` | No | function name | Tool name the LLM sees |
 | `description` | No | docstring | Human-readable description |
 | `timeout_seconds` | No | `30` | Max seconds for tool execution |
-| `requires_approval` | No | `False` | Future human-in-the-loop gate |
+| `requires_approval` | No | `False` | **Planned** human-in-the-loop gate — not enforced in runner yet; use external HITL ([runtime-control.md](../guides/runtime-control.md)) |
 
 `register_tool(fn, plugin_name="utilities")` → `utilities.echo`.
 

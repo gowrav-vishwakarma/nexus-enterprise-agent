@@ -42,6 +42,17 @@ def tenant_settings(ctx: RunContext) -> str:
     return f"Settings for tenant {ctx.tenant_id}"
 ```
 
+Tools can also **write** metadata for later tools in the same run:
+
+```python
+@tool(name="reserve_slot")
+def reserve_slot(ctx: RunContext, slot_id: str) -> str:
+    ctx.set("reserved_slot", slot_id)
+    return f"Reserved {slot_id}"
+```
+
+See [runtime-control.md](../guides/runtime-control.md) for supervision and branching patterns.
+
 ## Multi-agent teams
 
 Pass one `RunContext` into `AgentOrchestrator` or `OrchestrationRuntime`. Member runners get derived chat ids: `{group_session_id}_{member_name}`.
@@ -60,5 +71,6 @@ See [skills.md](skills.md).
 
 ## Next steps
 
+- [Runtime control](../guides/runtime-control.md)
 - [Architecture](../architecture.md)
 - [Storage](storage.md)

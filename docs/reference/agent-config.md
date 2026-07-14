@@ -49,9 +49,9 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 | `max_turns` | No | `10` | Max agent loop iterations |
 | `max_tool_calls_per_turn` | No | `5` | Cap tool calls per turn (`0` = no cap) |
 | `stop_on_empty_tool_calls` | No | `True` | Stop when LLM returns no tool calls |
-| `stop_sequences` | No | `[]` | Text sequences that stop the agent |
-| `stop_on_result_type` | No | `True` | Stop when structured result is obtained |
-| `human_in_loop_after_turns` | No | `None` | Pause for human input after N turns |
+| `stop_sequences` | No | `[]` | Text sequences that stop the agent (**planned — not enforced in runner yet**) |
+| `stop_on_result_type` | No | `True` | Stop when structured result is obtained (**planned — not enforced in runner yet**) |
+| `human_in_loop_after_turns` | No | `None` | Pause for human input after N turns (**planned — not enforced in runner yet**; use external HITL — see [runtime-control.md](../guides/runtime-control.md)) |
 | `turn_timeout_seconds` | No | `300` | Per-turn timeout in seconds |
 
 ## LLMProviderConfig
@@ -111,6 +111,7 @@ See [context-summary.md](context-summary.md) for the full field table (`summariz
 
 ## Next steps
 
+- [Runtime control](../guides/runtime-control.md) — external HITL and supervision patterns
 - [Runner](agent-runner.md)
 - [Tools](tools.md)
 - [Skills](skills.md)

@@ -86,6 +86,11 @@ After resolution, the runner copies the chosen id back onto `RunContext`.
 
 Both paths use the same underlying types. See [getting-started.md](getting-started.md) and [getting-started-python.md](getting-started-python.md).
 
+## Related guides
+
+- [Pipelines](../guides/pipelines.md) — which pipeline to run (text, voice, teams)
+- [Runtime control](../guides/runtime-control.md) — take charge when tools or tenant state change
+
 ## Next steps
 
 - [Getting started (YAML)](getting-started.md)

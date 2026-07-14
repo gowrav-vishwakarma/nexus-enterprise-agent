@@ -80,6 +80,9 @@ The runner syncs the resolved id back onto `RunContext`.
 
 ## Next steps
 
+- [Pipelines guide](../guides/pipelines.md)
+- [Runtime control](../guides/runtime-control.md)
 - [Run context](run-context.md)
 - [Streaming](streaming.md)
+- [Events](events.md)
 - [Multi-agent](multi-agent.md)

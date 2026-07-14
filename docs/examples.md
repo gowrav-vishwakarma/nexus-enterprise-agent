@@ -2,6 +2,8 @@
 
 **Who this is for:** Developers looking for runnable code beyond the getting-started guides.
 
+Not sure which example fits your use case? See the [pipelines guide](guides/pipelines.md) for a decision table (text, multi-agent, cascaded voice, S2S, channels) with links to every row below.
+
 ## Key terms
 
 - **Example** — A script or config in the `examples/` folder you can run or copy.

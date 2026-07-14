@@ -35,6 +35,31 @@ async for event in runner.run_stream("Hello", stream=True):
 
 Returns `AsyncIterator[AgentStreamEvent]`.
 
+### Stream event types
+
+| `event_type` | When it fires |
+|--------------|---------------|
+| `content` | LLM text chunk |
+| `tool_call` | Model requested a tool |
+| `tool_result` | Tool finished; check `event.content` |
+| `final_response` | Run done; full `AgentRunResult` in `event.data` |
+| `error` | Run failed |
+| `event` | Internal lifecycle signal |
+
+### Supervision: react to tool results
+
+Use `run_stream()` when your app must **take charge** after a tool returns — for example, escalate to a human or swap runners. This is the recommended pattern for deterministic branching without a state graph:
+
+```python
+escalate = False
+async for event in runner.run_stream(user_msg, stream=True):
+    if event.event_type == "tool_result" and "escalate" in (event.content or ""):
+        escalate = True
+        break
+```
+
+Full patterns: [runtime-control.md](../guides/runtime-control.md). Structured lifecycle events: [events.md](events.md).
+
 | Method | Returns when not streaming | Returns when streaming |
 |--------|---------------------------|------------------------|
 | `run()` | `AgentRunResult` | Raises error — use `run_stream()` |
@@ -48,5 +73,7 @@ The SaaS example accepts `"stream": true` on chat requests and returns SSE from 
 
 ## Next steps
 
+- [Runtime control](../guides/runtime-control.md)
+- [Events](events.md)
 - [Runner](agent-runner.md)
 - [Agent config](agent-config.md)
