@@ -18,6 +18,7 @@ from nexus.orchestration.runtime import (
 )
 from nexus.persistence.factory import PersistenceBundle
 from nexus.realtime.config import (
+    LIDConfig,
     RealtimeAgentConfig,
     S2SConfig,
     STTConfig,
@@ -28,7 +29,7 @@ from nexus.realtime.config import (
 from nexus.server.config import ModelServerSpec, ServersConfig
 from nexus.server.registry import ServerRegistry
 
-_REALTIME_KEYS = {"modality", "duplex", "stt", "tts", "vad", "s2s"}
+_REALTIME_KEYS = {"modality", "duplex", "stt", "tts", "vad", "lid", "s2s"}
 
 
 def resolve_realtime_agent(
@@ -57,6 +58,7 @@ def resolve_realtime_agent(
         stt=STTConfig(**spec["stt"]) if "stt" in spec else None,
         tts=TTSConfig(**spec["tts"]) if "tts" in spec else None,
         vad=VADConfig(**spec["vad"]) if "vad" in spec else None,
+        lid=LIDConfig(**spec["lid"]) if "lid" in spec else None,
         s2s=S2SConfig(**spec["s2s"]) if "s2s" in spec else None,
     )
 

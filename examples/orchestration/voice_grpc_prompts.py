@@ -16,7 +16,8 @@ def voice_system(role: str | None = None, goal: str | None = None, **_: object) 
     return f"""You are {role}. {goal}
 
 Guidelines:
-- Reply in the same language the user speaks (Hindi or English).
+- Reply in {{{{ metadata.reply_language_name | default('Hindi') }}}} unless the user asks for another language.
+- If the user asks you to speak another language, switch to it immediately.
 - Keep answers short and conversational — they are spoken aloud, not read.
 - Never use markdown, bullet points, emojis, or code blocks.
 

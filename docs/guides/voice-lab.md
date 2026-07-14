@@ -2,6 +2,14 @@
 
 The **Voice Lab** is a full-duplex browser UI for testing the Nexus voice stack end-to-end with **real** media servers and **liteLLM** — not mocks.
 
+**Media server configuration (full reference):** [server.md](../reference/server.md) — every `server_ref`, `servers:` field, port, engine, LID, and the two-YAML setup explained with examples.
+
+## Key terms
+
+- **`server_ref`** — Name that links an agent stage (STT, TTS, LID) to a server defined under `servers:`.
+- **Manifest** — `voice_grpc.yaml` — agent persona, tools, and connection map for media servers.
+- **Servers config** — `examples/servers.yaml` — file used to **start** gRPC processes.
+
 ## What you get
 
 - Mic button → live conversation (VAD → STT → agent → TTS)
@@ -19,7 +27,7 @@ The **Voice Lab** is a full-duplex browser UI for testing the Nexus voice stack 
    # In .env: LITELLM_BASE_URL=http://localhost:11434  VOICE_LLM_MODEL=ollama/qwen3:4b
    ```
 
-2. **Media servers** — gRPC STT/TTS/VAD (GPU recommended for conformer/parler):
+2. **Media servers** — gRPC STT / TTS / VAD / LID (GPU recommended for conformer/parler):
    ```bash
    uv sync --extra server --extra grpc
    ```
@@ -72,7 +80,10 @@ uv run --extra fastapi --extra realtime --extra litellm --extra grpc \
 | `TTS_ENGINE` | TTS server engine | `parler` or `mock` |
 | `STT_DEVICE` / `TTS_DEVICE` | GPU/CPU | `cuda`, `cpu` |
 | `VAD_PROVIDER` | Agent VAD | `energy` (local) or `nexus_server` |
-| `NEXUS_VOICE_MANIFEST` | Agent YAML | `examples/orchestration/voice_grpc.yaml` |
+| `LID_ENGINE` / `LID_PORT` / `LID_DEVICE` | LID server | `faster_whisper` / `50054` / `cpu` |
+| `STT_LANGUAGE` | STT default + LID fallback | `hi` |
+| `NEXUS_SERVERS_CONFIG` | YAML to **start** media processes | `examples/servers.yaml` |
+| `NEXUS_VOICE_MANIFEST` | Agent YAML (registry + agent) | `examples/orchestration/voice_grpc.yaml` |
 
 ## CPU-only smoke test
 
@@ -101,13 +112,51 @@ pieces you can edit:
   the manifest `plugins:` block and enabled per-agent via `agent.tool_plugins:
   [voice_tools]`. Add your own `@tool` methods to expose more capabilities.
 
-### Server names and swapping engines
+### Media servers and `server_ref`
 
-The keys under `servers:` (`indic_stt`, `indic_tts`, `silero_vad`) are arbitrary
-labels — the agent only cares about the `server_ref` that points at them. To use
-an English TTS instead, add another server (e.g. `en_tts` with `engine: kokoro`)
-and set the agent's `tts.server_ref: en_tts`. A commented example is included in
-the manifest.
+Voice Lab wires four optional gRPC stages. Each uses the same pattern: define under `servers:`, reference with `server_ref`.
+
+| Label (`server_ref`) | Role | Default port | Agent block |
+|----------------------|------|--------------|-------------|
+| `indic_stt` | Speech-to-text (Indic Conformer) | 50051 | `stt.server_ref` |
+| `indic_tts` | Text-to-speech (Indic Parler) | 50052 | `tts.server_ref` |
+| `silero_vad` | Voice activity (optional remote VAD) | 50053 | `vad.server_ref` |
+| `whisper_lid` | Per-turn language detection | 50054 | `lid.server_ref` |
+
+**Two YAML files must agree** on names and ports:
+
+1. **`examples/orchestration/voice_grpc.yaml`** — `servers:` block + agent `server_ref` values. Voice Lab builds the **connection registry** from here.
+2. **`examples/servers.yaml`** — used by `./scripts/run_voice_lab.sh` to **start** listener processes.
+
+If you add `whisper_lid` to the manifest but forget to start it (or use a different port in `servers.yaml`), LID health checks fail and per-turn language switching will not work.
+
+**Single-file setup** — use the manifest for both roles:
+
+```bash
+export NEXUS_SERVERS_CONFIG=examples/orchestration/voice_grpc.yaml
+./scripts/run_voice_lab.sh
+```
+
+**Why labels instead of hard-coded hosts?** Swap engines, point at remote GPUs, or share one STT server across many agents by changing YAML only. See [server.md](../reference/server.md).
+
+**Example — swap TTS to English Kokoro:**
+
+```yaml
+servers:
+  en_tts:
+    kind: tts
+    engine: kokoro
+    port: 50062
+    sample_rate: 24000
+
+agents:
+  voice_grpc:
+    tts:
+      server_ref: en_tts
+      sample_rate: 24000
+```
+
+A commented `en_tts` example is in the manifest.
 
 ### Sample rate
 
@@ -146,4 +195,4 @@ See [examples/voice_lab.py](../../examples/voice_lab.py) for the full FastAPI ap
 | `POST /v1/realtime/sessions` | Create session |
 | `WS /v1/realtime/ws/{id}` | Full-duplex voice |
 
-See also: [model-servers.md](model-servers.md), [llm-litellm.md](llm-litellm.md).
+See also: [server.md](../reference/server.md), [model-servers.md](model-servers.md), [llm-litellm.md](llm-litellm.md).

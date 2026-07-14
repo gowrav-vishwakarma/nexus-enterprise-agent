@@ -30,11 +30,13 @@ class STTAdapter(abc.ABC):
         self.config = config
 
     @abc.abstractmethod
-    async def transcribe(self, audio: bytes, mime_type: str = "audio/wav") -> str:
+    async def transcribe(
+        self, audio: bytes, mime_type: str = "audio/wav", *, language: str | None = None
+    ) -> str:
         """Transcribe a complete audio blob into text."""
 
     async def stream_transcribe(
-        self, audio_stream: AsyncIterator[bytes]
+        self, audio_stream: AsyncIterator[bytes], *, language: str | None = None
     ) -> AsyncIterator[STTResult]:
         """Transcribe a stream of audio chunks.
 
@@ -44,6 +46,6 @@ class STTAdapter(abc.ABC):
         chunks: list[bytes] = []
         async for chunk in audio_stream:
             chunks.append(chunk)
-        text = await self.transcribe(b"".join(chunks))
+        text = await self.transcribe(b"".join(chunks), language=language)
         if text:
             yield STTResult(text=text, is_final=True)

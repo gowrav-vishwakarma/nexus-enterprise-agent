@@ -5,20 +5,25 @@ inside each adapter so this package imports cleanly without optional extras.
 """
 
 from nexus.realtime.adapters.factory import (
+    build_lid,
     build_stt,
     build_tts,
     build_vad,
 )
+from nexus.realtime.adapters.lid.base import LIDAdapter, LIDResult
 from nexus.realtime.adapters.stt.base import STTAdapter, STTResult
 from nexus.realtime.adapters.tts.base import TTSAdapter
 from nexus.realtime.adapters.vad.base import VADAdapter, VADEvent
 
 __all__ = [
+    "LIDAdapter",
+    "LIDResult",
     "STTAdapter",
     "STTResult",
     "TTSAdapter",
     "VADAdapter",
     "VADEvent",
+    "build_lid",
     "build_stt",
     "build_tts",
     "build_vad",

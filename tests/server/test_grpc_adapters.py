@@ -21,7 +21,7 @@ async def test_grpc_stt_transcribe():
         )
         # minimal PCM16 frame
         pcm = b"\x00\x01" * 1600
-        text = await adapter.transcribe(pcm)
+        text = await adapter.transcribe(pcm, language="gu")
         assert "mock transcript" in text
         assert run_context_to_metadata(ctx)
     finally:
@@ -35,7 +35,7 @@ async def test_grpc_tts_synthesize():
         adapter = GrpcTTS(
             TTSConfig(provider="nexus_server", base_url="127.0.0.1:50102"),
         )
-        audio = await adapter.synthesize("hello world")
+        audio = await adapter.synthesize("hello world", language="hi")
         assert isinstance(audio, bytes)
         assert len(audio) > 0
     finally:

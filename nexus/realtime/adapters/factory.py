@@ -7,7 +7,7 @@ from typing import Optional
 from nexus.realtime.adapters.stt.base import STTAdapter
 from nexus.realtime.adapters.tts.base import TTSAdapter
 from nexus.realtime.adapters.vad.base import VADAdapter
-from nexus.realtime.config import STTConfig, TTSConfig, VADConfig
+from nexus.realtime.config import LIDConfig, STTConfig, TTSConfig, VADConfig
 from nexus.tools.context import RunContext
 
 _NEXUS_SERVER = frozenset({"nexus_server", "grpc", "nexus"})
@@ -104,3 +104,22 @@ def build_vad(
             ) from exc
         return SileroVAD(config)
     raise ValueError(f"Unknown VAD provider: {config.provider!r}")
+
+
+def build_lid(
+    config: LIDConfig,
+    *,
+    registry=None,
+    run_context: Optional[RunContext] = None,
+):
+    """Instantiate a LID adapter for the configured provider."""
+    provider = config.provider.lower()
+    if provider in ("mock", "test"):
+        from nexus.realtime.adapters.lid.mock import MockLID
+
+        return MockLID(config)
+    if provider in _NEXUS_SERVER:
+        from nexus.realtime.adapters.lid.grpc import GrpcLID
+
+        return GrpcLID(config, registry=registry, run_context=run_context)
+    raise ValueError(f"Unknown LID provider: {config.provider!r}")

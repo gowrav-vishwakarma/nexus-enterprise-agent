@@ -147,6 +147,10 @@ groups:
 #     port: 50052
 #     sample_rate: 44100
 #     extra: {model_id: ai4bharat/indic-parler-tts}
+#   whisper_lid:
+#     kind: lid
+#     engine: faster_whisper
+#     port: 50054
 # agents:
   voice_grpc:
     modality: voice_cascaded          # voice_cascaded | voice_s2s | vision_text
@@ -154,6 +158,7 @@ groups:
     stt: {provider: nexus_server, server_ref: indic_stt, language: hi}
     tts: {provider: nexus_server, server_ref: indic_tts, sample_rate: 44100}
     vad: {provider: energy, silence_ms: 600}
+    lid: {provider: nexus_server, server_ref: whisper_lid, fallback_language: hi}
     agent:                            # the underlying AgentConfig
       llm: *default_llm
       tool_plugins: [voice_tools]

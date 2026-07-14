@@ -18,6 +18,9 @@ class MockTTS(TTSAdapter):
     def __init__(self, config: Optional[TTSConfig] = None) -> None:
         super().__init__(config or TTSConfig(provider="mock"))
 
-    async def synthesize(self, text: str) -> bytes:
+    async def synthesize(
+        self, text: str, *, language: str | None = None, voice: str | None = None
+    ) -> bytes:
         """Return a deterministic byte payload derived from the text."""
-        return b"AUDIO:" + text.encode("utf-8")
+        prefix = f"AUDIO:{language or 'default'}:"
+        return prefix.encode("utf-8") + text.encode("utf-8")

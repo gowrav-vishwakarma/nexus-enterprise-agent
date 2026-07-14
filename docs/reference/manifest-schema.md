@@ -85,10 +85,29 @@ under an `agent:` block:
 | `stt` | No | mock | Speech-to-text: `provider`, `server_ref`, `language`, `sample_rate` |
 | `tts` | No | mock | Text-to-speech: `provider`, `server_ref`, `voice`, `sample_rate` |
 | `vad` | No | energy | Turn detection: `provider`, `server_ref`, `silence_ms`, `threshold` |
+| `lid` | No | — | Per-turn language ID: `provider`, `server_ref`, `fallback_language`, `sample_rate` |
 | `s2s` | No | openai_realtime | Speech-to-speech model: `provider`, `model`, `voice` |
 | `agent` | Yes | — | The underlying `AgentConfig` (persona, llm, tools, ...) |
 
-See [realtime-agents.md](realtime-agents.md) for full voice/channel docs.
+See [realtime-agents.md](realtime-agents.md) for voice/channel docs and [server.md](server.md) for every `servers:` / `server_ref` field with examples.
+
+## `servers:` block (gRPC media)
+
+Optional top-level map of named media servers. Keys are **labels** you choose; agents reference them via `server_ref`.
+
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| *(key)* | Yes | — | Arbitrary label (e.g. `indic_stt`, `whisper_lid`) |
+| `kind` | Yes | — | `stt`, `tts`, `vad`, or `lid` |
+| `engine` | Yes | — | Engine plugin id |
+| `host` | No | `127.0.0.1` | Bind / connect address |
+| `port` | Yes | — | gRPC port |
+| `device` | No | — | `cpu`, `cuda`, … |
+| `replicas` | No | `1` | TTS replica count |
+| `sample_rate` | No | — | Native audio rate (Hz) |
+| `extra` | No | `{}` | Engine-specific options |
+
+Full tables, agent adapter fields, recipes, and Voice Lab two-YAML setup: [server.md](server.md).
 
 ## `llm` block (agent or defaults)
 

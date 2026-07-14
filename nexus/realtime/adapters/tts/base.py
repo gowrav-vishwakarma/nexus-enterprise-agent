@@ -21,11 +21,17 @@ class TTSAdapter(abc.ABC):
         self.config = config
 
     @abc.abstractmethod
-    async def synthesize(self, text: str) -> bytes:
+    async def synthesize(
+        self, text: str, *, language: str | None = None, voice: str | None = None
+    ) -> bytes:
         """Synthesize a complete text string into audio bytes."""
 
     async def stream_synthesize(
-        self, text_stream: AsyncIterator[str]
+        self,
+        text_stream: AsyncIterator[str],
+        *,
+        language: str | None = None,
+        voice: str | None = None,
     ) -> AsyncIterator[bytes]:
         """Synthesize streamed text, flushing audio per sentence boundary."""
         buffer = ""
@@ -45,7 +51,7 @@ class TTSAdapter(abc.ABC):
                 sentence = buffer[: idx + 1].strip()
                 buffer = buffer[idx + 1 :]
                 if sentence:
-                    yield await self.synthesize(sentence)
+                    yield await self.synthesize(sentence, language=language, voice=voice)
         tail = buffer.strip()
         if tail:
-            yield await self.synthesize(tail)
+            yield await self.synthesize(tail, language=language, voice=voice)

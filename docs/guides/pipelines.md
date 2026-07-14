@@ -150,13 +150,17 @@ groups:
 servers:
   indic_stt: {kind: stt, engine: conformer, port: 50051}
   indic_tts: {kind: tts, engine: parler, port: 50052, sample_rate: 44100}
+  whisper_lid: {kind: lid, engine: faster_whisper, port: 50054}
 
 modality: voice_cascaded
 stt: {provider: nexus_server, server_ref: indic_stt, language: hi}
 tts: {provider: nexus_server, server_ref: indic_tts, sample_rate: 44100}
+lid: {provider: nexus_server, server_ref: whisper_lid, fallback_language: hi}  # optional
 vad: {provider: energy}
 duplex: full   # or half for IVR
 ```
+
+With `lid` enabled, language is re-detected on **each utterance** before STT. Users can switch languages mid-conversation; spoken requests like "talk to me in Gujarati" stick for LLM/TTS output. State is per session (`RunContext`), not global.
 
 **Manifest (cloud providers):**
 

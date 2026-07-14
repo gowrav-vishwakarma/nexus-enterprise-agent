@@ -77,14 +77,21 @@ them from the agent via `provider: nexus_server` and `server_ref`:
 servers:
   indic_stt: {kind: stt, engine: conformer, port: 50051}
   indic_tts: {kind: tts, engine: parler, port: 50052, sample_rate: 44100}
+  whisper_lid: {kind: lid, engine: faster_whisper, port: 50054}
 
 agents:
   voice_grpc:
     modality: voice_cascaded
     stt: {provider: nexus_server, server_ref: indic_stt, language: hi}
     tts: {provider: nexus_server, server_ref: indic_tts, sample_rate: 44100}
+    lid: {provider: nexus_server, server_ref: whisper_lid, fallback_language: hi}
     agent: {llm: ..., persona: {prompt: voice_system}}
 ```
+
+When `lid` is configured, each utterance is language-identified **before** STT.
+Detected language is passed to STT; reply language (for LLM + TTS) can stick after
+a spoken request like "talk to me in Gujarati". State is **per WebSocket session**
+(`RunContext`), so tenants and users do not share language preferences.
 
 Start servers: `uv run python -m nexus.server up -c examples/servers.yaml`
 
@@ -219,7 +226,7 @@ A transport moves audio/events between the client and the pipeline.
 | `WebSocketTransport` | browser / generic WS (PCM16) | — |
 | `TwilioMediaStreamTransport` | phone via Twilio/SIP (mu-law 8 kHz) | — |
 
-Media (STT/TTS/VAD/LID) can run as separate gRPC servers — see [model-servers.md](../guides/model-servers.md).
+Media (STT/TTS/VAD/LID) can run as separate gRPC servers — see [model-servers.md](../guides/model-servers.md) and the full [server.md](server.md) reference (`server_ref`, host, ports, LID).
 
 `RealtimeSession` binds a pipeline to a transport and pumps audio both ways:
 
@@ -287,6 +294,7 @@ Nexus is **bring-your-own-model**: each media stage can run locally. The
 | STT | gRPC server (`conformer`, `faster_whisper`, `mock`) | `servers:` + `stt.server_ref` |
 | TTS | gRPC server (`parler`, `kokoro`, `mock`) | `servers:` + `tts.server_ref` |
 | VAD | gRPC server (`silero`) or built-in `energy` | `vad.server_ref` or `vad.provider: energy` |
+| LID | gRPC server (`faster_whisper`, `mock`) | `servers:` + `lid.server_ref` (optional; enables per-turn language) |
 | LLM | liteLLM proxy / Ollama / vLLM | `llm.base_url` + `llm.model` |
 
 Example manifests and runnable demos:

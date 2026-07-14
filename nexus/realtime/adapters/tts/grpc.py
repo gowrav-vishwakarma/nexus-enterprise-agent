@@ -43,18 +43,32 @@ class GrpcTTS(TTSAdapter):
     def _metadata(self):
         return run_context_to_metadata(self._run_context)
 
-    async def synthesize(self, text: str) -> bytes:
+    async def synthesize(
+        self, text: str, *, language: str | None = None, voice: str | None = None
+    ) -> bytes:
         stub = await self._stub()
+        lang = language or self.config.extra.get("language") or ""
+        voice_desc = voice or self.config.voice or ""
         resp = await stub.Synthesize(
-            media_pb2.TtsRequest(text=text, voice=self.config.voice or ""),
+            media_pb2.TtsRequest(
+                text=text,
+                voice=voice_desc,
+                language=lang,
+            ),
             metadata=self._metadata(),
         )
         return resp.pcm
 
     async def stream_synthesize(
-        self, text_stream: AsyncIterator[str]
+        self,
+        text_stream: AsyncIterator[str],
+        *,
+        language: str | None = None,
+        voice: str | None = None,
     ) -> AsyncIterator[bytes]:
         stub = await self._stub()
+        lang = language or self.config.extra.get("language") or ""
+        voice_desc = voice or self.config.voice or ""
         buffer = ""
 
         async def _request_iter():
@@ -62,8 +76,12 @@ class GrpcTTS(TTSAdapter):
             async for delta in text_stream:
                 if delta:
                     buffer += delta
-                    yield media_pb2.TtsRequest(text=delta)
-            yield media_pb2.TtsRequest(text=buffer, is_final=True)
+                    yield media_pb2.TtsRequest(
+                        text=delta, language=lang, voice=voice_desc
+                    )
+            yield media_pb2.TtsRequest(
+                text=buffer, is_final=True, language=lang, voice=voice_desc
+            )
 
         async for chunk in stub.StreamSynthesize(_request_iter(), metadata=self._metadata()):
             if chunk.pcm:

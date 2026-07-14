@@ -113,7 +113,7 @@ def _media_server_refs() -> list[str]:
         AGENT_NAME, _load_manifest(), RunContext()
     )
     refs: list[str] = []
-    for block in (cfg.stt, cfg.tts, cfg.vad):
+    for block in (cfg.stt, cfg.tts, cfg.vad, cfg.lid):
         if block and getattr(block, "server_ref", None):
             if block.provider.lower() in ("nexus_server", "grpc", "nexus"):
                 refs.append(block.server_ref)
@@ -182,6 +182,14 @@ async def api_status() -> JSONResponse:
     stt = cfg.effective_stt()
     tts = cfg.effective_tts()
     vad = cfg.effective_vad()
+    lid = cfg.effective_lid()
+    lid_info = None
+    if lid:
+        lid_info = {
+            "provider": lid.provider,
+            "server_ref": lid.server_ref,
+            "fallback_language": lid.fallback_language,
+        }
     return JSONResponse(
         {
             "manifest": str(MANIFEST_PATH),
@@ -203,6 +211,8 @@ async def api_status() -> JSONResponse:
                 "voice": (tts.voice or "")[:60],
             },
             "vad": {"provider": vad.provider, "server_ref": vad.server_ref},
+            "lid": lid_info,
+            "per_turn_language": lid is not None,
             "audio": {"encoding": "pcm16", "sample_rate": 16000, "play_sample_rate": tts.sample_rate},
             "playback": {"sample_rate": tts.sample_rate},
             "servers": servers_info,

@@ -19,24 +19,32 @@ class SttServicer(media_pb2_grpc.SttServiceServicer):
 
     async def Transcribe(self, request, context):  # noqa: N802
         audio = pcm16_to_float32(request.pcm)
-        text = self.engine.transcribe(audio, request.sample_rate or 16000, "hi")
-        return media_pb2.TranscriptEvent(text=text, is_final=True, confidence=1.0)
+        lang = request.language or "hi"
+        text = self.engine.transcribe(audio, request.sample_rate or 16000, lang)
+        return media_pb2.TranscriptEvent(
+            text=text, is_final=True, confidence=1.0, language=lang
+        )
 
     async def StreamTranscribe(self, request_iterator, context):  # noqa: N802
         chunks: list[bytes] = []
         sample_rate = 16000
+        language = "hi"
         async for frame in request_iterator:
             if frame.pcm:
                 chunks.append(frame.pcm)
             if frame.sample_rate:
                 sample_rate = frame.sample_rate
+            if frame.language:
+                language = frame.language
             if frame.is_final:
                 break
         audio = pcm16_to_float32(b"".join(chunks))
         if len(audio):
-            text = self.engine.transcribe(audio, sample_rate, "hi")
+            text = self.engine.transcribe(audio, sample_rate, language)
             if text:
-                yield media_pb2.TranscriptEvent(text=text, is_final=True, confidence=1.0)
+                yield media_pb2.TranscriptEvent(
+                    text=text, is_final=True, confidence=1.0, language=language
+                )
 
 
 def build_stt_server(

@@ -19,7 +19,9 @@ class OpenAITTS(TTSAdapter):
         if config.audio_format == "pcm16":
             self._format = "pcm"
 
-    async def synthesize(self, text: str) -> bytes:
+    async def synthesize(
+        self, text: str, *, language: str | None = None, voice: str | None = None
+    ) -> bytes:
         """Synthesize text into audio bytes."""
         import httpx
 

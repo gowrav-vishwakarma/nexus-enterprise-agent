@@ -43,30 +43,40 @@ class GrpcSTT(STTAdapter):
     def _metadata(self):
         return run_context_to_metadata(self._run_context)
 
-    async def transcribe(self, audio: bytes, mime_type: str = "audio/wav") -> str:
+    async def transcribe(
+        self, audio: bytes, mime_type: str = "audio/wav", *, language: str | None = None
+    ) -> str:
         stub = await self._stub()
+        lang = language or self.config.language
         resp = await stub.Transcribe(
             media_pb2.AudioFrame(
                 pcm=audio,
                 sample_rate=self.config.sample_rate,
                 is_final=True,
+                language=lang or "",
             ),
             metadata=self._metadata(),
         )
         return resp.text
 
     async def stream_transcribe(
-        self, audio_stream: AsyncIterator[bytes]
+        self, audio_stream: AsyncIterator[bytes], *, language: str | None = None
     ) -> AsyncIterator[STTResult]:
         stub = await self._stub()
+        lang = language or self.config.language
 
         async def _request_iter():
             async for chunk in audio_stream:
                 yield media_pb2.AudioFrame(
                     pcm=chunk,
                     sample_rate=self.config.sample_rate,
+                    language=lang or "",
                 )
-            yield media_pb2.AudioFrame(is_final=True, sample_rate=self.config.sample_rate)
+            yield media_pb2.AudioFrame(
+                is_final=True,
+                sample_rate=self.config.sample_rate,
+                language=lang or "",
+            )
 
         async for event in stub.StreamTranscribe(_request_iter(), metadata=self._metadata()):
             if event.text:

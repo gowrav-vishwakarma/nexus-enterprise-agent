@@ -21,11 +21,14 @@ class DeepgramSTT(STTAdapter):
         self._model = config.model or "nova-3"
         self._base_url = (config.base_url or "https://api.deepgram.com/v1").rstrip("/")
 
-    async def transcribe(self, audio: bytes, mime_type: str = "audio/wav") -> str:
+    async def transcribe(
+        self, audio: bytes, mime_type: str = "audio/wav", *, language: str | None = None
+    ) -> str:
         """Batch transcription via Deepgram REST."""
         import httpx
 
-        params = {"model": self._model, "language": self.config.language, "smart_format": "true"}
+        lang = language or self.config.language
+        params = {"model": self._model, "language": lang, "smart_format": "true"}
         headers = {
             "Authorization": f"Token {self.config.get_api_key()}",
             "Content-Type": mime_type,
@@ -47,7 +50,7 @@ class DeepgramSTT(STTAdapter):
             return ""
 
     async def stream_transcribe(
-        self, audio_stream: AsyncIterator[bytes]
+        self, audio_stream: AsyncIterator[bytes], *, language: str | None = None
     ) -> AsyncIterator[STTResult]:
         """Streaming transcription via Deepgram realtime WebSocket."""
         try:
@@ -62,8 +65,9 @@ class DeepgramSTT(STTAdapter):
 
         ws_base = self._base_url.replace("https://", "wss://").replace("http://", "ws://")
         sample_rate = self.config.sample_rate
+        lang = language or self.config.language
         url = (
-            f"{ws_base}/listen?model={self._model}&language={self.config.language}"
+            f"{ws_base}/listen?model={self._model}&language={lang}"
             f"&encoding=linear16&sample_rate={sample_rate}&interim_results="
             f"{'true' if self.config.interim_results else 'false'}"
         )

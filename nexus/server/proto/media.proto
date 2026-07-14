@@ -14,6 +14,7 @@ message AudioFrame {
   bytes pcm = 1;           // PCM16 mono
   int32 sample_rate = 2;   // Hz, default 16000
   bool is_final = 3;       // true on last frame of an utterance/stream
+  string language = 4;     // ISO language code for STT (per utterance)
 }
 
 message TranscriptEvent {

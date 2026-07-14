@@ -19,7 +19,9 @@ class MockSTT(STTAdapter):
         super().__init__(config or STTConfig(provider="mock"))
         self.fixed_transcript = fixed_transcript or self.config.extra.get("transcript")
 
-    async def transcribe(self, audio: bytes, mime_type: str = "audio/wav") -> str:
+    async def transcribe(
+        self, audio: bytes, mime_type: str = "audio/wav", *, language: str | None = None
+    ) -> str:
         """Return the fixed transcript, else decode bytes as UTF-8 text."""
         if self.fixed_transcript is not None:
             return self.fixed_transcript

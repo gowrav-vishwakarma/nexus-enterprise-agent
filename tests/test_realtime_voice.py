@@ -71,7 +71,7 @@ async def test_cascaded_process_text_emits_audio_per_sentence():
     assert events[0].content == "hi there"
 
     audio_events = [e for e in events if e.event_type == "audio_out"]
-    assert [e.audio for e in audio_events] == [b"AUDIO:Hello.", b"AUDIO:World."]
+    assert [e.audio for e in audio_events] == [b"AUDIO:default:Hello.", b"AUDIO:default:World."]
 
     final = [e for e in events if e.event_type == "final_response"][0]
     assert final.content == "Hello. World."
@@ -147,7 +147,7 @@ async def test_realtime_session_pumps_audio():
     ):
         await session.run_audio()
 
-    assert transport.sent_audio == [b"AUDIO:Hi back."]
+    assert transport.sent_audio == [b"AUDIO:default:Hi back."]
     event_types = {e.event_type for e in transport.sent_events}
     assert "transcript_final" in event_types
     assert "final_response" in event_types

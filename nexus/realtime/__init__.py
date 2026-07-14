@@ -11,6 +11,7 @@ Install extras with ``pip install nexus-enterprise-agent[realtime]``.
 
 from nexus.realtime.config import (
     DuplexMode,
+    LIDConfig,
     Modality,
     RealtimeAgentConfig,
     S2SConfig,
@@ -37,6 +38,7 @@ __all__ = [
     "STTConfig",
     "TTSConfig",
     "VADConfig",
+    "LIDConfig",
     "S2SConfig",
     "Modality",
     "DuplexMode",

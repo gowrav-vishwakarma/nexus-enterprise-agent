@@ -12,10 +12,10 @@ root: voice_grpc
 prompts_module: ./voice_grpc_prompts.py
 
 # ---------------------------------------------------------------------------
-# Media servers (STT / TTS / VAD). The KEY (indic_stt, indic_tts, ...) is an
-# arbitrary label you choose — it is only referenced by `server_ref` below.
-# Rename freely, or add more servers (e.g. an English TTS) and point a
-# different agent's `server_ref` at it. See the commented `en_tts` example.
+# Media servers (STT / TTS / VAD / LID). The KEY (indic_stt, whisper_lid, …)
+# is an arbitrary label — agents reference it via `server_ref` in stt/tts/vad/lid.
+# Full reference: docs/reference/server.md
+# Voice Lab starts processes from examples/servers.yaml — keep names/ports in sync.
 # ---------------------------------------------------------------------------
 servers:
   indic_stt:
@@ -41,6 +41,14 @@ servers:
     kind: vad
     engine: ${ENV:VAD_ENGINE|silero}
     port: ${ENV:VAD_PORT|50053}
+
+  whisper_lid:
+    kind: lid
+    engine: ${ENV:LID_ENGINE|faster_whisper}
+    port: ${ENV:LID_PORT|50054}
+    device: ${ENV:LID_DEVICE|cpu}
+    extra:
+      model_size: ${ENV:LID_MODEL|small}
 
   # --- Example: add an English TTS server and switch tts.server_ref to it ---
   # en_tts:
@@ -90,6 +98,11 @@ agents:
       server_ref: silero_vad
       threshold: ${ENV:VAD_THRESHOLD|0.04}
       silence_ms: ${ENV:MIN_SILENCE_MS|600}
+      sample_rate: 16000
+    lid:
+      provider: nexus_server
+      server_ref: whisper_lid
+      fallback_language: ${ENV:STT_LANGUAGE|hi}
       sample_rate: 16000
     agent:
       llm: *llm_fast

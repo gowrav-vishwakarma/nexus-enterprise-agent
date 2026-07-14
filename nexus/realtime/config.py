@@ -55,6 +55,21 @@ class TTSConfig(BaseModel):
         return self.api_key.get_secret_value()
 
 
+class LIDConfig(BaseModel):
+    """Language-identification adapter configuration."""
+
+    provider: str = Field(
+        default="mock", description="LID provider: mock, nexus_server"
+    )
+    fallback_language: str = Field(
+        default="hi", description="Language when detection is low-confidence"
+    )
+    sample_rate: int = Field(default=16000, description="Input audio sample rate (Hz)")
+    base_url: Optional[str] = Field(default=None, description="gRPC endpoint host:port")
+    server_ref: Optional[str] = Field(default=None, description="Logical name in servers: config")
+    extra: dict[str, Any] = Field(default_factory=dict, description="Provider-specific options")
+
+
 class VADConfig(BaseModel):
     """Voice-activity-detection / turn-detection configuration."""
 
@@ -94,6 +109,7 @@ class RealtimeAgentConfig(BaseModel):
     stt: Optional[STTConfig] = Field(default=None, description="STT config (cascaded/vision voice notes)")
     tts: Optional[TTSConfig] = Field(default=None, description="TTS config (cascaded output)")
     vad: Optional[VADConfig] = Field(default=None, description="VAD/turn detection config")
+    lid: Optional[LIDConfig] = Field(default=None, description="Per-turn language detection config")
     s2s: Optional[S2SConfig] = Field(default=None, description="Speech-to-speech config (voice_s2s)")
 
     model_config = {"arbitrary_types_allowed": True}
@@ -114,6 +130,10 @@ class RealtimeAgentConfig(BaseModel):
     def effective_vad(self) -> VADConfig:
         """VAD config, defaulting to the built-in energy detector when unset."""
         return self.vad or VADConfig()
+
+    def effective_lid(self) -> Optional[LIDConfig]:
+        """LID config when per-turn language detection is enabled."""
+        return self.lid
 
     def effective_s2s(self) -> S2SConfig:
         """S2S config, defaulting to OpenAI Realtime when unset."""

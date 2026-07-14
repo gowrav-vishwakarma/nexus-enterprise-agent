@@ -51,7 +51,7 @@ Guide: [guides/saas-example.md](guides/saas-example.md).
 # Opens http://localhost:8787
 ```
 
-Guides: [guides/voice-lab.md](guides/voice-lab.md), [guides/model-servers.md](guides/model-servers.md).
+Guides: [guides/voice-lab.md](guides/voice-lab.md), [guides/model-servers.md](guides/model-servers.md). Full config reference: [reference/server.md](reference/server.md).
 
 ## Voice — alternates
 
