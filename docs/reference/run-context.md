@@ -69,6 +69,19 @@ RunContext(metadata={"skills": ["code-review"]})
 
 See [skills.md](skills.md).
 
+## Voice agents
+
+The cascaded voice pipeline writes language and IVR keys into `metadata` before each LLM turn. Tools read and write the same bag on `RunContext`:
+
+| Key | Written by | Read in tools |
+|-----|------------|---------------|
+| `reply_language`, `reply_language_name`, `detected_language`, `allowed_languages` | Pipeline (hi, en, gu, ta, te, bn, mr, …) | Optional in custom tools |
+| `ivr_actions` | `ivr_menu` tools | Transport / telephony layer |
+| `dtmf_buffer` | WebSocket/SIP transport | `collect_dtmf` |
+| `dtmf_expected`, `ivr_terminal` | `ivr_menu` tools | Pipeline turn control |
+
+Full table and Jinja examples: [realtime-agents.md](realtime-agents.md#voice-metadata-prompts-and-tools).
+
 ## Next steps
 
 - [Runtime control](../guides/runtime-control.md)

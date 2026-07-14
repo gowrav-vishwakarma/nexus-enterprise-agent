@@ -18,6 +18,8 @@ from nexus.orchestration.runtime import (
 )
 from nexus.persistence.factory import PersistenceBundle
 from nexus.realtime.config import (
+    InitialResponseConfig,
+    LanguageConfig,
     LIDConfig,
     RealtimeAgentConfig,
     S2SConfig,
@@ -28,8 +30,20 @@ from nexus.realtime.config import (
 )
 from nexus.server.config import ModelServerSpec, ServersConfig
 from nexus.server.registry import ServerRegistry
+from nexus.tools.context import RunContext
+from nexus.tools.registry import ToolRegistry
 
-_REALTIME_KEYS = {"modality", "duplex", "stt", "tts", "vad", "lid", "s2s"}
+_REALTIME_KEYS = {
+    "modality",
+    "duplex",
+    "stt",
+    "tts",
+    "vad",
+    "lid",
+    "languages",
+    "initial_response",
+    "s2s",
+}
 
 
 def resolve_realtime_agent(
@@ -59,6 +73,10 @@ def resolve_realtime_agent(
         tts=TTSConfig(**spec["tts"]) if "tts" in spec else None,
         vad=VADConfig(**spec["vad"]) if "vad" in spec else None,
         lid=LIDConfig(**spec["lid"]) if "lid" in spec else None,
+        languages=LanguageConfig(**spec["languages"]) if "languages" in spec else None,
+        initial_response=(
+            InitialResponseConfig(**spec["initial_response"]) if "initial_response" in spec else None
+        ),
         s2s=S2SConfig(**spec["s2s"]) if "s2s" in spec else None,
     )
 
@@ -178,10 +196,28 @@ class RealtimeRuntime:
     def tool_registry(self) -> ToolRegistry:
         return self._tool_registry
 
+    def _manifest_servers(self) -> dict[str, ModelServerSpec]:
+        raw = self.manifest.schema.servers or {}
+        return {
+            name: ModelServerSpec(**spec) if isinstance(spec, dict) else spec
+            for name, spec in raw.items()
+        }
+
     def build_pipeline(self, name: Optional[str] = None):
         """Build a voice pipeline for a named realtime agent (defaults to root)."""
+        from nexus.realtime.validation import log_validation_issues, validate_voice_languages_static
+
         agent_name = name or self.manifest.schema.root
         rt_config = resolve_realtime_agent(agent_name, self.manifest, self.run_context)
+        issues = validate_voice_languages_static(
+            rt_config,
+            servers=self._manifest_servers(),
+        )
+        log_validation_issues(
+            issues,
+            rt_config=rt_config,
+            servers=self._manifest_servers(),
+        )
         return self._pipeline_for(rt_config)
 
     def _pipeline_for(self, rt_config: RealtimeAgentConfig):

@@ -93,6 +93,28 @@ async def test_language_detected_fresh_every_turn():
 
 
 @pytest.mark.asyncio
+async def test_english_detected_skips_conformer_when_no_whisper_text():
+    lid = MockLID(LIDConfig(provider="mock"))
+    lid.detect = AsyncMock(
+        return_value=LIDResult(language="en", confidence=0.9, english_text=None),
+    )
+    stt = MockSTT()
+    stt.transcribe = AsyncMock(return_value="should not run")
+
+    pipeline = CascadedVoicePipeline(
+        _rt_config(lid=LIDConfig(provider="mock")),
+        storage_config=SessionManager(),
+        stt=stt,
+        tts=MockTTS(),
+        lid=lid,
+    )
+
+    events = [ev async for ev in pipeline.process_utterance(b"audio", session_id="s-en")]
+    assert stt.transcribe.await_count == 0
+    assert any(e.event_type == "event" and e.data.get("info") == "empty_transcript" for e in events)
+
+
+@pytest.mark.asyncio
 async def test_spoken_language_switch_sticks_for_llm_tts():
     lid = MockLID(LIDConfig(provider="mock"), fixed_language="hi")
     lid.detect = AsyncMock(

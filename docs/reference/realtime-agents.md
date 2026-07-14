@@ -82,11 +82,130 @@ servers:
 agents:
   voice_grpc:
     modality: voice_cascaded
-    stt: {provider: nexus_server, server_ref: indic_stt, language: hi}
+    languages:
+      allowed: [hi, en, gu, ta, te, bn, mr]
+      default: en   # or ${ENV:VOICE_DEFAULT_LANGUAGE|en}; set hi for India-first
+    initial_response:
+      mode: proactive
+      via_llm: true
+    stt: {provider: nexus_server, server_ref: indic_stt, language: en}
     tts: {provider: nexus_server, server_ref: indic_tts, sample_rate: 44100}
-    lid: {provider: nexus_server, server_ref: whisper_lid, fallback_language: hi}
+    lid: {provider: nexus_server, server_ref: whisper_lid, fallback_language: en}
     agent: {llm: ..., persona: {prompt: voice_system}}
 ```
+
+
+### Language config and startup validation
+
+Declare which languages the agent may use end-to-end with a `languages:` block:
+
+| Field | Required? | Default | What it does |
+|-------|-----------|---------|--------------|
+| `allowed` | Yes (if block present) | — | ISO codes supported for STT, reply, and TTS |
+| `default` | No | `stt.language` or `hi` | Fallback when LID is off or detection is out-of-allowed |
+
+When `languages:` is omitted, `allowed` is derived from the built-in routing table plus `stt.language` and `lid.fallback_language` (backward compatible).
+
+At startup, `validate_voice_languages` checks manifest language codes against static engine metadata and (when servers are up) live gRPC `HealthService.Meta`. Issues are logged as warnings/errors; set `NEXUS_VOICE_STRICT_LANG=1` to fail on errors (CI/production).
+
+**English rule:** if `en` is in `allowed`, enable `lid` (Whisper LID transcribes English) or use a Whisper/faster_whisper STT instead of Indic-Conformer.
+
+At runtime, detected and reply languages are clamped to `allowed`; spoken language-switch requests only match codes in that set.
+
+### Non-Indian / English-primary agents
+
+The default Voice Lab stack targets **English plus Indian languages** (Conformer STT + Parler TTS + Whisper LID), but agents are **not** limited to that mix. For English-primary or other locales:
+
+| Setting | Recommendation |
+|---------|----------------|
+| `stt.language` + `languages.default` | Primary code (e.g. `en` or `hi`) |
+| `languages.allowed` | e.g. `[en, hi]` or `[hi, en, gu, ta, te, bn, mr]` for bilingual / multilingual |
+| STT | Cloud (`deepgram`, `openai`) or gRPC `faster_whisper` — **not** Indic-Conformer for English-only without LID |
+| `lid` | Enable when `en` is allowed with Conformer; omit for static single-language |
+| TTS | Cloud (`openai`, `cartesia`) or any registered gRPC engine |
+
+See [examples/orchestration/ivr_support.yaml](../../examples/orchestration/ivr_support.yaml) for a half-duplex IVR agent with `allowed: [en, hi]` and cloud/mock STT/TTS.
+
+When LID is **disabled**, STT uses static `stt.language` only. Conformer supports Indic codes; English requires Whisper LID or a non-Conformer STT engine.
+
+### Voice metadata (prompts and tools)
+
+`RunContext.metadata` is rendered in Jinja system prompts as `metadata.*` on **every LLM turn**. The cascaded voice pipeline sets these keys:
+
+| Key | When set | Prompt use | Tool use |
+|-----|----------|------------|----------|
+| `reply_language` | Connect (seed) + each turn | `{{ metadata.reply_language }}` | — |
+| `reply_language_name` | Connect (seed) + each turn | `{{ metadata.reply_language_name }}` | — |
+| `detected_language` | Each turn after LID | `{{ metadata.detected_language }}` | — |
+| `allowed_languages` | Connect + each turn | `{{ metadata.allowed_languages \| join(', ') }}` | — |
+| `ivr_actions` | IVR tool calls | — | Read after LLM turn (`play_prompt`, `transfer`, …) |
+| `dtmf_buffer` | Transport (WebSocket/SIP) | — | `collect_dtmf` reads caller digits |
+| `dtmf_expected` | `collect_dtmf` tool | — | Transport hint for digit count |
+| `ivr_terminal` | `transfer_call` / `hang_up` | — | Pipeline stops after terminal turn |
+
+Example prompt lines (see [voice_grpc_prompts.py](../../examples/orchestration/voice_grpc_prompts.py)):
+
+```jinja
+{# Default reply language (Hindi, English, Gujarati, …) #}
+Reply in {{ metadata.reply_language_name | default('Hindi') }}.
+
+{# Allowed stack: hi, en, gu, ta, te, bn, mr #}
+Allowed languages: {{ metadata.allowed_languages | join(', ') if metadata.allowed_languages else 'hi, en, gu, ta, te, bn, mr' }}.
+```
+
+Seed default language at connect via `initial_response` (below) or by setting `RunContext.metadata` before `RealtimeRuntime.from_manifest()`.
+
+### Connect-time initial response
+
+Speak a greeting or IVR menu **before** the first user utterance with `initial_response:`:
+
+| Field | Required? | Default | What it does |
+|-------|-----------|---------|--------------|
+| `mode` | No | `none` | `none`, `proactive` (greeting), or `ivr` |
+| `text` | No | — | Fixed text for direct TTS (`via_llm: false`) |
+| `via_llm` | No | `false` | `true` → LLM turn with `llm_trigger`; `false` → direct TTS |
+| `llm_trigger` | No | mode default | Hidden user message for the connect LLM turn |
+| `ivr_script` | No | — | Ordered lines for IVR mode without LLM |
+| `emit_transcript` | No | `false` | Show connect trigger as a user transcript event |
+| `reply_language` | No | `languages.default` | TTS language for the greeting |
+
+```yaml
+# Proactive — Hindi (direct TTS)
+initial_response:
+  mode: proactive
+  text: "Namaste, main aapki kaise madad kar sakta hoon?"
+  via_llm: false
+  reply_language: hi
+
+# Proactive — English (direct TTS)
+initial_response:
+  mode: proactive
+  text: "Hello, how can I help you today?"
+  via_llm: false
+  reply_language: en
+
+# Proactive — LLM greeting (follows default / detected language: hi, en, gu, …)
+initial_response:
+  mode: proactive
+  via_llm: true
+  llm_trigger: "The caller just connected. Greet them briefly in the default language."
+
+# IVR — LLM presents menu via ivr_menu tools (requires duplex: half + plugin)
+initial_response:
+  mode: ivr
+  via_llm: true
+  llm_trigger: "The caller just connected. Present the menu in English; offer 9 for Hindi."
+
+# IVR — fixed bilingual script, no LLM
+initial_response:
+  mode: ivr
+  via_llm: false
+  ivr_script:
+    - "Welcome. Press 1 for sales, 2 for billing, 9 for Hindi."
+    - "स्वागत है। बिक्री के लिए 1, बिलिंग के लिए 2, हिंदी के लिए 9 दबाएं।"
+```
+
+`RealtimeSession.run_audio()` calls `run_initial_response()` automatically when configured, then listens for user speech.
 
 When `lid` is configured, each utterance is language-identified **before** STT.
 Detected language is passed to STT; reply language (for LLM + TTS) can stick after

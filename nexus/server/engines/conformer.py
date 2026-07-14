@@ -18,7 +18,7 @@ class ConformerEngine(STTEngine):
         id="conformer",
         label="Indic-Conformer 600M",
         kind="stt",
-        languages=("hi", "gu", "ta", "te", "kn", "bn", "mr", "ml", "pa", "or", "en"),
+        languages=("hi", "gu", "ta", "te", "kn", "bn", "mr", "ml", "pa", "or"),
         sample_rate=TARGET_SR,
     )
 
@@ -60,6 +60,11 @@ class ConformerEngine(STTEngine):
         logger.info("STT ready in %.1fs", time.monotonic() - start)
 
     def transcribe(self, audio: np.ndarray, sample_rate: int, language: str) -> str:
+        lang = (language or "hi").lower().split("-")[0]
+        if lang == "en":
+            raise ValueError(
+                "Indic-Conformer does not support English; use Whisper LID english_text"
+            )
         self.load()
         torch = self._torch
         wav = torch.from_numpy(np.ascontiguousarray(audio, dtype=np.float32))

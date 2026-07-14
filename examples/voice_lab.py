@@ -40,6 +40,7 @@ for _src, _dst in (
     ("NEXUS_LLM_BASE_URL", "LITELLM_BASE_URL"),
     ("NEXUS_LLM_API_KEY", "LITELLM_API_KEY"),
     ("NEXUS_LLM_MODEL", "VOICE_LLM_MODEL"),
+    ("STT_LANGUAGE", "VOICE_DEFAULT_LANGUAGE"),
 ):
     if os.getenv(_src) and not os.getenv(_dst):
         os.environ[_dst] = os.environ[_src]
@@ -90,6 +91,7 @@ app = FastAPI(title="Nexus Voice Lab", description="Real voice testing UI for th
 _manifest: OrchestrationManifest | None = None
 _registry: ServerRegistry | None = None
 _rt_config: RealtimeAgentConfig | None = None
+_language_validation: list[dict[str, str]] = []
 
 
 def _load_manifest() -> OrchestrationManifest:
@@ -118,6 +120,13 @@ def _media_server_refs() -> list[str]:
             if block.provider.lower() in ("nexus_server", "grpc", "nexus"):
                 refs.append(block.server_ref)
     return refs
+
+
+
+def _manifest_servers() -> dict[str, ModelServerSpec]:
+    manifest = _load_manifest()
+    raw = manifest.schema.servers or {}
+    return {n: ModelServerSpec(**s) if isinstance(s, dict) else s for n, s in raw.items()}
 
 
 def _safe_llm_dict() -> dict[str, Any]:
@@ -156,6 +165,19 @@ async def _startup() -> None:
             )
         else:
             logger.info("All media servers healthy: %s", ", ".join(refs))
+
+    global _language_validation
+    cfg = _rt_config or resolve_realtime_agent(AGENT_NAME, _load_manifest(), RunContext())
+    from nexus.realtime.validation import run_startup_language_validation
+
+    issues = await run_startup_language_validation(
+        cfg,
+        servers=_manifest_servers(),
+        server_registry=_registry,
+    )
+    _language_validation = [
+        {"severity": i.severity, "code": i.code, "message": i.message} for i in issues
+    ]
 
 
 @app.get("/")
@@ -217,6 +239,7 @@ async def api_status() -> JSONResponse:
             "playback": {"sample_rate": tts.sample_rate},
             "servers": servers_info,
             "media_ready": media_ready,
+            "language_validation": _language_validation,
         }
     )
 

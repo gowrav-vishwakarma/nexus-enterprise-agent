@@ -81,7 +81,8 @@ uv run --extra fastapi --extra realtime --extra litellm --extra grpc \
 | `STT_DEVICE` / `TTS_DEVICE` | GPU/CPU | `cuda`, `cpu` |
 | `VAD_PROVIDER` | Agent VAD | `energy` (local) or `nexus_server` |
 | `LID_ENGINE` / `LID_PORT` / `LID_DEVICE` | LID server | `faster_whisper` / `50054` / `cpu` |
-| `STT_LANGUAGE` | STT default + LID fallback | `hi` |
+| `VOICE_DEFAULT_LANGUAGE` | Default reply, STT, LID fallback | `en` (set `hi` for Hindi-first) |
+| `STT_LANGUAGE` | Legacy alias → `VOICE_DEFAULT_LANGUAGE` | — |
 | `NEXUS_SERVERS_CONFIG` | YAML to **start** media processes | `examples/servers.yaml` |
 | `NEXUS_VOICE_MANIFEST` | Agent YAML (registry + agent) | `examples/orchestration/voice_grpc.yaml` |
 
@@ -165,6 +166,16 @@ places that must agree: the server's `sample_rate` (native engine rate) and the
 agent's `tts.sample_rate` (the rate sent to the browser). Both default to
 `${ENV:TTS_SAMPLE_RATE|44100}` for Parler; use `24000` for kokoro/mock.
 
+## Connect greeting (`initial_response`)
+
+When the manifest sets `initial_response.mode` to `proactive` or `ivr`, the WebSocket session speaks that greeting **before** listening for microphone input. Configure in [`voice_grpc.yaml`](../../examples/orchestration/voice_grpc.yaml) (commented Hindi/English/LLM examples) or [`ivr_support.yaml`](../../examples/orchestration/ivr_support.yaml) (enabled bilingual IVR connect menu: `en` + `hi`).
+
+- `via_llm: false` + `text` — deterministic TTS in `reply_language` (`hi`, `en`, …)
+- `via_llm: true` + `llm_trigger` — LLM generates the opening (persona + tools apply; supports hi/en/gu/…)
+- IVR mode — use with `duplex: half` and `ivr_menu` plugin; `ivr_script` can list English and Hindi lines
+
+Language metadata (`reply_language`, `allowed_languages`) is seeded at connect so Jinja prompts have defaults before the first user utterance. See [realtime-agents.md](../reference/realtime-agents.md#connect-time-initial-response).
+
 ## Python API (coding way)
 
 Wire a voice pipeline in code the same way Voice Lab does:
@@ -190,7 +201,7 @@ See [examples/voice_lab.py](../../examples/voice_lab.py) for the full FastAPI ap
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /` | Browser UI |
-| `GET /api/status` | Config + server health |
+| `GET /api/status` | Config + server health + `language_validation` issues |
 | `GET /api/health` | Preflight (503 if media down) |
 | `POST /v1/realtime/sessions` | Create session |
 | `WS /v1/realtime/ws/{id}` | Full-duplex voice |

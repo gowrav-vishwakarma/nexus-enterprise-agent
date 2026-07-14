@@ -89,6 +89,10 @@ class RealtimeSession:
     async def run_audio(self) -> None:
         """Stream audio from the transport through the pipeline until it ends."""
         try:
+            run_initial = getattr(self.pipeline, "run_initial_response", None)
+            if run_initial is not None:
+                async for event in run_initial(session_id=self.session_id):
+                    await self._dispatch(event)
             async for event in self.pipeline.process_audio_stream(
                 self.transport.receive_audio(), session_id=self.session_id
             ):

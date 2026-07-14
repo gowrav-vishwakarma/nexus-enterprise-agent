@@ -81,10 +81,20 @@ agents:
   voice_grpc:
     modality: voice_cascaded
     duplex: full
+    languages:
+      # Worldwide default is English; set VOICE_DEFAULT_LANGUAGE=hi for Hindi-first.
+      allowed: [hi, en, gu, ta, te, bn, mr]
+      default: ${ENV:VOICE_DEFAULT_LANGUAGE|en}
+    initial_response:
+      mode: proactive
+      via_llm: true
+      llm_trigger: >-
+        The user just connected. Greet them briefly and warmly in the default
+        language (English unless configured otherwise). One or two short sentences.
     stt:
       provider: nexus_server
       server_ref: indic_stt
-      language: ${ENV:STT_LANGUAGE|hi}
+      language: ${ENV:VOICE_DEFAULT_LANGUAGE|en}
       sample_rate: 16000
     tts:
       provider: nexus_server
@@ -102,7 +112,7 @@ agents:
     lid:
       provider: nexus_server
       server_ref: whisper_lid
-      fallback_language: ${ENV:STT_LANGUAGE|hi}
+      fallback_language: ${ENV:VOICE_DEFAULT_LANGUAGE|en}
       sample_rate: 16000
     agent:
       llm: *llm_fast

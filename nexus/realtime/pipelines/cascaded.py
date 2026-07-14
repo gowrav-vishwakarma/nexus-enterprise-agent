@@ -23,6 +23,7 @@ from nexus.realtime.adapters.vad.base import VADAdapter, VADEvent
 from nexus.realtime.config import RealtimeAgentConfig
 from nexus.realtime.events import RealtimeStreamEvent
 from nexus.realtime.languages import (
+    DEFAULT_LANGUAGE,
     detect_language_request,
     resolve as resolve_language,
     tts_voice_for,
@@ -106,19 +107,133 @@ class CascadedVoicePipeline:
         self.session_lang = None
         self.forced_lang = None
 
-    def _language_fallback(self) -> str:
-        return (
-            self.forced_lang
-            or self.session_lang
-            or self.config.effective_stt().language
-            or "hi"
+    def _allowed_language_codes(self) -> frozenset[str]:
+        return frozenset(
+            code.lower().split("-")[0] for code in self.config.effective_languages().allowed
         )
+
+    def _clamp_language(self, code: str | None) -> str:
+        langs = self.config.effective_languages()
+        allowed = self._allowed_language_codes()
+        norm = (code or langs.default or DEFAULT_LANGUAGE).lower().split("-")[0]
+        if norm in allowed:
+            return norm
+        default = (
+            langs.default or self.config.effective_stt().language or DEFAULT_LANGUAGE
+        ).lower().split("-")[0]
+        if default in allowed:
+            return default
+        return next(iter(allowed))
+
+    def _language_fallback(self) -> str:
+        langs = self.config.effective_languages()
+        default = langs.default or self.config.effective_stt().language or DEFAULT_LANGUAGE
+        return self.forced_lang or self.session_lang or default
 
     def _apply_reply_language(self, reply_lang: str, detected_lang: str) -> None:
         lang_info = resolve_language(reply_lang)
         self.run_context.metadata["reply_language"] = reply_lang
         self.run_context.metadata["reply_language_name"] = lang_info.name
         self.run_context.metadata["detected_language"] = detected_lang
+
+    def seed_language_metadata(self) -> None:
+        """Seed allowed/default language keys before the first user utterance."""
+        langs = self.config.effective_languages()
+        default = self._clamp_language(langs.default)
+        self.run_context.metadata["allowed_languages"] = sorted(self._allowed_language_codes())
+        self._apply_reply_language(default, default)
+        self.session_lang = default
+
+    def _initial_reply_language(self) -> str:
+        ir = self.config.effective_initial_response()
+        if ir.reply_language:
+            return self._clamp_language(ir.reply_language)
+        langs = self.config.effective_languages()
+        return self._clamp_language(langs.default)
+
+    async def speak_text(
+        self,
+        text: str,
+        *,
+        reply_lang: str | None = None,
+    ) -> AsyncIterator[RealtimeStreamEvent]:
+        """Synthesize fixed text to audio without calling the LLM."""
+        stripped = text.strip()
+        if not stripped:
+            return
+        tts_lang = reply_lang
+        tts_voice = tts_voice_for(tts_lang, self.config.effective_tts().voice) if tts_lang else None
+        kwargs: dict[str, Any] = {}
+        if tts_lang:
+            kwargs["language"] = tts_lang
+        if tts_voice:
+            kwargs["voice"] = tts_voice
+        audio = await self.tts.synthesize(stripped, **kwargs)
+        yield RealtimeStreamEvent.text_delta(stripped)
+        yield RealtimeStreamEvent.audio_chunk(
+            audio, text=stripped, language=tts_lang, voice=tts_voice
+        )
+        yield RealtimeStreamEvent(
+            event_type="final_response",
+            content=stripped,
+            data={"final_response": stripped, "session_id": self.run_context.session_id},
+        )
+
+    async def run_initial_response(
+        self,
+        session_id: Optional[str] = None,
+    ) -> AsyncIterator[RealtimeStreamEvent]:
+        """Speak connect-time greeting or IVR opening when configured."""
+        ir = self.config.effective_initial_response()
+        if ir.mode == "none":
+            return
+
+        self.seed_language_metadata()
+        reply_lang = self._initial_reply_language()
+        self._apply_reply_language(reply_lang, reply_lang)
+
+        if ir.mode == "proactive":
+            if ir.via_llm:
+                trigger = (
+                    ir.llm_trigger
+                    or "The caller just connected. Greet them briefly in the default language."
+                )
+                async for ev in self.process_text(
+                    trigger,
+                    session_id=session_id,
+                    emit_transcript=ir.emit_transcript,
+                    reply_lang=reply_lang,
+                    detected_lang=reply_lang,
+                ):
+                    yield ev
+                return
+            if not ir.text:
+                return
+            async for ev in self.speak_text(ir.text, reply_lang=reply_lang):
+                yield ev
+            return
+
+        if ir.mode == "ivr":
+            if ir.via_llm:
+                trigger = (
+                    ir.llm_trigger
+                    or "The caller just connected. Use play_prompt to present the main menu."
+                )
+                async for ev in self.process_text(
+                    trigger,
+                    session_id=session_id,
+                    emit_transcript=ir.emit_transcript,
+                    reply_lang=reply_lang,
+                    detected_lang=reply_lang,
+                ):
+                    yield ev
+                return
+            script = list(ir.ivr_script or [])
+            if not script and ir.text:
+                script = [ir.text]
+            for line in script:
+                async for ev in self.speak_text(line, reply_lang=reply_lang):
+                    yield ev
 
     async def process_text(
         self,
@@ -248,19 +363,29 @@ class CascadedVoicePipeline:
         fallback = self._language_fallback()
         detected_lang = fallback
         english_text: str | None = None
+        allowed = self._allowed_language_codes()
+        self.run_context.metadata["allowed_languages"] = sorted(allowed)
 
         try:
             lid_result = await self.lid.detect(audio, fallback_language=fallback)
-            detected_lang = lid_result.language
+            detected_lang = self._clamp_language(lid_result.language)
             english_text = lid_result.english_text
             self.session_lang = detected_lang
         except Exception as exc:
             logger.error("LID failed: %s", exc, exc_info=True)
-            detected_lang = fallback
+            detected_lang = self._clamp_language(fallback)
             self.session_lang = detected_lang
 
-        if detected_lang == "en" and english_text:
-            transcript = english_text
+        if detected_lang == "en":
+            # Indic-Conformer has no English head (joint_post_net_en). English
+            # transcription comes from faster-whisper LID only — same as ankpal-voice.
+            if english_text:
+                transcript = english_text
+            else:
+                logger.warning(
+                    "English detected but LID returned no transcript; skipping Conformer"
+                )
+                transcript = ""
         else:
             transcript = await self.stt.transcribe(
                 audio, mime_type=mime_type, language=detected_lang
@@ -270,8 +395,9 @@ class CascadedVoicePipeline:
             yield RealtimeStreamEvent(event_type="event", data={"info": "empty_transcript"})
             return
 
-        requested = detect_language_request(transcript)
+        requested = detect_language_request(transcript, allowed=allowed)
         if requested is not None:
+            requested = self._clamp_language(requested)
             if requested != detected_lang or self.forced_lang != requested:
                 logger.info(
                     "Spoken language switch request -> %s (detected=%s)",

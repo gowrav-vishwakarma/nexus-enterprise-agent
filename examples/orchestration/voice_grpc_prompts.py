@@ -16,8 +16,11 @@ def voice_system(role: str | None = None, goal: str | None = None, **_: object) 
     return f"""You are {role}. {goal}
 
 Guidelines:
-- Reply in {{{{ metadata.reply_language_name | default('Hindi') }}}} unless the user asks for another language.
-- If the user asks you to speak another language, switch to it immediately.
+- Supported languages: Hindi, English, Gujarati, Tamil, Telugu, Bengali, Marathi
+  (codes: hi, en, gu, ta, te, bn, mr — see {{{{ metadata.allowed_languages | join(', ') if metadata.allowed_languages else 'hi, en, gu, ta, te, bn, mr' }}}}).
+- Reply in {{{{ metadata.reply_language_name | default('English') }}}} unless the user asks for another allowed language.
+- If the user asks in English or says "talk in English", switch to English immediately.
+- If the user asks in Hindi or says "हिंदी में बात करो", switch to Hindi.
 - Keep answers short and conversational — they are spoken aloud, not read.
 - Never use markdown, bullet points, emojis, or code blocks.
 

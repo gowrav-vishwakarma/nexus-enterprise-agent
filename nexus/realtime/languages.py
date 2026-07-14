@@ -79,7 +79,11 @@ def tts_voice_for(code: str | None, default_voice: str | None = None) -> str:
     return resolve(code).tts_description
 
 
-def detect_language_request(text: str | None) -> str | None:
+def detect_language_request(
+    text: str | None,
+    *,
+    allowed: frozenset[str] | None = None,
+) -> str | None:
     """Detect an explicit spoken language-switch request in transcript text."""
     if not text:
         return None
@@ -88,6 +92,8 @@ def detect_language_request(text: str | None) -> str | None:
     if not has_intent:
         return None
     for code, aliases in LANG_NAME_ALIASES.items():
+        if allowed is not None and code not in allowed:
+            continue
         if any(alias in lowered for alias in aliases):
             return code
     return None

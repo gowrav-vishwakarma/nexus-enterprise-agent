@@ -69,7 +69,8 @@ the agent connects via `provider: nexus_server` and `server_ref`.
 | `VAD_ENGINE` | VAD server engine (`silero`, `mock`) |
 | `STT_DEVICE` / `TTS_DEVICE` | GPU/CPU for media servers |
 | `TTS_SAMPLE_RATE` | TTS output rate (Parler = 44100, mock/kokoro = 24000) |
-| `STT_LANGUAGE` | STT language code + LID fallback (e.g. `hi`) |
+| `STT_LANGUAGE` | STT language code + LID fallback (legacy; prefer `VOICE_DEFAULT_LANGUAGE`) |
+| `VOICE_DEFAULT_LANGUAGE` | Default language for `voice_grpc` manifest: reply, STT, LID (`en` or `hi`) |
 | `LID_ENGINE` | LID server engine (`faster_whisper`, `mock`) |
 | `LID_PORT` | LID gRPC port (default `50054`) |
 | `LID_DEVICE` | LID GPU/CPU (`cpu`, `cuda`) |
@@ -77,6 +78,7 @@ the agent connects via `provider: nexus_server` and `server_ref`.
 | `VAD_PROVIDER` | Agent-side VAD (`energy` or `nexus_server`) |
 | `NEXUS_SERVERS_CONFIG` | YAML to start media processes (default `examples/servers.yaml`) |
 | `NEXUS_VOICE_MANIFEST` | Agent YAML path |
+| `NEXUS_VOICE_STRICT_LANG` | `1`/`true` to fail startup on language validation errors |
 | `VOICE_LAB_PORT` | Voice Lab UI port (default `8787`) |
 | `NEXUS_SERVERS_CONFIG` | Media servers YAML (default `examples/servers.yaml`) |
 

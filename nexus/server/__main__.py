@@ -60,6 +60,8 @@ async def start_server(name: str, spec: ModelServerSpec, pool: EnginePool) -> gr
             extra=_engine_kwargs(spec),
         )
     add_svc, servicer, add_health, health, host, port = parts
+    if health.languages:
+        logger.info("%s languages: %s", name, ", ".join(health.languages))
     return await serve_grpc(
         [(add_svc, servicer), (add_health, health)],
         host=host,

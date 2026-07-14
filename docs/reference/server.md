@@ -242,6 +242,61 @@ vad:
   sample_rate: 16000
 ```
 
+
+### `languages` — allowed language stack (optional)
+
+| Field | Required? | Default | What it does |
+|-------|-----------|---------|--------------|
+| `allowed` | Yes (if block present) | — | ISO codes this agent may use for STT, LLM reply, and TTS |
+| `default` | No | `stt.language` or `hi` | Fallback when LID is off or detection is outside `allowed` |
+
+```yaml
+languages:
+  allowed: [hi, en, gu, ta, te, bn, mr]
+  default: hi
+```
+
+Startup validation compares `allowed` to each referenced engine's `EngineMeta.languages` (static) and, when servers are running, gRPC `Meta.languages`. Mismatches log warnings so you catch issues like Tamil allowed but Conformer-only STT before a call fails.
+
+Set `NEXUS_VOICE_STRICT_LANG=1` to raise on validation errors instead of only logging them.
+
+### `initial_response` — connect greeting or IVR opening (optional)
+
+Spoken when a voice session connects, before the first user utterance. See [realtime-agents.md](realtime-agents.md#connect-time-initial-response).
+
+| Field | Required? | Default | What it does |
+|-------|-----------|---------|--------------|
+| `mode` | No | `none` | `none`, `proactive`, or `ivr` |
+| `text` | No | — | Fixed greeting (direct TTS when `via_llm: false`) |
+| `via_llm` | No | `false` | Run LLM turn with `llm_trigger` before listening |
+| `llm_trigger` | No | mode default | Hidden user message for connect LLM turn |
+| `ivr_script` | No | — | Ordered lines for IVR without LLM |
+| `reply_language` | No | `languages.default` | TTS language (`hi`, `en`, …) |
+
+```yaml
+# Hindi greeting
+initial_response:
+  mode: proactive
+  text: "Namaste, main aapki kaise madad kar sakta hoon?"
+  via_llm: false
+  reply_language: hi
+
+# English greeting
+initial_response:
+  mode: proactive
+  text: "Hello, how can I help you today?"
+  via_llm: false
+  reply_language: en
+
+# Bilingual IVR script
+initial_response:
+  mode: ivr
+  via_llm: false
+  ivr_script:
+    - "Welcome. Press 1 for sales, 9 for Hindi."
+    - "स्वागत है। बिक्री के लिए 1, हिंदी के लिए 9 दबाएं।"
+```
+
 ### `lid` — per-turn language detection (optional)
 
 | Name | Required? | Default | What it does |

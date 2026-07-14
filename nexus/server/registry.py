@@ -81,6 +81,13 @@ class ServerRegistry:
             results[name] = await self.check_health(name)
         return results
 
+    async def fetch_meta(self, name: str) -> media_pb2.MetaResponse:
+        """Fetch live engine metadata (including languages) from a media server."""
+        ep = self.resolve(name)
+        channel = await self._get_channel(ep)
+        stub = media_pb2_grpc.HealthServiceStub(channel)
+        return await stub.Meta(media_pb2.MetaRequest(), timeout=5.0)
+
     async def require_healthy(self, names: list[str]) -> None:
         """Fail fast if any referenced server is unhealthy."""
         results = await self.check_all(names)

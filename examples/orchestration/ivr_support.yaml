@@ -21,6 +21,22 @@ agents:
   ivr_support:
     modality: voice_cascaded
     duplex: half
+    languages:
+      allowed: [en, hi]
+      default: en
+    initial_response:
+      mode: ivr
+      via_llm: true
+      llm_trigger: >-
+        The caller just connected. Use play_prompt to present the main menu in
+        English. Mention they can press 9 for Hindi (हिंदी).
+    # Fixed bilingual script (no LLM) — alternative to via_llm above:
+    # initial_response:
+    #   mode: ivr
+    #   via_llm: false
+    #   ivr_script:
+    #     - "Welcome. Press 1 for sales, 2 for billing, 3 for support, 9 for Hindi."
+    #     - "स्वागत है। बिक्री के लिए 1, बिलिंग के लिए 2, सहायता के लिए 3, हिंदी के लिए 9 दबाएं।"
     stt:
       provider: ${ENV:NEXUS_STT_PROVIDER|mock}
       model: ${ENV:NEXUS_STT_MODEL|nova-3}

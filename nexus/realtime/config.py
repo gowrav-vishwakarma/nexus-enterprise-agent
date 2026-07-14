@@ -16,6 +16,7 @@ from nexus.config.agent import AgentConfig
 
 Modality = Literal["text", "vision_text", "voice_cascaded", "voice_s2s"]
 DuplexMode = Literal["half", "full"]
+InitialResponseMode = Literal["none", "proactive", "ivr"]
 
 
 class STTConfig(BaseModel):
@@ -55,6 +56,20 @@ class TTSConfig(BaseModel):
         return self.api_key.get_secret_value()
 
 
+class LanguageConfig(BaseModel):
+    """Languages this voice agent may use end-to-end (STT, reply, TTS)."""
+
+    allowed: list[str] = Field(
+        ...,
+        min_length=1,
+        description="ISO language codes the agent may use for STT, reply, and TTS",
+    )
+    default: Optional[str] = Field(
+        default=None,
+        description="Fallback when LID is off or detection is out-of-allowed",
+    )
+
+
 class LIDConfig(BaseModel):
     """Language-identification adapter configuration."""
 
@@ -81,6 +96,39 @@ class VADConfig(BaseModel):
     base_url: Optional[str] = Field(default=None, description="gRPC endpoint host:port")
     server_ref: Optional[str] = Field(default=None, description="Logical name in servers: config")
     extra: dict[str, Any] = Field(default_factory=dict, description="Provider-specific options")
+
+
+class InitialResponseConfig(BaseModel):
+    """Greeting or IVR opening spoken when a voice session connects."""
+
+    mode: InitialResponseMode = Field(
+        default="none",
+        description="none, proactive (greeting), or ivr (menu/script at connect)",
+    )
+    text: Optional[str] = Field(
+        default=None,
+        description="Fixed greeting text for proactive direct TTS or single-line IVR script",
+    )
+    via_llm: bool = Field(
+        default=False,
+        description="When true, run an LLM turn with llm_trigger before listening",
+    )
+    llm_trigger: Optional[str] = Field(
+        default=None,
+        description="Hidden user message for the connect-time LLM turn",
+    )
+    ivr_script: Optional[list[str]] = Field(
+        default=None,
+        description="Ordered lines to speak in IVR mode when via_llm is false",
+    )
+    emit_transcript: bool = Field(
+        default=False,
+        description="Whether the connect trigger appears as a user transcript event",
+    )
+    reply_language: Optional[str] = Field(
+        default=None,
+        description="TTS language for the connect greeting (defaults to languages.default)",
+    )
 
 
 class S2SConfig(BaseModel):
@@ -110,6 +158,14 @@ class RealtimeAgentConfig(BaseModel):
     tts: Optional[TTSConfig] = Field(default=None, description="TTS config (cascaded output)")
     vad: Optional[VADConfig] = Field(default=None, description="VAD/turn detection config")
     lid: Optional[LIDConfig] = Field(default=None, description="Per-turn language detection config")
+    languages: Optional[LanguageConfig] = Field(
+        default=None,
+        description="Allowed/default language codes for this voice agent",
+    )
+    initial_response: Optional[InitialResponseConfig] = Field(
+        default=None,
+        description="Connect-time greeting or IVR opening (before first user speech)",
+    )
     s2s: Optional[S2SConfig] = Field(default=None, description="Speech-to-speech config (voice_s2s)")
 
     model_config = {"arbitrary_types_allowed": True}
@@ -134,6 +190,29 @@ class RealtimeAgentConfig(BaseModel):
     def effective_lid(self) -> Optional[LIDConfig]:
         """LID config when per-turn language detection is enabled."""
         return self.lid
+
+    def effective_languages(self) -> LanguageConfig:
+        """Resolved allowed/default languages (explicit block or backward-compatible defaults)."""
+        from nexus.realtime.languages import DEFAULT_LANGUAGE, LANGUAGES
+
+        stt_lang = (self.effective_stt().language or DEFAULT_LANGUAGE).lower().split("-")[0]
+        lid = self.effective_lid()
+        lid_fallback = (
+            lid.fallback_language.lower().split("-")[0] if lid else stt_lang
+        )
+
+        if self.languages is not None:
+            default = self.languages.default or stt_lang or DEFAULT_LANGUAGE
+            return LanguageConfig(allowed=list(self.languages.allowed), default=default)
+
+        allowed = set(LANGUAGES.keys())
+        allowed.add(stt_lang)
+        allowed.add(lid_fallback)
+        return LanguageConfig(allowed=sorted(allowed), default=lid_fallback or stt_lang)
+
+    def effective_initial_response(self) -> InitialResponseConfig:
+        """Connect-time greeting/IVR config, defaulting to disabled."""
+        return self.initial_response or InitialResponseConfig()
 
     def effective_s2s(self) -> S2SConfig:
         """S2S config, defaulting to OpenAI Realtime when unset."""
