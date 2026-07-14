@@ -22,9 +22,18 @@ class TTSAdapter(abc.ABC):
 
     @abc.abstractmethod
     async def synthesize(
-        self, text: str, *, language: str | None = None, voice: str | None = None
+        self,
+        text: str,
+        *,
+        language: str | None = None,
+        voice: str | None = None,
+        **kwargs,
     ) -> bytes:
-        """Synthesize a complete text string into audio bytes."""
+        """Synthesize a complete text string into audio bytes.
+
+        Extra kwargs (``speed``, engine-specific params) are forwarded when the
+        adapter supports them.
+        """
 
     async def stream_synthesize(
         self,

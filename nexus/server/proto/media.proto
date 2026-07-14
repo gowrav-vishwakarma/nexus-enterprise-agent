@@ -29,6 +29,8 @@ message TtsRequest {
   string language = 2;
   string voice = 3;
   bool is_final = 4;       // true when no more text for this synthesis turn
+  float speed = 5;         // speaking rate multiplier (1.0 = normal); 0 = unset → engine default
+  map<string, string> params = 6;  // engine-specific options from agent tts.params / tts.extra
 }
 
 message AudioChunk {

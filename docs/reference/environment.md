@@ -77,6 +77,7 @@ the agent connects via `provider: nexus_server` and `server_ref`.
 | `VAD_ENGINE` | VAD server engine (`silero`, `mock`) |
 | `STT_DEVICE` / `TTS_DEVICE` | GPU/CPU for media servers |
 | `TTS_SAMPLE_RATE` | TTS output rate (Parler = 44100, mock/kokoro = 24000) |
+| `TTS_SPEED` | Speaking rate multiplier (`1.0` normal, `1.2` faster, `0.85` slower) |
 | `STT_LANGUAGE` | STT language code + LID fallback (legacy; prefer `VOICE_DEFAULT_LANGUAGE`) |
 | `VOICE_DEFAULT_LANGUAGE` | Default language for `voice_grpc` manifest: reply, STT, LID (`en` or `hi`) |
 | `LID_ENGINE` | LID server engine (`faster_whisper`, `mock`) |

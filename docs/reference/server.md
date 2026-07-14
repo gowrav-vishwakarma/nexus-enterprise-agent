@@ -207,7 +207,9 @@ When `lid` is enabled, STT receives the **detected** language each turn (see LID
 | `voice` | No | — | Voice id or Parler style description string |
 | `sample_rate` | No | `24000` | Playback rate sent to browser; must match server native rate |
 | `audio_format` | No | `pcm16` | Output encoding |
-| `speed` | No | `1.0` | Speaking rate multiplier (cloud TTS) |
+| `speed` | No | `1.0` | Speaking rate (`>1` faster, `<1` slower). Native on OpenAI TTS; Parler/mock time-stretch PCM |
+| `params` | No | `{}` | Engine-specific options passed through as-is (like LLM `default_params`) |
+| `extra` | No | `{}` | Deprecated alias of `params` (merged; `params` wins on conflict) |
 
 ```yaml
 tts:
@@ -215,9 +217,14 @@ tts:
   server_ref: indic_tts
   voice: Divya speaks in a clear expressive voice at a moderate pace.
   sample_rate: ${ENV:TTS_SAMPLE_RATE|44100}
+  speed: ${ENV:TTS_SPEED|1.0}    # 1.2 = faster, 0.85 = slower
+  params: {}                     # engine-specific pass-through
+  # params:
+  #   description: Divya speaks quickly and clearly.   # Parler style override
 ```
 
 With LID enabled, language and voice description update per turn from the detected/reply language.
+`speed` and `params` travel over gRPC on every synthesize call.
 
 ### `vad` — voice activity detection
 

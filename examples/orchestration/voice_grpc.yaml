@@ -115,6 +115,15 @@ agents:
       # Playback rate sent to the browser. Keep in sync with the server's
       # native rate above (Parler = 44100).
       sample_rate: ${ENV:TTS_SAMPLE_RATE|44100}
+      # Speaking rate: 1.0 = normal, >1 faster, <1 slower.
+      # OpenAI TTS uses this natively; Parler time-stretches the PCM.
+      speed: ${ENV:TTS_SPEED|1.0}
+      # Engine-specific options — passed through as-is (like LLM default_params).
+      # Unknown keys are ignored by engines that do not use them.
+      params: {}
+      # Example Parler overrides (optional):
+      # params:
+      #   description: Divya speaks quickly and clearly in a quiet room.
     vad:
       # Turn detection + barge-in (full duplex). Tune via env or edit values:
       #   threshold              — how loud counts as speech (higher = ignore noise)

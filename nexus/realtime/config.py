@@ -45,15 +45,30 @@ class TTSConfig(BaseModel):
     voice: Optional[str] = Field(default=None, description="Voice id/name")
     sample_rate: int = Field(default=24000, description="Output audio sample rate (Hz)")
     audio_format: str = Field(default="pcm16", description="Output encoding, e.g. pcm16, mp3")
-    speed: float = Field(default=1.0, description="Speaking rate multiplier")
+    speed: float = Field(
+        default=1.0,
+        description="Speaking rate multiplier (1.0 = normal). Engines that support it "
+        "apply natively; others time-stretch the PCM (e.g. Parler).",
+    )
     api_key: SecretStr = Field(default=SecretStr(""), description="Provider API key")
     base_url: Optional[str] = Field(default=None, description="Custom endpoint override (host:port or URL)")
     server_ref: Optional[str] = Field(default=None, description="Logical name in servers: config")
-    extra: dict[str, Any] = Field(default_factory=dict, description="Provider-specific options")
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Engine-specific options passed through as-is (like LLM default_params)",
+    )
+    extra: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Deprecated alias of params — merged with params (params wins on conflict)",
+    )
 
     def get_api_key(self) -> str:
         """Return the raw API key string."""
         return self.api_key.get_secret_value()
+
+    def effective_params(self) -> dict[str, Any]:
+        """Merged engine kwargs: ``extra`` then ``params`` (params wins)."""
+        return {**self.extra, **self.params}
 
 
 class LanguageConfig(BaseModel):

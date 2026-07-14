@@ -37,13 +37,24 @@ class MockTTSEngine(TTSEngine):
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    def synthesize(self, text: str, language: str, voice: str | None = None) -> np.ndarray:
+    def synthesize(
+        self,
+        text: str,
+        language: str,
+        voice: str | None = None,
+        *,
+        speed: float = 1.0,
+        params: dict | None = None,
+    ) -> np.ndarray:
         # Audible test tone so Voice Lab / mock gRPC TTS is hearable (not silence).
         sr = self.sample_rate
         duration = max(0.25, min(2.5, len(text) * 0.04))
         n = int(sr * duration)
         t = np.arange(n, dtype=np.float32) / sr
-        return (0.25 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+        audio = (0.25 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+        from nexus.server.engines.tts_params import apply_speed
+
+        return apply_speed(audio, speed)
 
     def synthesize_stream(
         self,
@@ -53,8 +64,10 @@ class MockTTSEngine(TTSEngine):
         *,
         chunk_s: float = 0.35,
         should_stop=None,
+        speed: float = 1.0,
+        params: dict | None = None,
     ) -> Iterator[np.ndarray]:
-        audio = self.synthesize(text, language, voice)
+        audio = self.synthesize(text, language, voice, speed=speed, params=params)
         chunk_samples = int(self.sample_rate * chunk_s)
         for start in range(0, len(audio), chunk_samples):
             if should_stop and should_stop():

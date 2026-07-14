@@ -20,7 +20,7 @@ class OpenAITTS(TTSAdapter):
             self._format = "pcm"
 
     async def synthesize(
-        self, text: str, *, language: str | None = None, voice: str | None = None
+        self, text: str, *, language: str | None = None, voice: str | None = None, **kwargs
     ) -> bytes:
         """Synthesize text into audio bytes."""
         import httpx
@@ -31,11 +31,18 @@ class OpenAITTS(TTSAdapter):
         }
         body = {
             "model": self._model,
-            "voice": self._voice,
+            "voice": voice or self._voice,
             "input": text,
             "response_format": self._format,
-            "speed": self.config.speed,
+            "speed": kwargs.get("speed", self.config.speed),
         }
+        # Pass-through engine params (OpenAI ignores unknown keys; proxies may use them).
+        for key, value in self.config.effective_params().items():
+            body.setdefault(key, value)
+        for key, value in kwargs.items():
+            if key == "speed":
+                continue
+            body[key] = value
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
                 f"{self._base_url}/audio/speech", headers=headers, json=body

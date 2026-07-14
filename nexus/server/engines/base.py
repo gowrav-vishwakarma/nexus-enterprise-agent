@@ -51,7 +51,15 @@ class TTSEngine(BaseEngine):
     sample_rate: int = 24000
 
     @abstractmethod
-    def synthesize(self, text: str, language: str, voice: str | None = None) -> np.ndarray:
+    def synthesize(
+        self,
+        text: str,
+        language: str,
+        voice: str | None = None,
+        *,
+        speed: float = 1.0,
+        params: dict | None = None,
+    ) -> np.ndarray:
         raise NotImplementedError
 
     def synthesize_stream(
@@ -62,8 +70,12 @@ class TTSEngine(BaseEngine):
         *,
         chunk_s: float = 0.35,
         should_stop=None,
+        speed: float = 1.0,
+        params: dict | None = None,
     ) -> Iterator[np.ndarray]:
-        yield self.synthesize(text, language, voice)
+        yield self.synthesize(
+            text, language, voice, speed=speed, params=params
+        )
 
 
 class VADEngine(BaseEngine):

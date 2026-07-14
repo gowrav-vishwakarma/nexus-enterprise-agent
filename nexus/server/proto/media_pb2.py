@@ -24,47 +24,51 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bmedia.proto\x12\x0enexus.media.v1\"\\\n\x0eRequestContext\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x12\n\nrequest_id\x18\x04 \x01(\t\"R\n\nAudioFrame\x12\x0b\n\x03pcm\x18\x01 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x02 \x01(\x05\x12\x10\n\x08is_final\x18\x03 \x01(\x08\x12\x10\n\x08language\x18\x04 \x01(\t\"W\n\x0fTranscriptEvent\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x10\n\x08is_final\x18\x02 \x01(\x08\x12\x12\n\nconfidence\x18\x03 \x01(\x02\x12\x10\n\x08language\x18\x04 \x01(\t\"M\n\nTtsRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\r\n\x05voice\x18\x03 \x01(\t\x12\x10\n\x08is_final\x18\x04 \x01(\x08\"<\n\nAudioChunk\x12\x0b\n\x03pcm\x18\x01 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x02 \x01(\x05\x12\x0c\n\x04text\x18\x03 \x01(\t\"\x9d\x01\n\x08VadEvent\x12\x36\n\nevent_type\x18\x01 \x01(\x0e\x32\".nexus.media.v1.VadEvent.EventType\x12\x15\n\rutterance_pcm\x18\x02 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x03 \x01(\x05\"-\n\tEventType\x12\x10\n\x0cSPEECH_START\x10\x00\x12\x0e\n\nSPEECH_END\x10\x01\"I\n\nLidRequest\x12\x0b\n\x03pcm\x18\x01 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x02 \x01(\x05\x12\x19\n\x11\x66\x61llback_language\x18\x03 \x01(\t\"I\n\x0bLidResponse\x12\x10\n\x08language\x18\x01 \x01(\t\x12\x12\n\nconfidence\x18\x02 \x01(\x02\x12\x14\n\x0c\x65nglish_text\x18\x03 \x01(\t\"\x0f\n\rHealthRequest\"A\n\x0eHealthResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0e\n\x06\x65ngine\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\"\r\n\x0bMetaRequest\"f\n\x0cMetaResponse\x12\x0c\n\x04kind\x18\x01 \x01(\t\x12\x0e\n\x06\x65ngine\x18\x02 \x01(\t\x12\x10\n\x08model_id\x18\x03 \x01(\t\x12\x13\n\x0bsample_rate\x18\x04 \x01(\x05\x12\x11\n\tlanguages\x18\x05 \x03(\t2\xac\x01\n\nSttService\x12S\n\x10StreamTranscribe\x12\x1a.nexus.media.v1.AudioFrame\x1a\x1f.nexus.media.v1.TranscriptEvent(\x01\x30\x01\x12I\n\nTranscribe\x12\x1a.nexus.media.v1.AudioFrame\x1a\x1f.nexus.media.v1.TranscriptEvent2\xa2\x01\n\nTtsService\x12N\n\x10StreamSynthesize\x12\x1a.nexus.media.v1.TtsRequest\x1a\x1a.nexus.media.v1.AudioChunk(\x01\x30\x01\x12\x44\n\nSynthesize\x12\x1a.nexus.media.v1.TtsRequest\x1a\x1a.nexus.media.v1.AudioChunk2S\n\nVadService\x12\x45\n\tStreamVad\x12\x1a.nexus.media.v1.AudioFrame\x1a\x18.nexus.media.v1.VadEvent(\x01\x30\x01\x32W\n\nLidService\x12I\n\x0e\x44\x65tectLanguage\x12\x1a.nexus.media.v1.LidRequest\x1a\x1b.nexus.media.v1.LidResponse2\x9a\x01\n\rHealthService\x12\x46\n\x05\x43heck\x12\x1d.nexus.media.v1.HealthRequest\x1a\x1e.nexus.media.v1.HealthResponse\x12\x41\n\x04Meta\x12\x1b.nexus.media.v1.MetaRequest\x1a\x1c.nexus.media.v1.MetaResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bmedia.proto\x12\x0enexus.media.v1\"\\\n\x0eRequestContext\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x12\n\nrequest_id\x18\x04 \x01(\t\"R\n\nAudioFrame\x12\x0b\n\x03pcm\x18\x01 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x02 \x01(\x05\x12\x10\n\x08is_final\x18\x03 \x01(\x08\x12\x10\n\x08language\x18\x04 \x01(\t\"W\n\x0fTranscriptEvent\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x10\n\x08is_final\x18\x02 \x01(\x08\x12\x12\n\nconfidence\x18\x03 \x01(\x02\x12\x10\n\x08language\x18\x04 \x01(\t\"\xc3\x01\n\nTtsRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\r\n\x05voice\x18\x03 \x01(\t\x12\x10\n\x08is_final\x18\x04 \x01(\x08\x12\r\n\x05speed\x18\x05 \x01(\x02\x12\x36\n\x06params\x18\x06 \x03(\x0b\x32&.nexus.media.v1.TtsRequest.ParamsEntry\x1a-\n\x0bParamsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"<\n\nAudioChunk\x12\x0b\n\x03pcm\x18\x01 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x02 \x01(\x05\x12\x0c\n\x04text\x18\x03 \x01(\t\"\x9d\x01\n\x08VadEvent\x12\x36\n\nevent_type\x18\x01 \x01(\x0e\x32\".nexus.media.v1.VadEvent.EventType\x12\x15\n\rutterance_pcm\x18\x02 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x03 \x01(\x05\"-\n\tEventType\x12\x10\n\x0cSPEECH_START\x10\x00\x12\x0e\n\nSPEECH_END\x10\x01\"I\n\nLidRequest\x12\x0b\n\x03pcm\x18\x01 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x02 \x01(\x05\x12\x19\n\x11\x66\x61llback_language\x18\x03 \x01(\t\"I\n\x0bLidResponse\x12\x10\n\x08language\x18\x01 \x01(\t\x12\x12\n\nconfidence\x18\x02 \x01(\x02\x12\x14\n\x0c\x65nglish_text\x18\x03 \x01(\t\"\x0f\n\rHealthRequest\"A\n\x0eHealthResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0e\n\x06\x65ngine\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\"\r\n\x0bMetaRequest\"f\n\x0cMetaResponse\x12\x0c\n\x04kind\x18\x01 \x01(\t\x12\x0e\n\x06\x65ngine\x18\x02 \x01(\t\x12\x10\n\x08model_id\x18\x03 \x01(\t\x12\x13\n\x0bsample_rate\x18\x04 \x01(\x05\x12\x11\n\tlanguages\x18\x05 \x03(\t2\xac\x01\n\nSttService\x12S\n\x10StreamTranscribe\x12\x1a.nexus.media.v1.AudioFrame\x1a\x1f.nexus.media.v1.TranscriptEvent(\x01\x30\x01\x12I\n\nTranscribe\x12\x1a.nexus.media.v1.AudioFrame\x1a\x1f.nexus.media.v1.TranscriptEvent2\xa2\x01\n\nTtsService\x12N\n\x10StreamSynthesize\x12\x1a.nexus.media.v1.TtsRequest\x1a\x1a.nexus.media.v1.AudioChunk(\x01\x30\x01\x12\x44\n\nSynthesize\x12\x1a.nexus.media.v1.TtsRequest\x1a\x1a.nexus.media.v1.AudioChunk2S\n\nVadService\x12\x45\n\tStreamVad\x12\x1a.nexus.media.v1.AudioFrame\x1a\x18.nexus.media.v1.VadEvent(\x01\x30\x01\x32W\n\nLidService\x12I\n\x0e\x44\x65tectLanguage\x12\x1a.nexus.media.v1.LidRequest\x1a\x1b.nexus.media.v1.LidResponse2\x9a\x01\n\rHealthService\x12\x46\n\x05\x43heck\x12\x1d.nexus.media.v1.HealthRequest\x1a\x1e.nexus.media.v1.HealthResponse\x12\x41\n\x04Meta\x12\x1b.nexus.media.v1.MetaRequest\x1a\x1c.nexus.media.v1.MetaResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'media_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
+  _globals['_TTSREQUEST_PARAMSENTRY']._loaded_options = None
+  _globals['_TTSREQUEST_PARAMSENTRY']._serialized_options = b'8\001'
   _globals['_REQUESTCONTEXT']._serialized_start=31
   _globals['_REQUESTCONTEXT']._serialized_end=123
   _globals['_AUDIOFRAME']._serialized_start=125
   _globals['_AUDIOFRAME']._serialized_end=207
   _globals['_TRANSCRIPTEVENT']._serialized_start=209
   _globals['_TRANSCRIPTEVENT']._serialized_end=296
-  _globals['_TTSREQUEST']._serialized_start=298
-  _globals['_TTSREQUEST']._serialized_end=375
-  _globals['_AUDIOCHUNK']._serialized_start=377
-  _globals['_AUDIOCHUNK']._serialized_end=437
-  _globals['_VADEVENT']._serialized_start=440
-  _globals['_VADEVENT']._serialized_end=597
-  _globals['_VADEVENT_EVENTTYPE']._serialized_start=552
-  _globals['_VADEVENT_EVENTTYPE']._serialized_end=597
-  _globals['_LIDREQUEST']._serialized_start=599
-  _globals['_LIDREQUEST']._serialized_end=672
-  _globals['_LIDRESPONSE']._serialized_start=674
-  _globals['_LIDRESPONSE']._serialized_end=747
-  _globals['_HEALTHREQUEST']._serialized_start=749
-  _globals['_HEALTHREQUEST']._serialized_end=764
-  _globals['_HEALTHRESPONSE']._serialized_start=766
-  _globals['_HEALTHRESPONSE']._serialized_end=831
-  _globals['_METAREQUEST']._serialized_start=833
-  _globals['_METAREQUEST']._serialized_end=846
-  _globals['_METARESPONSE']._serialized_start=848
-  _globals['_METARESPONSE']._serialized_end=950
-  _globals['_STTSERVICE']._serialized_start=953
-  _globals['_STTSERVICE']._serialized_end=1125
-  _globals['_TTSSERVICE']._serialized_start=1128
-  _globals['_TTSSERVICE']._serialized_end=1290
-  _globals['_VADSERVICE']._serialized_start=1292
-  _globals['_VADSERVICE']._serialized_end=1375
-  _globals['_LIDSERVICE']._serialized_start=1377
-  _globals['_LIDSERVICE']._serialized_end=1464
-  _globals['_HEALTHSERVICE']._serialized_start=1467
-  _globals['_HEALTHSERVICE']._serialized_end=1621
+  _globals['_TTSREQUEST']._serialized_start=299
+  _globals['_TTSREQUEST']._serialized_end=494
+  _globals['_TTSREQUEST_PARAMSENTRY']._serialized_start=449
+  _globals['_TTSREQUEST_PARAMSENTRY']._serialized_end=494
+  _globals['_AUDIOCHUNK']._serialized_start=496
+  _globals['_AUDIOCHUNK']._serialized_end=556
+  _globals['_VADEVENT']._serialized_start=559
+  _globals['_VADEVENT']._serialized_end=716
+  _globals['_VADEVENT_EVENTTYPE']._serialized_start=671
+  _globals['_VADEVENT_EVENTTYPE']._serialized_end=716
+  _globals['_LIDREQUEST']._serialized_start=718
+  _globals['_LIDREQUEST']._serialized_end=791
+  _globals['_LIDRESPONSE']._serialized_start=793
+  _globals['_LIDRESPONSE']._serialized_end=866
+  _globals['_HEALTHREQUEST']._serialized_start=868
+  _globals['_HEALTHREQUEST']._serialized_end=883
+  _globals['_HEALTHRESPONSE']._serialized_start=885
+  _globals['_HEALTHRESPONSE']._serialized_end=950
+  _globals['_METAREQUEST']._serialized_start=952
+  _globals['_METAREQUEST']._serialized_end=965
+  _globals['_METARESPONSE']._serialized_start=967
+  _globals['_METARESPONSE']._serialized_end=1069
+  _globals['_STTSERVICE']._serialized_start=1072
+  _globals['_STTSERVICE']._serialized_end=1244
+  _globals['_TTSSERVICE']._serialized_start=1247
+  _globals['_TTSSERVICE']._serialized_end=1409
+  _globals['_VADSERVICE']._serialized_start=1411
+  _globals['_VADSERVICE']._serialized_end=1494
+  _globals['_LIDSERVICE']._serialized_start=1496
+  _globals['_LIDSERVICE']._serialized_end=1583
+  _globals['_HEALTHSERVICE']._serialized_start=1586
+  _globals['_HEALTHSERVICE']._serialized_end=1740
 # @@protoc_insertion_point(module_scope)
