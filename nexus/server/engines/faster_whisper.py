@@ -67,10 +67,20 @@ class FasterWhisperLIDEngine(LIDEngine):
         detected, confidence, _ = self._model.detect_language(audio_cap)
         detected = (detected or "").lower()
         confidence = float(confidence or 0.0)
-        if detected not in SUPPORTED or confidence < 0.55:
-            return fallback_language, confidence, None
-        if detected != "en":
-            return detected, confidence, None
-        segments, _ = self._model.transcribe(audio, beam_size=1, vad_filter=True, language="en")
-        text = " ".join(s.text for s in segments).strip()
-        return "en", confidence, text or None
+
+        low_conf = detected not in SUPPORTED or confidence < 0.55
+        fallback = (fallback_language or "hi").lower().split("-")[0]
+        lang = fallback if low_conf else detected
+
+        # English (whether confidently detected OR resolved via fallback) MUST be
+        # transcribed here: Indic-Conformer has no English head, so Whisper is the
+        # only English transcript source. Skipping this leaves english_text empty
+        # and the caller drops the turn (silent agent). Indic langs are handed to
+        # Conformer by the caller, so we return (lang, None) without decoding.
+        if lang == "en":
+            segments, _ = self._model.transcribe(
+                audio, beam_size=1, vad_filter=True, language="en"
+            )
+            text = " ".join(s.text for s in segments).strip()
+            return "en", confidence, text or None
+        return lang, confidence, None

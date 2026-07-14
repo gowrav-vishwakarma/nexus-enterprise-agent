@@ -58,7 +58,7 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 
 | Name | Required? | Default | What it does |
 |------|-----------|---------|--------------|
-| `provider` | No | `openai` | Adapter: `openai`, `anthropic`, `litellm`, `gemini`, `groq`, `ollama`, etc. |
+| `provider` | No | `openai` | Provider hint for model-string prefixing (`openai`, `anthropic`, `litellm`, `gemini`, `groq`, `ollama`, etc.). **All providers route through the unified `LiteLLMAdapter`.** |
 | `model` | No | `gpt-4o` | Model name for the provider |
 | `api_key` | No | `""` | Secret API key |
 | `base_url` | No | `None` | Custom endpoint (proxies, local servers) |
@@ -68,7 +68,7 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 | `max_retries` | No | `3` | Retry count on failure |
 | `retry_delay` | No | `1.0` | Seconds between retries |
 | `extra_headers` | No | `{}` | Extra HTTP headers |
-| `default_params` | No | `{}` | Extra params sent to the provider |
+| `default_params` | No | `{}` | Extra params sent to the provider (`max_tokens`, `temperature`, `extra_body`, …). Use `extra_body.chat_template_kwargs.enable_thinking: false` for voice with Qwen3. |
 
 `base_url` overrides the endpoint; it does **not** choose the adapter. Set `provider` explicitly.
 

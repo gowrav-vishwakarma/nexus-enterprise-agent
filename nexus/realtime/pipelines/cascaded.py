@@ -13,6 +13,7 @@ playback starts before the full reply is ready.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, AsyncIterator, Optional
 
 from nexus.realtime.adapters.factory import build_lid, build_stt, build_tts, build_vad
@@ -36,11 +37,41 @@ logger = logging.getLogger(__name__)
 
 _SENTENCE_BOUNDARIES = (".", "!", "?", "\n", ";", "।")
 
+_THINK_TAG = "<think>"
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
 
 def _first_boundary(text: str) -> int:
     """Index of the earliest sentence boundary in text, or -1."""
     found = [text.find(b) for b in _SENTENCE_BOUNDARIES if b in text]
     return min(found) if found else -1
+
+
+def _strip_think(text: str) -> str:
+    """Remove reasoning traces so they are never spoken.
+
+    Handles complete ``<think>…</think>`` blocks and a trailing unclosed
+    ``<think>`` (drops everything from it onward). Reasoning models sometimes leak
+    thinking even when it is disabled at the proxy; speaking it wrecks latency and
+    sounds like gibberish.
+    """
+    if not text:
+        return ""
+    text = _THINK_BLOCK_RE.sub("", text)
+    idx = text.find(_THINK_TAG)
+    if idx != -1:
+        text = text[:idx]
+    return text
+
+
+def _visible_think_len(raw: str) -> int:
+    """Length of the visible (non-reasoning) prefix of ``raw``, holding back any
+    trailing partial ``<think>`` tag so it is never emitted mid-stream."""
+    visible = _strip_think(raw)
+    for k in range(len(_THINK_TAG) - 1, 0, -1):
+        if visible.endswith(_THINK_TAG[:k]):
+            return len(visible) - k
+    return len(visible)
 
 
 class CascadedVoicePipeline:
@@ -129,6 +160,22 @@ class CascadedVoicePipeline:
         langs = self.config.effective_languages()
         default = langs.default or self.config.effective_stt().language or DEFAULT_LANGUAGE
         return self.forced_lang or self.session_lang or default
+
+    def _indic_fallback_language(self) -> str | None:
+        """Best non-English allowed language for Conformer, or None if English-only.
+
+        Used when Whisper resolves an utterance to English but returns no text
+        (silence, noise, or a misdetected Indic turn). Retrying with Conformer on
+        a non-English language recovers the turn instead of dropping it silently.
+        """
+        langs = self.config.effective_languages()
+        default = (langs.default or "").lower().split("-")[0]
+        if default and default != "en":
+            return default
+        for code in sorted(self._allowed_language_codes()):
+            if code != "en":
+                return code
+        return None
 
     def _apply_reply_language(self, reply_lang: str, detected_lang: str) -> None:
         lang_info = resolve_language(reply_lang)
@@ -273,6 +320,8 @@ class CascadedVoicePipeline:
         sentence_buffer = ""
         final_text: Optional[str] = None
         spoke_audio = False
+        raw_content = ""
+        visible_emitted = 0
 
         async def _synthesize(sentence: str) -> bytes:
             kwargs: dict[str, Any] = {}
@@ -284,9 +333,20 @@ class CascadedVoicePipeline:
 
         async for ev in self.runner.run_stream(text, session_id=session_id, stream=True):
             if ev.event_type == "content" and ev.content:
-                yield RealtimeStreamEvent.text_delta(ev.content)
+                # Filter reasoning traces (<think>…</think>) before they are spoken
+                # or streamed. Recompute from the full raw stream so tags split
+                # across deltas are handled correctly.
+                raw_content += ev.content
+                visible_total = _visible_think_len(raw_content)
+                if visible_total <= visible_emitted:
+                    continue
+                delta = _strip_think(raw_content)[visible_emitted:visible_total]
+                visible_emitted = visible_total
+                if not delta:
+                    continue
+                yield RealtimeStreamEvent.text_delta(delta)
                 if do_speak:
-                    sentence_buffer += ev.content
+                    sentence_buffer += delta
                     while True:
                         idx = _first_boundary(sentence_buffer)
                         if idx < 0:
@@ -306,7 +366,7 @@ class CascadedVoicePipeline:
             elif ev.event_type == "error":
                 yield RealtimeStreamEvent(event_type="error", content=ev.content, data=ev.data)
             elif ev.event_type == "final_response":
-                final_text = ev.content
+                final_text = _strip_think(ev.content or "").strip() or None
 
         # Flush any trailing partial sentence.
         if do_speak and sentence_buffer.strip():
@@ -379,13 +439,26 @@ class CascadedVoicePipeline:
         if detected_lang == "en":
             # Indic-Conformer has no English head (joint_post_net_en). English
             # transcription comes from faster-whisper LID only — same as ankpal-voice.
-            if english_text:
-                transcript = english_text
-            else:
-                logger.warning(
-                    "English detected but LID returned no transcript; skipping Conformer"
-                )
-                transcript = ""
+            transcript = (english_text or "").strip()
+            if not transcript:
+                # Whisper resolved English but produced no text (silence/noise or a
+                # misdetected Indic turn). Don't drop the turn — retry with Conformer
+                # on a non-English language when the agent supports one (parity with
+                # ankpal-voice's conformer-fallback path).
+                indic = self._indic_fallback_language()
+                if indic:
+                    logger.info(
+                        "English gave no transcript; retrying with Conformer (%s)", indic
+                    )
+                    try:
+                        retry = await self.stt.transcribe(
+                            audio, mime_type=mime_type, language=indic
+                        )
+                        if retry and retry.strip():
+                            transcript = retry.strip()
+                            detected_lang = indic
+                    except Exception as exc:
+                        logger.warning("Conformer English fallback failed: %s", exc)
         else:
             transcript = await self.stt.transcribe(
                 audio, mime_type=mime_type, language=detected_lang

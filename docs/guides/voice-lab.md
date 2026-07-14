@@ -75,7 +75,11 @@ uv run --extra fastapi --extra realtime --extra litellm --extra grpc \
 | Variable | Purpose | Example |
 |----------|---------|---------|
 | `LITELLM_BASE_URL` | LLM endpoint | `http://localhost:4000` |
+| `LITELLM_API_KEY` | API key for proxy | (empty for local Ollama) |
 | `VOICE_LLM_MODEL` | Voice agent model | `ollama/qwen3:4b` |
+| `VOICE_LLM_MAX_TOKENS` | Max tokens per reply | `400` |
+| `VOICE_LLM_TEMPERATURE` | LLM temperature | `0.4` |
+| `NEXUS_LLM_*` | Legacy/SaaS aliases | Mapped to `LITELLM_*` / `VOICE_LLM_MODEL` at startup |
 | `STT_ENGINE` | STT server engine | `conformer` or `mock` |
 | `TTS_ENGINE` | TTS server engine | `parler` or `mock` |
 | `STT_DEVICE` / `TTS_DEVICE` | GPU/CPU | `cuda`, `cpu` |

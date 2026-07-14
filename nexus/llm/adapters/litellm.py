@@ -24,7 +24,6 @@ Usage examples in LLMProviderConfig:
     LLMProviderConfig(provider="gemini", model="gemini-2.0-flash-exp", api_key="...")
 """
 
-import inspect
 import json
 import logging
 from typing import Any, AsyncIterator, Optional
@@ -101,19 +100,27 @@ class LiteLLMAdapter(LLMAdapter):
         self._litellm.suppress_debug_info = True
         self._litellm.set_verbose = False
 
-        # litellm.acompletion strips provider prefixes (openai/qwen → qwen) before
-        # calling OpenAI-compatible endpoints. Proxies register full names like
-        # openai/qwen — use the OpenAI SDK directly so the model is sent unchanged.
-        self._proxy_delegate: LLMAdapter | None = None
-        if config.base_url:
-            from nexus.llm.adapters.openai import OpenAIAdapter
-            self._proxy_delegate = OpenAIAdapter(config)
-
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @property
     def _model(self) -> str:
-        return build_litellm_model_string(self.config.provider, self.config.model)
+        """Model string sent to litellm.
+
+        Without ``base_url``, use normal per-provider prefixing (``gemini/…``,
+        ``ollama/…``, etc.).
+
+        With ``base_url`` (LiteLLM proxy, vLLM, SGLang, LM Studio), the env/manifest
+        model is the **exact name registered on your server** (e.g. ``openai/qwen``).
+        We only prepend ``litellm_proxy/`` when needed — that is litellm's required
+        transport prefix for proxy calls, not a rename. Without it, litellm strips
+        ``openai/`` and the proxy receives ``qwen`` instead of ``openai/qwen``.
+        """
+        raw = self.config.model
+        if self.config.base_url:
+            if raw.startswith("litellm_proxy/"):
+                return raw
+            return f"litellm_proxy/{raw}"
+        return build_litellm_model_string(self.config.provider, raw)
 
     def _base_kwargs(
         self,
@@ -135,7 +142,7 @@ class LiteLLMAdapter(LLMAdapter):
         if self.config.api_version:
             kw["api_version"] = self.config.api_version
         if self.config.extra_headers:
-            kw["extra_headers"] = self.config.extra_headers
+            kw["extra_headers"] = dict(self.config.extra_headers)
         if temperature is not None:
             kw["temperature"] = temperature
         if max_tokens is not None:
@@ -150,11 +157,31 @@ class LiteLLMAdapter(LLMAdapter):
         if stream:
             kw["stream"] = True
 
-        # Merge any extra provider-specific params (won't overwrite above)
+        # Merge any extra provider-specific params (won't overwrite above).
+        # This is where users pass extra_body / chat_template_kwargs / reasoning
+        # switches from the manifest's default_params.
         for k, v in self.config.default_params.items():
             kw.setdefault(k, v)
 
+        self._apply_voice_defaults(kw)
         return kw
+
+    def _apply_voice_defaults(self, kw: dict[str, Any]) -> None:
+        """Disable reasoning at the source for self-hosted proxies.
+
+        Reasoning models (e.g. Qwen3) otherwise emit a ``<think>…</think>`` block
+        before any speakable text — killing voice latency. We default
+        ``chat_template_kwargs.enable_thinking = False`` for non-OpenAI proxies;
+        anything set in the manifest's ``default_params.extra_body`` wins.
+        """
+        base_url = self.config.base_url or ""
+        if not base_url or "api.openai.com" in base_url:
+            return
+        extra = dict(kw.get("extra_body") or {})
+        template_kwargs = dict(extra.get("chat_template_kwargs") or {})
+        template_kwargs.setdefault("enable_thinking", False)
+        extra["chat_template_kwargs"] = template_kwargs
+        kw["extra_body"] = extra
 
     @staticmethod
     def _parse_tool_calls(raw_tool_calls: Any) -> list[ToolCallRequest]:
@@ -184,11 +211,15 @@ class LiteLLMAdapter(LLMAdapter):
     def _parse_usage(raw_usage: Any) -> TokenUsage:
         if raw_usage is None:
             return TokenUsage()
+        cached = 0
+        details = getattr(raw_usage, "prompt_tokens_details", None)
+        if details is not None:
+            cached = getattr(details, "cached_tokens", 0) or 0
         return TokenUsage(
             prompt_tokens=getattr(raw_usage, "prompt_tokens", 0) or 0,
             completion_tokens=getattr(raw_usage, "completion_tokens", 0) or 0,
             total_tokens=getattr(raw_usage, "total_tokens", 0) or 0,
-            cached_tokens=getattr(raw_usage, "prompt_tokens_details", {}).get("cached_tokens", 0) if hasattr(raw_usage, "prompt_tokens_details") else 0,
+            cached_tokens=cached,
         )
 
     def _parse_response(self, response: Any) -> LLMResponse:
@@ -224,16 +255,6 @@ class LiteLLMAdapter(LLMAdapter):
         **kwargs: Any,
     ) -> LLMResponse:
         """Non-streaming chat via LiteLLM."""
-        if self._proxy_delegate is not None:
-            return await self._proxy_delegate.chat(
-                messages=messages,
-                tools=tools,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stop_sequences=stop_sequences,
-                **kwargs,
-            )
-
         kw = self._base_kwargs(temperature, max_tokens, stop_sequences, tools)
         kw["messages"] = messages
         kw.update(kwargs)
@@ -256,24 +277,9 @@ class LiteLLMAdapter(LLMAdapter):
         **kwargs: Any,
     ) -> AsyncIterator[LLMStreamChunk]:
         """Streaming chat via LiteLLM — yields LLMStreamChunk deltas."""
-        if self._proxy_delegate is not None:
-            stream = self._proxy_delegate.chat_stream(
-                messages=messages,
-                tools=tools,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stop_sequences=stop_sequences,
-                **kwargs,
-            )
-            # OpenAI/Anthropic historically returned a coroutine of an async iterator.
-            if inspect.iscoroutine(stream):
-                stream = await stream
-            async for chunk in stream:
-                yield chunk
-            return
-
         kw = self._base_kwargs(temperature, max_tokens, stop_sequences, tools, stream=True)
         kw["messages"] = messages
+        kwargs.pop("stop_sequences", None)
         kw.update(kwargs)
 
         logger.debug("LiteLLMAdapter.chat_stream → model=%s", self._model)

@@ -19,37 +19,25 @@ class LLMProxy:
         self._adapter = self._init_adapter()
 
     def _init_adapter(self) -> LLMAdapter:
-        """Initialize the specific provider adapter.
+        """Initialize the LLM adapter.
 
-        Routing is driven only by ``provider``. ``base_url`` is optional endpoint
-        configuration passed through to whichever adapter is selected.
+        Every provider routes through the single :class:`LiteLLMAdapter`, which
+        gives one consistent path for tool calls, streaming, reasoning controls,
+        and usage across OpenAI, Anthropic, Gemini, Groq, Ollama, and any
+        self-hosted OpenAI-compatible proxy (LiteLLM proxy, vLLM, SGLang, …).
 
-          - ``openai`` / ``azure_openai`` → native OpenAI adapter
-          - ``anthropic``                 → native Anthropic adapter
-          - everything else               → LiteLLMAdapter (litellm, gemini, groq,
-                                            ollama, bedrock, openrouter, custom, …)
-
-        Examples:
-          - Direct OpenAI: ``provider="openai"``, no base_url
-          - LiteLLM proxy via OpenAI SDK: ``provider="openai"``, ``base_url="http://…"``
-          - LiteLLM proxy via litellm lib: ``provider="litellm"``, ``base_url="http://…"``
+        ``provider`` only influences model-string prefixing; ``base_url`` selects
+        the self-hosted pass-through (model name sent verbatim). Examples:
+          - Direct OpenAI:      ``provider="openai"`` (or ``litellm``), no base_url
+          - Anthropic:          ``provider="anthropic"``, no base_url
+          - Self-hosted proxy:  ``provider="litellm"``, ``base_url="http://…"``
         """
-        provider = self.config.provider
-
-        if provider in ("openai", "azure_openai"):
-            from nexus.llm.adapters.openai import OpenAIAdapter
-            return OpenAIAdapter(self.config)
-
-        if provider == "anthropic":
-            from nexus.llm.adapters.anthropic import AnthropicAdapter
-            return AnthropicAdapter(self.config)
-
         try:
             from nexus.llm.adapters.litellm import LiteLLMAdapter
             return LiteLLMAdapter(self.config)
         except ImportError:
             raise ValueError(
-                f"Provider '{provider}' requires the LiteLLM adapter. "
+                f"Provider '{self.config.provider}' requires the LiteLLM adapter. "
                 "Install it with: uv pip install litellm"
             )
 

@@ -11,13 +11,22 @@ from nexus.realtime.adapters.lid.base import LIDResult
 from nexus.realtime.adapters.lid.mock import MockLID
 from nexus.realtime.adapters.stt.mock import MockSTT
 from nexus.realtime.adapters.tts.mock import MockTTS
-from nexus.realtime.config import LIDConfig, RealtimeAgentConfig, STTConfig
+from nexus.realtime.config import (
+    LanguageConfig,
+    LIDConfig,
+    RealtimeAgentConfig,
+    STTConfig,
+)
 from nexus.realtime.languages import detect_language_request
 from nexus.realtime.pipelines.cascaded import CascadedVoicePipeline
 from nexus.session.manager import SessionManager
 
 
-def _rt_config(*, lid: LIDConfig | None = None) -> RealtimeAgentConfig:
+def _rt_config(
+    *,
+    lid: LIDConfig | None = None,
+    languages: LanguageConfig | None = None,
+) -> RealtimeAgentConfig:
     agent = AgentConfig(
         name="voice_agent",
         llm=LLMProviderConfig(provider="openai", model="gpt-4o-mini", api_key="sk-test"),
@@ -29,6 +38,7 @@ def _rt_config(*, lid: LIDConfig | None = None) -> RealtimeAgentConfig:
         agent=agent,
         stt=STTConfig(provider="mock", language="hi"),
         lid=lid,
+        languages=languages,
     )
 
 
@@ -93,7 +103,40 @@ async def test_language_detected_fresh_every_turn():
 
 
 @pytest.mark.asyncio
-async def test_english_detected_skips_conformer_when_no_whisper_text():
+async def test_english_no_whisper_text_recovers_via_conformer_for_multilingual():
+    """English resolved but Whisper returned no text: a multilingual agent must not
+    drop the turn — it retries Conformer on a non-English language."""
+    lid = MockLID(LIDConfig(provider="mock"))
+    lid.detect = AsyncMock(
+        return_value=LIDResult(language="en", confidence=0.9, english_text=None),
+    )
+    stt = MockSTT()
+    stt.transcribe = AsyncMock(return_value="नमस्ते")
+
+    pipeline = CascadedVoicePipeline(
+        _rt_config(
+            lid=LIDConfig(provider="mock"),
+            languages=LanguageConfig(allowed=["hi", "en"], default="hi"),
+        ),
+        storage_config=SessionManager(),
+        stt=stt,
+        tts=MockTTS(),
+        lid=lid,
+    )
+
+    with patch.object(pipeline.runner.llm_proxy, "chat_stream", _mock_chat_stream(["Ok."])):
+        events = [ev async for ev in pipeline.process_utterance(b"audio", session_id="s-en")]
+
+    assert stt.transcribe.await_count == 1
+    stt.transcribe.assert_awaited_with(b"audio", mime_type="audio/wav", language="hi")
+    transcript = [e for e in events if e.event_type == "transcript_final"][0]
+    assert transcript.data["language"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_english_no_whisper_text_drops_turn_for_english_only():
+    """English-only agent has no Indic fallback, so an empty English turn is dropped
+    (Conformer cannot transcribe English)."""
     lid = MockLID(LIDConfig(provider="mock"))
     lid.detect = AsyncMock(
         return_value=LIDResult(language="en", confidence=0.9, english_text=None),
@@ -102,7 +145,10 @@ async def test_english_detected_skips_conformer_when_no_whisper_text():
     stt.transcribe = AsyncMock(return_value="should not run")
 
     pipeline = CascadedVoicePipeline(
-        _rt_config(lid=LIDConfig(provider="mock")),
+        _rt_config(
+            lid=LIDConfig(provider="mock"),
+            languages=LanguageConfig(allowed=["en"], default="en"),
+        ),
         storage_config=SessionManager(),
         stt=stt,
         tts=MockTTS(),
@@ -112,6 +158,35 @@ async def test_english_detected_skips_conformer_when_no_whisper_text():
     events = [ev async for ev in pipeline.process_utterance(b"audio", session_id="s-en")]
     assert stt.transcribe.await_count == 0
     assert any(e.event_type == "event" and e.data.get("info") == "empty_transcript" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_reasoning_traces_are_not_spoken():
+    """<think>…</think> reasoning must never reach text deltas or TTS, even when it
+    is split across streamed chunks."""
+    lid = MockLID(LIDConfig(provider="mock"))
+    lid.detect = AsyncMock(return_value=LIDResult(language="en", confidence=1.0, english_text="hi"))
+    stt = MockSTT()
+
+    pipeline = CascadedVoicePipeline(
+        _rt_config(
+            lid=LIDConfig(provider="mock"),
+            languages=LanguageConfig(allowed=["en"], default="en"),
+        ),
+        storage_config=SessionManager(),
+        stt=stt,
+        tts=MockTTS(),
+        lid=lid,
+    )
+
+    chunks = ["<th", "ink>reasoning ", "here</th", "ink>Hello", " there."]
+    with patch.object(pipeline.runner.llm_proxy, "chat_stream", _mock_chat_stream(chunks)):
+        events = [ev async for ev in pipeline.process_utterance(b"audio", session_id="s-think")]
+
+    spoken = "".join(e.content or "" for e in events if e.event_type == "content")
+    assert "reasoning" not in spoken
+    assert "<think>" not in spoken
+    assert "Hello there." in spoken
 
 
 @pytest.mark.asyncio

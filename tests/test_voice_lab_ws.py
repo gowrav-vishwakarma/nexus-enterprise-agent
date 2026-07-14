@@ -63,9 +63,8 @@ async def test_cascaded_litellm_base_url_stream_no_error():
     """Regression for Voice Lab: litellm+base_url must not emit stream TypeErrors."""
     pipeline = _pipeline()
     adapter = pipeline.runner.llm_proxy._adapter
-    assert adapter._proxy_delegate is not None
 
-    adapter._proxy_delegate.chat_stream = _true_async_chat_stream(["Namaste", "."])
+    adapter.chat_stream = _true_async_chat_stream(["Namaste", "."])
 
     events = [ev async for ev in pipeline.process_text("हलोद", session_id="e2e-1")]
     types = [e.event_type for e in events]
@@ -83,7 +82,7 @@ def test_voice_lab_websocket_full_cycle():
 
     pipeline = _pipeline()
     adapter = pipeline.runner.llm_proxy._adapter
-    adapter._proxy_delegate.chat_stream = _true_async_chat_stream(["Hi back", "."])
+    adapter.chat_stream = _true_async_chat_stream(["Hi back", "."])
 
     class _FakeRuntime:
         @classmethod
@@ -93,7 +92,13 @@ def test_voice_lab_websocket_full_cycle():
         def build_pipeline(self, _name):
             return pipeline
 
-    lab._manifest = object()
+    class _FakeSchema:
+        servers: dict = {}
+
+    class _FakeManifest:
+        schema = _FakeSchema()
+
+    lab._manifest = _FakeManifest()
     lab._registry = None
     lab._rt_config = pipeline.config
 

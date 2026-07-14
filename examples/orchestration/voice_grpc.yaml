@@ -66,9 +66,21 @@ defaults:
     model: ${ENV:VOICE_LLM_MODEL|ollama/qwen3:4b}
     base_url: ${ENV:LITELLM_BASE_URL|http://localhost:4000}
     api_key: ${ENV:LITELLM_API_KEY|}
+    # Per-request LLM args are passed straight through to the provider. Use this
+    # to disable reasoning at the source (lowest latency) for thinking models like
+    # Qwen3 — Nexus also defaults enable_thinking=False for proxies, but setting it
+    # here makes it explicit and lets you add proxy/engine-specific switches.
     default_params:
       max_tokens: ${ENV:VOICE_LLM_MAX_TOKENS|400}
       temperature: ${ENV:VOICE_LLM_TEMPERATURE|0.4}
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false   # vLLM / SGLang / Qwen chat template
+        # think: false             # uncomment if your proxy forwards to Ollama
+        # reasoning_effort: low    # for gpt-oss / reasoning-effort models
+    # Custom HTTP headers (e.g. auth, routing) are forwarded on every call:
+    # extra_headers:
+    #   x-my-route: voice
 
 storage:
   adapter: memory
@@ -89,8 +101,8 @@ agents:
       mode: proactive
       via_llm: true
       llm_trigger: >-
-        The user just connected. Greet them briefly and warmly in the default
-        language (English unless configured otherwise). One or two short sentences.
+        The user just connected. Greet them warmly in ONE short sentence (under 12
+        words) in the default language (English unless configured otherwise).
     stt:
       provider: nexus_server
       server_ref: indic_stt

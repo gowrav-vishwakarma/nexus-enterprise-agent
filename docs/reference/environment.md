@@ -54,6 +54,11 @@ Layout under `NEXUS_DATA_ROOT`:
 
 When `NEXUS_LLM_BASE_URL` is set, the SaaS example routes all tenants through that endpoint.
 
+**Reasoning models (Qwen3, gpt-oss):** Voice agents disable thinking at the source via
+`default_params.extra_body.chat_template_kwargs.enable_thinking: false` in
+`voice_grpc.yaml`. Nexus also applies this default for any self-hosted `base_url`.
+See [llm-litellm.md](../guides/llm-litellm.md#reasoning-models-extra_body-and-headers).
+
 ## Realtime / voice — Voice Lab (gRPC)
 
 Used by Voice Lab and `voice_grpc.yaml`. Media servers run as gRPC processes;
@@ -63,7 +68,10 @@ the agent connects via `provider: nexus_server` and `server_ref`.
 |----------|--------------|
 | `LITELLM_BASE_URL` | LLM endpoint (LiteLLM proxy, Ollama, vLLM) |
 | `LITELLM_API_KEY` | API key for LLM endpoint |
-| `VOICE_LLM_MODEL` | Voice agent model (e.g. `ollama/qwen3:4b`) |
+| `VOICE_LLM_MODEL` | Voice agent model — **exact name on your LiteLLM proxy** (e.g. `openai/qwen`, not `qwen`) |
+| `VOICE_LLM_MAX_TOKENS` | Max tokens per voice reply (manifest default `400`) |
+| `VOICE_LLM_TEMPERATURE` | LLM temperature for voice (manifest default `0.4`) |
+| `NEXUS_LLM_*` | SaaS / legacy aliases — Voice Lab maps these to `LITELLM_*` / `VOICE_LLM_MODEL` |
 | `STT_ENGINE` | STT server engine (`conformer`, `mock`) |
 | `TTS_ENGINE` | TTS server engine (`parler`, `mock`) |
 | `VAD_ENGINE` | VAD server engine (`silero`, `mock`) |
