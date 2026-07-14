@@ -89,9 +89,24 @@ class VADConfig(BaseModel):
     """Voice-activity-detection / turn-detection configuration."""
 
     provider: str = Field(default="energy", description="VAD provider: energy, silero, nexus_server")
-    threshold: float = Field(default=0.02, description="Energy/probability threshold for speech")
-    silence_ms: int = Field(default=700, description="Trailing silence that ends a turn (ms)")
-    min_speech_ms: int = Field(default=200, description="Minimum speech length to count as a turn (ms)")
+    threshold: float = Field(
+        default=0.02,
+        description="Energy/probability threshold — louder than this counts as speech "
+        "(higher = ignore more noise / quieter barge-ins)",
+    )
+    silence_ms: int = Field(
+        default=700,
+        description="Trailing silence (ms) after speech before the assistant takes its turn",
+    )
+    min_speech_ms: int = Field(
+        default=200,
+        description="Minimum continuous speech (ms) to accept as a user turn (filters blips)",
+    )
+    barge_in_min_speech_ms: int = Field(
+        default=250,
+        description="While the assistant is speaking, how long the user must keep talking "
+        "(ms) before barge-in cancels TTS/LLM (0 = interrupt on first speech frame)",
+    )
     sample_rate: int = Field(default=16000, description="Audio sample rate (Hz)")
     base_url: Optional[str] = Field(default=None, description="gRPC endpoint host:port")
     server_ref: Optional[str] = Field(default=None, description="Logical name in servers: config")

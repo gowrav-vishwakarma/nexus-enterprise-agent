@@ -84,7 +84,7 @@ under an `agent:` block:
 | `duplex` | No | `full` | `half` (IVR, strict turns) or `full` (barge-in) |
 | `stt` | No | mock | Speech-to-text: `provider`, `server_ref`, `language`, `sample_rate` |
 | `tts` | No | mock | Text-to-speech: `provider`, `server_ref`, `voice`, `sample_rate` |
-| `vad` | No | energy | Turn detection: `provider`, `server_ref`, `silence_ms`, `threshold` |
+| `vad` | No | energy | Turn detection: `threshold`, `silence_ms`, `min_speech_ms`, `barge_in_min_speech_ms` |
 | `languages` | No | derived | Allowed/default language codes: `allowed` (list), `default` (ISO code) |
 | `initial_response` | No | `none` | Connect greeting/IVR: `mode`, `text`, `via_llm`, `llm_trigger`, `ivr_script` |
 | `lid` | No | — | Per-turn language ID: `provider`, `server_ref`, `fallback_language`, `sample_rate` |

@@ -86,6 +86,10 @@ uv run --extra fastapi --extra realtime --extra litellm --extra grpc \
 | `TTS_ENGINE` | TTS server engine | `parler` or `mock` |
 | `STT_DEVICE` / `TTS_DEVICE` | GPU/CPU | `cuda`, `cpu` |
 | `VAD_PROVIDER` | Agent VAD | `energy` (local) or `nexus_server` |
+| `VAD_THRESHOLD` | Speech vs noise level | `0.04` (higher = ignore quieter noise) |
+| `VAD_SILENCE_MS` | Quiet ms before assistant turn | `600` |
+| `VAD_MIN_SPEECH_MS` | Ignore short blips | `200` |
+| `VAD_BARGE_IN_MIN_SPEECH_MS` | Talk this long during TTS to interrupt | `250` |
 | `LID_ENGINE` / `LID_PORT` / `LID_DEVICE` | LID server | `faster_whisper` / `50054` / `cpu` |
 | `VOICE_DEFAULT_LANGUAGE` | Default reply, STT, LID fallback | `en` (set `hi` for Hindi-first) |
 | `STT_LANGUAGE` | Legacy alias → `VOICE_DEFAULT_LANGUAGE` | — |

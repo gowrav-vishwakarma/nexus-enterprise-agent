@@ -84,6 +84,10 @@ the agent connects via `provider: nexus_server` and `server_ref`.
 | `LID_DEVICE` | LID GPU/CPU (`cpu`, `cuda`) |
 | `LID_MODEL` | Whisper model size for LID (`small`, `medium`, …) |
 | `VAD_PROVIDER` | Agent-side VAD (`energy` or `nexus_server`) |
+| `VAD_THRESHOLD` | Speech energy threshold (higher = ignore quieter noise) |
+| `VAD_SILENCE_MS` | Trailing silence (ms) before assistant turn (`MIN_SILENCE_MS` is a legacy alias) |
+| `VAD_MIN_SPEECH_MS` | Minimum speech length (ms) to accept as a turn |
+| `VAD_BARGE_IN_MIN_SPEECH_MS` | While TTS plays, ms of speech required to interrupt |
 | `NEXUS_SERVERS_CONFIG` | YAML to start media processes (default `examples/servers.yaml`) |
 | `NEXUS_VOICE_MANIFEST` | Agent YAML path |
 | `NEXUS_VOICE_STRICT_LANG` | `1`/`true` to fail startup on language validation errors |

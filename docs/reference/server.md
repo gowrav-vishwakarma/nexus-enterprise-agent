@@ -223,17 +223,26 @@ With LID enabled, language and voice description update per turn from the detect
 
 | Name | Required? | Default | What it does |
 |------|-----------|---------|--------------|
-| `threshold` | No | `0.02` | Energy/probability threshold for speech |
-| `silence_ms` | No | `700` | Trailing silence (ms) that ends a user turn |
-| `min_speech_ms` | No | `200` | Minimum speech length to count as a turn |
+| `threshold` | No | `0.02` | How loud counts as speech (0–1 RMS for energy VAD). **Higher** = ignore more noise / harder to barge-in |
+| `silence_ms` | No | `700` | Quiet time after speech before the **assistant** takes its turn |
+| `min_speech_ms` | No | `200` | Ignore speech blips shorter than this (ms) |
+| `barge_in_min_speech_ms` | No | `250` | While TTS is playing, user must keep talking this long (ms) before interrupt (`0` = first frame) |
 
 ```yaml
-# Built-in (no gRPC server):
+# Built-in energy VAD (no gRPC server) — typical Voice Lab defaults:
 vad:
   provider: energy
-  threshold: 0.04
-  silence_ms: 600
+  threshold: 0.04                 # noise vs speech
+  silence_ms: 600                 # end of user turn
+  min_speech_ms: 200
+  barge_in_min_speech_ms: 250     # interrupt sensitivity
   sample_rate: 16000
+
+# Or override from .env:
+#   VAD_THRESHOLD=0.06
+#   VAD_SILENCE_MS=800
+#   VAD_MIN_SPEECH_MS=200
+#   VAD_BARGE_IN_MIN_SPEECH_MS=300
 
 # Remote Silero server:
 vad:
@@ -241,7 +250,6 @@ vad:
   server_ref: silero_vad
   sample_rate: 16000
 ```
-
 
 ### `languages` — allowed language stack (optional)
 

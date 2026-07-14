@@ -20,13 +20,19 @@ def _pipeline(duplex="full"):
         name="va",
         llm=LLMProviderConfig(provider="openai", model="gpt-4o-mini", api_key="sk-test"),
     )
-    cfg = RealtimeAgentConfig(name="va", duplex=duplex, agent=agent)
+    vad_cfg = VADConfig(
+        silence_ms=100,
+        min_speech_ms=40,
+        barge_in_min_speech_ms=0,  # interrupt on first speech frame
+        sample_rate=16000,
+    )
+    cfg = RealtimeAgentConfig(name="va", duplex=duplex, agent=agent, vad=vad_cfg)
     return CascadedVoicePipeline(
         cfg,
         storage_config=SessionManager(),
         stt=MockSTT(fixed_transcript="hi"),
         tts=MockTTS(),
-        vad=EnergyVAD(VADConfig(silence_ms=100, min_speech_ms=40, sample_rate=16000)),
+        vad=EnergyVAD(vad_cfg),
     )
 
 

@@ -116,10 +116,17 @@ agents:
       # native rate above (Parler = 44100).
       sample_rate: ${ENV:TTS_SAMPLE_RATE|44100}
     vad:
+      # Turn detection + barge-in (full duplex). Tune via env or edit values:
+      #   threshold              — how loud counts as speech (higher = ignore noise)
+      #   silence_ms             — quiet time before assistant turn starts
+      #   min_speech_ms          — ignore blips shorter than this
+      #   barge_in_min_speech_ms — while TTS plays, talk this long to interrupt
       provider: ${ENV:VAD_PROVIDER|energy}
       server_ref: silero_vad
       threshold: ${ENV:VAD_THRESHOLD|0.04}
-      silence_ms: ${ENV:MIN_SILENCE_MS|600}
+      silence_ms: ${ENV:VAD_SILENCE_MS|600}
+      min_speech_ms: ${ENV:VAD_MIN_SPEECH_MS|200}
+      barge_in_min_speech_ms: ${ENV:VAD_BARGE_IN_MIN_SPEECH_MS|250}
       sample_rate: 16000
     lid:
       provider: nexus_server

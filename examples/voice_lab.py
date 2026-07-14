@@ -41,6 +41,7 @@ for _src, _dst in (
     ("NEXUS_LLM_API_KEY", "LITELLM_API_KEY"),
     ("NEXUS_LLM_MODEL", "VOICE_LLM_MODEL"),
     ("STT_LANGUAGE", "VOICE_DEFAULT_LANGUAGE"),
+    ("MIN_SILENCE_MS", "VAD_SILENCE_MS"),
 ):
     if os.getenv(_src) and not os.getenv(_dst):
         os.environ[_dst] = os.environ[_src]

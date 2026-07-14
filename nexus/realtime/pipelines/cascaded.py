@@ -544,9 +544,34 @@ class CascadedVoicePipeline:
 
         self.vad.reset()
         out_q: asyncio.Queue = asyncio.Queue()
-        state: dict[str, Any] = {"response_task": None, "input_done": False}
+        vad_cfg = self.config.effective_vad()
+        barge_need_ms = max(0, int(vad_cfg.barge_in_min_speech_ms))
+        sample_rate = max(1, int(vad_cfg.sample_rate or 16000))
+        state: dict[str, Any] = {
+            "response_task": None,
+            "input_done": False,
+            "barge_pending": False,
+            "barge_ms": 0.0,
+        }
         DONE = object()
         RESP_DONE = object()
+
+        def _frame_ms(frame: bytes) -> float:
+            return (len(frame) / 2 / sample_rate) * 1000.0
+
+        async def _maybe_fire_barge_in() -> None:
+            rt = state["response_task"]
+            if rt is None or rt.done() or not state["barge_pending"]:
+                return
+            if state["barge_ms"] < barge_need_ms:
+                return
+            state["barge_pending"] = False
+            await out_q.put(
+                RealtimeStreamEvent(
+                    event_type="barge_in", data={"info": "user interrupted"}
+                )
+            )
+            rt.cancel()
 
         async def run_response(utterance: bytes) -> None:
             try:
@@ -568,22 +593,33 @@ class CascadedVoicePipeline:
 
         async def reader() -> None:
             async for frame in audio_in:
+                frame_ms = _frame_ms(frame)
                 ev = self.vad.process_frame(frame)
+                rt = state["response_task"]
+                responding = rt is not None and not rt.done()
+
                 if ev == VADEvent.SPEECH_START:
                     await out_q.put(
                         RealtimeStreamEvent(event_type="event", data={"vad": "speech_start"})
                     )
-                    rt = state["response_task"]
-                    if rt is not None and not rt.done():
-                        await out_q.put(
-                            RealtimeStreamEvent(
-                                event_type="barge_in", data={"info": "user interrupted"}
-                            )
-                        )
-                        rt.cancel()
+                    if responding:
+                        state["barge_pending"] = True
+                        state["barge_ms"] = frame_ms
+                        await _maybe_fire_barge_in()
+                    else:
+                        state["barge_pending"] = False
+                        state["barge_ms"] = 0.0
                 elif ev == VADEvent.SPEECH_END:
+                    state["barge_pending"] = False
+                    state["barge_ms"] = 0.0
                     utterance = self.vad.take_utterance()
                     state["response_task"] = asyncio.create_task(run_response(utterance))
+                elif state["barge_pending"] and responding:
+                    # Still in speech (VAD returns None between start and end).
+                    state["barge_ms"] += frame_ms
+                    await _maybe_fire_barge_in()
+                elif not responding:
+                    state["barge_pending"] = False
             await out_q.put(DONE)
 
         # Speak connect greeting concurrently so the user can barge-in over it.

@@ -27,6 +27,7 @@ Guidelines:
   aloud in real time, so brevity keeps the conversation fast and natural.
 - Never think out loud or narrate your reasoning — reply with the answer only.
 - Never use markdown, bullet points, emojis, or code blocks.
+- Since our TTS is slow, punctuation should be avoided unless absolutely necessary like commas, periods, colons, semicolons, etc.
 
 Tools:
 - voice_tools.get_current_datetime — returns the current date and time (optional timezone).
