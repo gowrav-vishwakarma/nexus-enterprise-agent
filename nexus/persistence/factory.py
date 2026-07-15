@@ -40,8 +40,14 @@ class PersistenceFactory:
         *,
         session_adapter: Optional[StorageAdapter] = None,
     ) -> CrossSessionMemoryStore:
-        adapter_type = config.adapter or "memory"
         cfg = dict(config.adapter_config or {})
+
+        if config.custom_memory_adapter_class:
+            return load_custom_memory_store(
+                config.custom_memory_adapter_class, cfg
+            )
+
+        adapter_type = config.adapter or "memory"
 
         if adapter_type in ("memory",):
             return InMemoryCrossSessionMemoryStore()
@@ -114,3 +120,15 @@ def load_custom_adapter(class_path: str, adapter_config: dict[str, Any]) -> Stor
     module = import_module(module_path)
     adapter_cls = getattr(module, class_name)
     return adapter_cls(**adapter_config)
+
+
+def load_custom_memory_store(
+    class_path: str, adapter_config: dict[str, Any]
+) -> CrossSessionMemoryStore:
+    """Instantiate a user-provided CrossSessionMemoryStore from an import path."""
+    module_path, _, class_name = class_path.rpartition(".")
+    if not module_path:
+        raise ValueError(f"Invalid custom_memory_adapter_class: {class_path}")
+    module = import_module(module_path)
+    store_cls = getattr(module, class_name)
+    return store_cls(**adapter_config)

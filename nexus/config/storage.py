@@ -24,6 +24,15 @@ class SessionStorageConfig(BaseModel):
         default=None,
         description="Import path for custom StorageAdapter when adapter='custom'",
     )
+    custom_memory_adapter_class: Optional[str] = Field(
+        default=None,
+        description=(
+            "Import path for a custom CrossSessionMemoryStore. "
+            "When set, PersistenceFactory uses it instead of the built-in "
+            "memory store for the chosen adapter (or whenever you want a "
+            "product-specific memory backend)."
+        ),
+    )
     codec_class: Optional[str] = Field(
         default=None,
         description=(

@@ -23,6 +23,7 @@
 | `adapter` | No | `"memory"` | Backend type (`memory`, `file`, `sqlite`, `postgresql`, `redis`, `custom`) |
 | `adapter_config` | No | `{}` | Adapter-specific settings |
 | `custom_adapter_class` | No | `None` | Import path when `adapter="custom"` |
+| `custom_memory_adapter_class` | No | `None` | Import path for a custom `CrossSessionMemoryStore` |
 | `codec_class` | No | `None` | Import path for a `SessionCodec`; empty uses `DefaultSessionCodec` |
 
 ## SessionScope

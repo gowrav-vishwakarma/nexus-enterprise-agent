@@ -60,6 +60,7 @@ flowchart TD
 | Who is calling | [reference/run-context.md](reference/run-context.md) |
 | Save chat history | [reference/storage.md](reference/storage.md) |
 | Custom storage adapter | [guides/custom-storage-adapter.md](guides/custom-storage-adapter.md) |
+| Custom memory store | [guides/custom-memory-store.md](guides/custom-memory-store.md) |
 | Tools | [reference/tools.md](reference/tools.md) |
 | Memory | [reference/memory.md](reference/memory.md) |
 | Context summary | [reference/context-summary.md](reference/context-summary.md) |

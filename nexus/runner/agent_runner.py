@@ -357,27 +357,84 @@ class AgentRunner:
         else:
             self._explicit_skills_content = block
 
+    def _memory_store_namespace(self, store_name: str = "") -> str:
+        """Resolve namespace for a named store (same rule as MemoryPlugin)."""
+        base = resolve_cross_session_namespace(
+            self.config.memory.namespace, self.config.name
+        )
+        if store_name and store_name != "default":
+            return f"{base}:{store_name}"
+        return base
+
+    @staticmethod
+    def _trim_to_char_budget(
+        entries: dict[str, str], char_budget: int
+    ) -> dict[str, str]:
+        """Soft-trim entries for prompt inject only (oldest keys dropped first)."""
+        if char_budget <= 0 or not entries:
+            return entries
+        kept: dict[str, str] = {}
+        used = 0
+        # Prefer keeping the most recently ordered items (dict insertion order).
+        for key, value in reversed(list(entries.items())):
+            line_len = len(f"{key}: {value}") + (1 if kept else 0)
+            if used + line_len > char_budget:
+                continue
+            kept[key] = value
+            used += line_len
+        # Restore original relative order among kept keys.
+        return {k: entries[k] for k in entries if k in kept}
+
     async def _load_user_memory(self) -> dict[str, str]:
-        """Load cross-session user facts for injection into the system prompt."""
+        """Load cross-session user facts for injection into the system prompt.
+
+        When ``memory.stores`` is configured, loads every store with
+        ``inject="always"`` using the same namespace suffix rule as the memory
+        plugin. Multiple stores prefix keys as ``{store}/{key}``.
+        """
         if not self.config.memory.enabled or not self.cross_session_memory_store:
             return {}
         if not self.run_context.user_id:
             return {}
 
-        namespace = resolve_cross_session_namespace(
-            self.config.memory.namespace, self.config.name
-        )
+        company_id = self.run_context.company_id
+        stores = list(self.config.memory.stores)
         try:
-            record = await self.cross_session_memory_store.load(
-                self.run_context.tenant_id,
-                self.run_context.user_id,
-                namespace,
-            )
-            if record and record.entity_memory:
-                return dict(record.entity_memory)
+            if not stores:
+                namespace = self._memory_store_namespace("default")
+                record = await self.cross_session_memory_store.load(
+                    self.run_context.tenant_id,
+                    self.run_context.user_id,
+                    namespace,
+                    company_id=company_id,
+                )
+                if record and record.entity_memory:
+                    return dict(record.entity_memory)
+                return {}
+
+            always = [s for s in stores if s.inject == "always"]
+            multi = len(always) > 1
+            merged: dict[str, str] = {}
+            for store_cfg in always:
+                namespace = self._memory_store_namespace(store_cfg.name)
+                record = await self.cross_session_memory_store.load(
+                    self.run_context.tenant_id,
+                    self.run_context.user_id,
+                    namespace,
+                    company_id=company_id,
+                )
+                if not record or not record.entity_memory:
+                    continue
+                entries = self._trim_to_char_budget(
+                    dict(record.entity_memory), store_cfg.char_budget
+                )
+                for key, value in entries.items():
+                    out_key = f"{store_cfg.name}/{key}" if multi else key
+                    merged[out_key] = value
+            return merged
         except Exception as exc:
             logger.warning("AgentRunner: failed to load cross-session memory: %s", exc)
-        return {}
+            return {}
 
     async def _get_or_create_session(self, session_id: Optional[str]) -> AgentSession:
         """Fetch existing session or create a new one."""

@@ -56,6 +56,7 @@ class MemoryPlugin:
             ns,
             {key: value},
             max_entities=self._config.max_entities,
+            company_id=ctx.company_id,
         )
         return json.dumps({"ok": True, "store": store, "key": key})
 
@@ -69,12 +70,14 @@ class MemoryPlugin:
         if ctx is None or not ctx.user_id or not ctx.should_persist:
             return json.dumps({"ok": False, "error": "memory remove skipped"})
         ns = self._namespace(store)
-        record = await self._store.load(ctx.tenant_id, ctx.user_id, ns)
+        record = await self._store.load(
+            ctx.tenant_id, ctx.user_id, ns, company_id=ctx.company_id
+        )
         if not record or key not in record.entity_memory:
             return json.dumps({"ok": False, "error": "key not found"})
         del record.entity_memory[key]
         record.touch()
-        await self._store.save(record)
+        await self._store.save(record, company_id=ctx.company_id)
         return json.dumps({"ok": True, "store": store, "key": key})
 
     @tool(name="list", description="List memory facts in a store.")
@@ -86,7 +89,9 @@ class MemoryPlugin:
         if ctx is None or not ctx.user_id:
             return json.dumps({"ok": True, "entries": {}})
         ns = self._namespace(store)
-        record = await self._store.load(ctx.tenant_id, ctx.user_id, ns)
+        record = await self._store.load(
+            ctx.tenant_id, ctx.user_id, ns, company_id=ctx.company_id
+        )
         entries = dict(record.entity_memory) if record else {}
         return json.dumps({"ok": True, "store": store, "entries": entries})
 
@@ -103,9 +108,21 @@ class MemoryPlugin:
         ns = self._namespace(store)
         search_fn = getattr(self._store, "search", None)
         if callable(search_fn):
-            matches = await search_fn(ctx.tenant_id, ctx.user_id, ns, query, k=k)
+            try:
+                matches = await search_fn(
+                    ctx.tenant_id,
+                    ctx.user_id,
+                    ns,
+                    query,
+                    k=k,
+                    company_id=ctx.company_id,
+                )
+            except TypeError:
+                matches = await search_fn(ctx.tenant_id, ctx.user_id, ns, query, k=k)
             return json.dumps({"ok": True, "store": store, "matches": matches})
-        record = await self._store.load(ctx.tenant_id, ctx.user_id, ns)
+        record = await self._store.load(
+            ctx.tenant_id, ctx.user_id, ns, company_id=ctx.company_id
+        )
         if not record:
             return json.dumps({"ok": True, "matches": []})
         q = query.lower()

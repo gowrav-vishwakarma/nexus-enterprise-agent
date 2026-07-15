@@ -62,9 +62,16 @@ class CrossSessionMemoryStore(Protocol):
         tenant_id: Optional[str],
         user_id: str,
         namespace: str,
+        *,
+        company_id: Optional[str] = None,
     ) -> Optional[CrossSessionMemoryRecord]: ...
 
-    async def save(self, record: CrossSessionMemoryRecord) -> None: ...
+    async def save(
+        self,
+        record: CrossSessionMemoryRecord,
+        *,
+        company_id: Optional[str] = None,
+    ) -> None: ...
 
     async def merge_entities(
         self,
@@ -74,6 +81,7 @@ class CrossSessionMemoryStore(Protocol):
         entities: dict[str, str],
         *,
         max_entities: int,
+        company_id: Optional[str] = None,
     ) -> CrossSessionMemoryRecord:
         """Merge entities into the record, enforcing max_entities cap."""
         ...
@@ -96,11 +104,20 @@ class InMemoryCrossSessionMemoryStore:
         tenant_id: Optional[str],
         user_id: str,
         namespace: str,
+        *,
+        company_id: Optional[str] = None,
     ) -> Optional[CrossSessionMemoryRecord]:
+        del company_id  # built-in stores key by tenant+user+namespace only
         key = make_cross_session_memory_key(tenant_id, user_id, namespace)
         return self._records.get(key)
 
-    async def save(self, record: CrossSessionMemoryRecord) -> None:
+    async def save(
+        self,
+        record: CrossSessionMemoryRecord,
+        *,
+        company_id: Optional[str] = None,
+    ) -> None:
+        del company_id
         key = make_cross_session_memory_key(record.tenant_id, record.user_id, record.namespace)
         record.touch()
         self._records[key] = record
@@ -113,8 +130,11 @@ class InMemoryCrossSessionMemoryStore:
         entities: dict[str, str],
         *,
         max_entities: int,
+        company_id: Optional[str] = None,
     ) -> CrossSessionMemoryRecord:
-        existing = await self.load(tenant_id, user_id, namespace)
+        existing = await self.load(
+            tenant_id, user_id, namespace, company_id=company_id
+        )
         if existing is None:
             existing = CrossSessionMemoryRecord(
                 tenant_id=tenant_id,
@@ -124,7 +144,7 @@ class InMemoryCrossSessionMemoryStore:
         if entities:
             merged = {**existing.entity_memory, **entities}
             existing.entity_memory = _cap_entities(merged, max_entities)
-        await self.save(existing)
+        await self.save(existing, company_id=company_id)
         return existing
 
 
@@ -174,9 +194,12 @@ class SQLiteCrossSessionMemoryStore:
         tenant_id: Optional[str],
         user_id: str,
         namespace: str,
+        *,
+        company_id: Optional[str] = None,
     ) -> Optional[CrossSessionMemoryRecord]:
         import aiosqlite
 
+        del company_id
         key = make_cross_session_memory_key(tenant_id, user_id, namespace)
         db_file = self._resolve_db_path(tenant_id, user_id)
         async with aiosqlite.connect(db_file) as db:
@@ -190,9 +213,15 @@ class SQLiteCrossSessionMemoryStore:
             return None
         return CrossSessionMemoryRecord(**json.loads(row[0]))
 
-    async def save(self, record: CrossSessionMemoryRecord) -> None:
+    async def save(
+        self,
+        record: CrossSessionMemoryRecord,
+        *,
+        company_id: Optional[str] = None,
+    ) -> None:
         import aiosqlite
 
+        del company_id
         record.touch()
         key = make_cross_session_memory_key(record.tenant_id, record.user_id, record.namespace)
         data = record.model_dump_json()
@@ -230,8 +259,11 @@ class SQLiteCrossSessionMemoryStore:
         entities: dict[str, str],
         *,
         max_entities: int,
+        company_id: Optional[str] = None,
     ) -> CrossSessionMemoryRecord:
-        existing = await self.load(tenant_id, user_id, namespace)
+        existing = await self.load(
+            tenant_id, user_id, namespace, company_id=company_id
+        )
         if existing is None:
             existing = CrossSessionMemoryRecord(
                 tenant_id=tenant_id,
@@ -241,7 +273,7 @@ class SQLiteCrossSessionMemoryStore:
         if entities:
             merged = {**existing.entity_memory, **entities}
             existing.entity_memory = _cap_entities(merged, max_entities)
-        await self.save(existing)
+        await self.save(existing, company_id=company_id)
         return existing
 
 
@@ -333,7 +365,10 @@ class PostgreSQLCrossSessionMemoryStore:
         tenant_id: Optional[str],
         user_id: str,
         namespace: str,
+        *,
+        company_id: Optional[str] = None,
     ) -> Optional[CrossSessionMemoryRecord]:
+        del company_id
         key = make_cross_session_memory_key(tenant_id, user_id, namespace)
         pool = await self._get_pool()
         async with pool.acquire() as conn:
@@ -351,7 +386,13 @@ class PostgreSQLCrossSessionMemoryStore:
             return CrossSessionMemoryRecord(**json.loads(data))
         return CrossSessionMemoryRecord(**data)
 
-    async def save(self, record: CrossSessionMemoryRecord) -> None:
+    async def save(
+        self,
+        record: CrossSessionMemoryRecord,
+        *,
+        company_id: Optional[str] = None,
+    ) -> None:
+        del company_id
         record.touch()
         key = make_cross_session_memory_key(record.tenant_id, record.user_id, record.namespace)
         payload = record.model_dump_json()
@@ -388,8 +429,11 @@ class PostgreSQLCrossSessionMemoryStore:
         entities: dict[str, str],
         *,
         max_entities: int,
+        company_id: Optional[str] = None,
     ) -> CrossSessionMemoryRecord:
-        existing = await self.load(tenant_id, user_id, namespace)
+        existing = await self.load(
+            tenant_id, user_id, namespace, company_id=company_id
+        )
         if existing is None:
             existing = CrossSessionMemoryRecord(
                 tenant_id=tenant_id,
@@ -399,7 +443,7 @@ class PostgreSQLCrossSessionMemoryStore:
         if entities:
             merged = {**existing.entity_memory, **entities}
             existing.entity_memory = _cap_entities(merged, max_entities)
-        await self.save(existing)
+        await self.save(existing, company_id=company_id)
         return existing
 
 
@@ -465,14 +509,23 @@ class RedisCrossSessionMemoryStore:
         tenant_id: Optional[str],
         user_id: str,
         namespace: str,
+        *,
+        company_id: Optional[str] = None,
     ) -> Optional[CrossSessionMemoryRecord]:
+        del company_id
         key = make_cross_session_memory_key(tenant_id, user_id, namespace)
         raw = await self._redis.get(self._storage_key(key))
         if not raw:
             return None
         return CrossSessionMemoryRecord(**json.loads(raw))
 
-    async def save(self, record: CrossSessionMemoryRecord) -> None:
+    async def save(
+        self,
+        record: CrossSessionMemoryRecord,
+        *,
+        company_id: Optional[str] = None,
+    ) -> None:
+        del company_id
         record.touch()
         key = make_cross_session_memory_key(record.tenant_id, record.user_id, record.namespace)
         storage_key = self._storage_key(key)
@@ -488,8 +541,11 @@ class RedisCrossSessionMemoryStore:
         entities: dict[str, str],
         *,
         max_entities: int,
+        company_id: Optional[str] = None,
     ) -> CrossSessionMemoryRecord:
-        existing = await self.load(tenant_id, user_id, namespace)
+        existing = await self.load(
+            tenant_id, user_id, namespace, company_id=company_id
+        )
         if existing is None:
             existing = CrossSessionMemoryRecord(
                 tenant_id=tenant_id,
@@ -499,5 +555,5 @@ class RedisCrossSessionMemoryStore:
         if entities:
             merged = {**existing.entity_memory, **entities}
             existing.entity_memory = _cap_entities(merged, max_entities)
-        await self.save(existing)
+        await self.save(existing, company_id=company_id)
         return existing
