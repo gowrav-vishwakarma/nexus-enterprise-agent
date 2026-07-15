@@ -47,11 +47,48 @@ Agents accept the same fields as `AgentConfig` plus orchestration persona keys:
 | `persona.prompt_args` | No | `{}` | Extra Jinja variables (flattened at render time; stored on persona) |
 | `turns` | No | `TurnConfig()` defaults | Loop limits |
 | `tool_plugins` | No | `[]` | Allow-list of plugin namespaces |
+| `toolsets` | No | `{}` | Named toolset packs (name → tools / includes / visibility) |
+| `base_toolsets` | No | `[]` | Always-on toolset names for this agent |
+| `optional_toolsets` | No | `[]` | Packs the client may enable per request via `enabled_toolsets` |
 | `memory` | No | disabled | Cross-session user memory settings |
 | `context_summary` | No | disabled | Rolling conversation summary (`summarize_on`) |
 | `rcs` | No | disabled | Long-context summarization |
-| `skills` | No | disabled | agentskills.io folders |
+| `skills` | No | disabled | Static agentskills.io folders + optional learned skill store |
 | `storage` | No | `None` | Per-agent storage fallback |
+
+### Agent `skills` (learned store fields)
+
+When documenting the agent `skills:` block, these fields control learned skills (full tables: [skills.md](skills.md)):
+
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| `skills.enabled` | No | `False` | Turn skills on |
+| `skills.scope.keys` | No | `tenant_id`, `company_id`, `user_id` | Partition for learned skills |
+| `skills.store_backend` | No | `"none"` | `"none"`, `"memory"`, `"file"`, or `"custom"` |
+| `skills.store_class` | No | `None` | Import path when backend is `custom` |
+| `skills.store_config` | No | `{}` | Backend kwargs (e.g. file `root`) |
+| `skills.retrieval_k` | No | `6` | Max learned skills injected per turn |
+| `skills.inject_learned` | No | `True` | Inject learned skills into the system prompt |
+| `skills.expose_manage_tools` | No | `False` | Register `skill_manage.*` tools |
+
+### Agent toolsets (YAML sketch)
+
+```yaml
+agents:
+  assistant:
+    toolsets:
+      core:
+        description: Always available
+        tools: [memory.write, memory.search]
+      attachments:
+        description: File tools
+        visibility: frontend
+        tools: [files.read]
+    base_toolsets: [core]
+    optional_toolsets: [attachments]
+```
+
+Enable optional packs per request with `enabled_toolsets` on `run()` / `run_stream()` — see [tools.md](tools.md).
 
 See [agent-config.md](agent-config.md) for nested fields (`turns`, `memory`, `rcs`, `skills`).
 

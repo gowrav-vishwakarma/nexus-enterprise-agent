@@ -5,10 +5,11 @@ making it a zero-dependency persistent option for development and
 single-server SaaS deployments.
 """
 
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Optional
 
 try:
     import aiosqlite
@@ -16,8 +17,9 @@ except ImportError:
     aiosqlite = None  # type: ignore
 
 from nexus.session.adapters.base import StorageAdapter
-from nexus.session.adapters._serde import session_from_json, session_to_json
+from nexus.session.codec import DefaultSessionCodec, SessionCodec
 from nexus.session.models import AgentSession, TurnRecord
+from nexus.session.scope import SessionScope
 from nexus.storage.paths import (
     get_data_root,
     lookup_session,
@@ -62,6 +64,7 @@ class SQLiteStorageAdapter(StorageAdapter):
         wal_mode: bool = True,
         auto_migrate: bool = True,
         table_prefix: str = "nexus_",
+        codec: Optional[SessionCodec] = None,
     ) -> None:
         if aiosqlite is None:
             raise ImportError(
@@ -74,18 +77,22 @@ class SQLiteStorageAdapter(StorageAdapter):
         self.wal_mode = wal_mode
         self.auto_migrate = auto_migrate
         self.table_prefix = table_prefix
+        self._codec: SessionCodec = codec or DefaultSessionCodec()
         self._initialised_paths: set[str] = set()
 
     async def _resolve_location(
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         session: Optional[AgentSession] = None,
     ) -> tuple[Optional[str], Optional[str]]:
-        tid = tenant_id or (session.tenant_id if session else None)
-        uid = user_id or (session.user_id if session else None)
+        tid = (scope.tenant_id if scope else None) or (
+            session.tenant_id if session else None
+        )
+        uid = (scope.user_id if scope else None) or (
+            session.user_id if session else None
+        )
         if tid is not None and uid is not None:
             return tid, uid
         if self.tenant_scoped:
@@ -116,7 +123,7 @@ class SQLiteStorageAdapter(StorageAdapter):
             self._initialised_paths.add(db_file)
 
     def _session_to_row(self, session: AgentSession) -> tuple:
-        data = session_to_json(session)
+        data = json.dumps(self._codec.dumps(session), default=str)
         return (
             session.session_id,
             session.agent_id,
@@ -129,7 +136,10 @@ class SQLiteStorageAdapter(StorageAdapter):
         )
 
     def _row_to_session(self, row: tuple) -> AgentSession:
-        return session_from_json(row[7])
+        return self._codec.loads(row[7])
+
+    def _encode_session(self, session: AgentSession) -> str:
+        return json.dumps(self._codec.dumps(session), default=str)
 
     async def save_session(self, session: AgentSession) -> None:
         tid, uid = await self._resolve_location(session.session_id, session=session)
@@ -163,12 +173,9 @@ class SQLiteStorageAdapter(StorageAdapter):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> Optional[AgentSession]:
-        tid, uid = await self._resolve_location(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        tid, uid = await self._resolve_location(session_id, scope=scope)
         db_file = self._resolve_db_path(tid, uid)
         async with aiosqlite.connect(db_file) as db:
             await self._ensure_schema(db, db_file)
@@ -180,22 +187,27 @@ class SQLiteStorageAdapter(StorageAdapter):
                 row = await cursor.fetchone()
                 if row is None:
                     return None
-                return self._row_to_session(row)
+                session = self._row_to_session(row)
+                if scope is not None and not scope.matches_session(session):
+                    return None
+                return session
 
     async def list_sessions(
         self,
+        *,
         agent_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AgentSession]:
+        tenant_id = scope.tenant_id if scope else None
+        user_id = scope.user_id if scope else None
+
         if not self.tenant_scoped:
             return await self._list_from_db(
                 self._resolve_db_path(None, None),
                 agent_id,
-                tenant_id,
-                user_id,
+                scope,
                 limit,
                 offset,
             )
@@ -213,11 +225,15 @@ class SQLiteStorageAdapter(StorageAdapter):
                         if candidate.exists():
                             db_files.append(str(candidate))
         else:
-            db_files = [str(p) for p in self.data_root.rglob("sessions.db") if "_index" not in p.parts]
+            db_files = [
+                str(p)
+                for p in self.data_root.rglob("sessions.db")
+                if "_index" not in p.parts
+            ]
 
         for db_file in db_files:
             batch = await self._list_from_db(
-                db_file, agent_id, tenant_id, user_id, limit + offset, 0
+                db_file, agent_id, scope, limit + offset, 0
             )
             results.extend(batch)
             if len(results) >= offset + limit:
@@ -230,16 +246,17 @@ class SQLiteStorageAdapter(StorageAdapter):
         self,
         session_id_prefix: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         exclude_session_ids: Optional[set[str]] = None,
     ) -> list[AgentSession]:
+        tenant_id = scope.tenant_id if scope else None
+        user_id = scope.user_id if scope else None
+
         if not self.tenant_scoped:
             return await self._list_from_db(
                 self._resolve_db_path(None, None),
                 None,
-                tenant_id,
-                user_id,
+                scope,
                 limit=10000,
                 offset=0,
                 session_id_prefix=session_id_prefix,
@@ -269,8 +286,7 @@ class SQLiteStorageAdapter(StorageAdapter):
             batch = await self._list_from_db(
                 db_file,
                 None,
-                tenant_id,
-                user_id,
+                scope,
                 limit=10000,
                 offset=0,
                 session_id_prefix=session_id_prefix,
@@ -285,8 +301,7 @@ class SQLiteStorageAdapter(StorageAdapter):
         self,
         db_file: str,
         agent_id: Optional[str],
-        tenant_id: Optional[str],
-        user_id: Optional[str],
+        scope: Optional[SessionScope],
         limit: int,
         offset: int,
         session_id_prefix: Optional[str] = None,
@@ -294,6 +309,9 @@ class SQLiteStorageAdapter(StorageAdapter):
     ) -> list[AgentSession]:
         if not Path(db_file).exists():
             return []
+
+        tenant_id = scope.tenant_id if scope else None
+        user_id = scope.user_id if scope else None
 
         conditions: list[str] = []
         params: list = []
@@ -325,6 +343,8 @@ class SQLiteStorageAdapter(StorageAdapter):
             ) as cursor:
                 rows = await cursor.fetchall()
                 sessions = [self._row_to_session(r) for r in rows]
+                if scope is not None:
+                    sessions = [s for s in sessions if scope.matches_session(s)]
                 if exclude_session_ids:
                     sessions = [
                         s for s in sessions if s.session_id not in exclude_session_ids
@@ -335,12 +355,9 @@ class SQLiteStorageAdapter(StorageAdapter):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
-        tid, uid = await self._resolve_location(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        tid, uid = await self._resolve_location(session_id, scope=scope)
         db_file = self._resolve_db_path(tid, uid)
         async with aiosqlite.connect(db_file) as db:
             await self._ensure_schema(db, db_file)
@@ -356,12 +373,9 @@ class SQLiteStorageAdapter(StorageAdapter):
         session_id: str,
         turn: TurnRecord,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
-        tid, uid = await self._resolve_location(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        tid, uid = await self._resolve_location(session_id, scope=scope)
         db_file = self._resolve_db_path(tid, uid)
         async with aiosqlite.connect(db_file) as db:
             await self._ensure_schema(db, db_file)
@@ -374,13 +388,16 @@ class SQLiteStorageAdapter(StorageAdapter):
                     logger.warning("append_turn: session %s not found", session_id)
                     return
 
-            session = session_from_json(row[0])
+            session = self._codec.loads(row[0])
+            if scope is not None and not scope.matches_session(session):
+                logger.warning("append_turn: session %s scope mismatch", session_id)
+                return
             session.turns.append(turn)
             session.updated_at = datetime.now()
 
             await db.execute(
                 "UPDATE nexus_sessions SET data = ?, updated_at = ? WHERE session_id = ?",
-                (session_to_json(session), session.updated_at.isoformat(), session_id),
+                (self._encode_session(session), session.updated_at.isoformat(), session_id),
             )
             await db.commit()
 
@@ -391,12 +408,9 @@ class SQLiteStorageAdapter(StorageAdapter):
         summarized_response: str,
         summarized_by_turn: int,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
-        tid, uid = await self._resolve_location(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        tid, uid = await self._resolve_location(session_id, scope=scope)
         db_file = self._resolve_db_path(tid, uid)
         async with aiosqlite.connect(db_file) as db:
             await self._ensure_schema(db, db_file)
@@ -408,7 +422,9 @@ class SQLiteStorageAdapter(StorageAdapter):
                 if row is None:
                     return
 
-            session = session_from_json(row[0])
+            session = self._codec.loads(row[0])
+            if scope is not None and not scope.matches_session(session):
+                return
             for turn in session.turns:
                 for tc in turn.tool_calls:
                     if tc.tc_id == tc_id:
@@ -421,6 +437,6 @@ class SQLiteStorageAdapter(StorageAdapter):
             session.updated_at = datetime.now()
             await db.execute(
                 "UPDATE nexus_sessions SET data = ?, updated_at = ? WHERE session_id = ?",
-                (session_to_json(session), session.updated_at.isoformat(), session_id),
+                (self._encode_session(session), session.updated_at.isoformat(), session_id),
             )
             await db.commit()

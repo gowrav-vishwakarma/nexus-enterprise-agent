@@ -120,6 +120,7 @@ class ServerCompactor:
                         tc_id=tc.tc_id,
                         summarized_response=summary,
                         summarized_by_turn=current_turn_index,
+                        scope=session.to_scope(),
                     )
             except Exception as e:
                 logger.error("ServerCompactor: Failed to save summary to storage: %s", e)

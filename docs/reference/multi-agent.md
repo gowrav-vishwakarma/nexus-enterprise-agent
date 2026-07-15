@@ -58,11 +58,11 @@ groups:
 
 ```python
 from nexus.session.manager import SessionManager
+from nexus.session.scope import SessionScope
 
 view = await manager.load_session_group(
     root_session_id="group-sess-1",
-    tenant_id="acme",
-    user_id="user-42",
+    scope=SessionScope(tenant_id="acme", user_id="user-42"),
     pattern="pipeline",
     member_order=["researcher", "analyst"],
 )

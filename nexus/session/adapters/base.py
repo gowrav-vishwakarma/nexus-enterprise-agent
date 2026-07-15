@@ -2,24 +2,14 @@
 
 All session storage backends must implement ``list_sessions_by_prefix`` with
 consistent semantics: return every session whose ``session_id`` starts with the
-given prefix (after optional tenant/user filtering). Sort by ``created_at`` ascending.
-
-Future adapters:
-- PostgreSQL: ``WHERE session_id LIKE $1 || '%'`` with index on
-  ``(tenant_id, user_id, session_id)``.
-- Redis: maintain a sorted set of session ids per tenant/user; prefix query via
-  ``ZRANGEBYLEX`` or ``SCAN`` with ``MATCH {prefix}*``.
-
-When ``adapter=postgresql`` or ``adapter=redis`` is configured, use the
-implementations in ``nexus.session.adapters.postgresql`` and
-``nexus.session.adapters.redis``. Install optional deps via
-``pip install nexus-enterprise-agent[postgres,redis]``.
+given prefix (after optional scope filtering). Sort by ``created_at`` ascending.
 """
 
 from abc import ABC, abstractmethod
 from typing import Optional
 
 from nexus.session.models import AgentSession, TurnRecord
+from nexus.session.scope import SessionScope
 
 
 class StorageAdapter(ABC):
@@ -35,18 +25,17 @@ class StorageAdapter(ABC):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> Optional[AgentSession]:
-        """Load a session by ID."""
+        """Load a session by ID, optionally filtered by scope."""
         ...
 
     @abstractmethod
     async def list_sessions(
         self,
+        *,
         agent_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AgentSession]:
@@ -58,8 +47,7 @@ class StorageAdapter(ABC):
         self,
         session_id_prefix: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         exclude_session_ids: Optional[set[str]] = None,
     ) -> list[AgentSession]:
         """Return sessions whose session_id starts with session_id_prefix."""
@@ -70,8 +58,7 @@ class StorageAdapter(ABC):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
         """Delete a session."""
         ...
@@ -82,8 +69,7 @@ class StorageAdapter(ABC):
         session_id: str,
         turn: TurnRecord,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
         """Atomically append a turn to a session."""
         ...
@@ -96,8 +82,7 @@ class StorageAdapter(ABC):
         summarized_response: str,
         summarized_by_turn: int,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
         """Update a tool call record's summary field."""
         ...

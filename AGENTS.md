@@ -18,6 +18,10 @@ Follow [docs/style-guide.md](docs/style-guide.md). Write for beginners. Define t
 | `examples/nexus_saas_api.py` | `docs/guides/saas-example.md` |
 | `nexus/server/*` or `nexus/orchestration/schema.py` `servers:` | `docs/reference/server.md`, `docs/guides/model-servers.md`, `examples/servers.yaml` |
 
+## how to run python code
+
+the project is made with uv, so any python code must be run with uv to pick all dependencies.
+
 ## README policy
 
 Keep [README.md](README.md) short (~1000 lines). It is a quick start only. Move depth to `docs/`.

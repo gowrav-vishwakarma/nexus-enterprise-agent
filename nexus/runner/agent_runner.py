@@ -38,13 +38,14 @@ from nexus.memory.cross_session_store import (
 from nexus.rcs.compactor import ServerCompactor
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
 from nexus.session.manager import SessionManager
-from nexus.session.models import AgentSession, ToolCallRecord, TurnRecord
+from nexus.session.models import AgentSession, PendingInteraction, ToolCallRecord, TurnRecord
 from nexus.skills.catalog import build_explicit_skills_block, build_skills_catalog
 from nexus.skills.plugin import create_skills_plugin
 from nexus.skills.registry import SkillsRegistry
 from nexus.tools.context import RunContext
 from nexus.tools.interceptor import ContextUpdateInterceptor
 from nexus.tools.registry import ToolRegistry
+from nexus.tools.toolsets import effective_tools, filter_schemas_by_tools
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +166,10 @@ class AgentRunner:
         self.skills_registry: Optional[SkillsRegistry] = None
         self._skills_catalog: Optional[str] = None
         self._explicit_skills_content: Optional[str] = None
+        self._skill_store = None
+        self._skill_scope_resolver = None
+        self._enabled_toolsets: Optional[list[str]] = None
+        self._allowed_tools: Optional[set[str]] = None
         if self.config.skills.enabled:
             self.skills_registry = SkillsRegistry(self.config.skills)
 
@@ -172,25 +177,69 @@ class AgentRunner:
         """Resolve effective streaming mode from per-call override or config default."""
         return self.config.stream_output if stream is None else stream
 
-    def _session_lookup_kwargs(
+    def _session_scope(
         self, session: Optional[AgentSession] = None
-    ) -> dict[str, Optional[str]]:
-        """Tenant/user hints for tenant-scoped storage adapters."""
-        return {
-            "tenant_id": self.run_context.tenant_id
+    ):
+        """Build a SessionScope from run context (and session fallback)."""
+        from nexus.session.scope import SessionScope
+
+        return SessionScope(
+            tenant_id=self.run_context.tenant_id
             or (session.tenant_id if session else None),
-            "user_id": self.run_context.user_id or (session.user_id if session else None),
-        }
+            company_id=self.run_context.company_id
+            or (session.company_id if session else None),
+            user_id=self.run_context.user_id
+            or (session.user_id if session else None),
+        )
+
+    async def _persist_turn(
+        self, session: AgentSession, turn: TurnRecord
+    ) -> AgentSession:
+        """Append a turn and reload. Skips storage when run is non-persistable."""
+        if not self.run_context.should_persist:
+            session.turns.append(turn)
+            session.update_timestamp()
+            return session
+        await self.session_manager.append_turn(
+            session.session_id,
+            turn,
+            scope=self._session_scope(session),
+        )
+        reloaded = await self.session_manager.load_session(
+            session.session_id, scope=self._session_scope(session)
+        )
+        return reloaded if reloaded is not None else session
+
+    async def _maybe_save_session(self, session: AgentSession) -> None:
+        """Save session unless the run is non-persistable."""
+        if not self.run_context.should_persist:
+            return
+        await self.session_manager.save_session(session)
 
     def _effective_tool_plugins(self) -> list[str]:
-        """Return tool plugin allow-list, auto-including skills when enabled."""
+        """Return tool plugin allow-list, auto-including skills/memory when enabled."""
         plugins = list(self.config.tool_plugins)
         if self.config.skills.enabled and "skills" not in plugins:
             plugins.append("skills")
+        if (
+            self.config.memory.enabled
+            and self.config.memory.expose_tools
+            and "memory" not in plugins
+        ):
+            plugins.append("memory")
+        if (
+            self.config.skills.enabled
+            and self.config.skills.expose_manage_tools
+            and "skill_manage" not in plugins
+        ):
+            plugins.append("skill_manage")
         return plugins
 
     def _setup_skills(self) -> None:
-        """Register skills plugin and prepare prompt injection content."""
+        """Register skills/memory plugins and prepare prompt injection content."""
+        self._setup_memory_plugin()
+        self._setup_learned_skills()
+
         if not self.skills_registry:
             return
 
@@ -213,17 +262,100 @@ class AgentRunner:
             explicit = self.skills_registry.resolve_explicit_skills(self.run_context)
             self._explicit_skills_content = build_explicit_skills_block(explicit)
 
+    def _setup_memory_plugin(self) -> None:
+        if not (
+            self.config.memory.enabled
+            and self.config.memory.expose_tools
+            and self.cross_session_memory_store
+        ):
+            return
+        from nexus.memory.plugin import create_memory_plugin
+
+        plugin = create_memory_plugin(
+            self.cross_session_memory_store,
+            self.config.memory,
+            agent_name=self.config.name,
+        )
+        self.tool_registry.register_plugin(plugin)
+
+    def _setup_learned_skills(self) -> None:
+        cfg = self.config.skills
+        if not cfg.enabled or cfg.store_backend == "none":
+            self._skill_store = None
+            return
+        from nexus.skills.scope import build_skill_scope_resolver
+        from nexus.skills.store import FileSkillStore, InMemorySkillStore
+
+        self._skill_scope_resolver = build_skill_scope_resolver(cfg.scope)
+        if cfg.store_backend == "memory":
+            self._skill_store = InMemorySkillStore()
+        elif cfg.store_backend == "file":
+            root = cfg.store_config.get("root", "./learned_skills")
+            self._skill_store = FileSkillStore(root, scope_keys=list(cfg.scope.keys))
+        elif cfg.store_backend == "custom" and cfg.store_class:
+            from importlib import import_module
+
+            module_path, _, name = cfg.store_class.rpartition(".")
+            cls = getattr(import_module(module_path), name)
+            self._skill_store = cls(**cfg.store_config)
+        else:
+            self._skill_store = None
+            return
+        if cfg.expose_manage_tools:
+            from nexus.skills.manage_plugin import create_skill_manage_plugin
+
+            self.tool_registry.register_plugin(
+                create_skill_manage_plugin(self._skill_store, self._skill_scope_resolver)
+            )
+
     def _filter_tool_schemas(self, tool_schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Hide run_skill_script unless scripts are enabled and present."""
+        """Apply toolset allow-list and hide run_skill_script unless enabled."""
+        schemas = filter_schemas_by_tools(tool_schemas, self._allowed_tools)
         if not self.skills_registry:
-            return tool_schemas
+            return schemas
         expose_scripts = (
             self.config.skills.allow_scripts
             and self.skills_registry.has_scripts(self.run_context)
         )
         if expose_scripts:
-            return tool_schemas
-        return [s for s in tool_schemas if s.get("name") != "skills.run_skill_script"]
+            return schemas
+        return [s for s in schemas if s.get("name") != "skills.run_skill_script"]
+
+    def _resolve_toolsets(self, enabled_toolsets: Optional[list[str]] = None) -> None:
+        """Compute allowed tool names from base + optional toolsets."""
+        self._enabled_toolsets = enabled_toolsets
+        if not self.config.toolsets and not self.config.base_toolsets:
+            self._allowed_tools = None
+            return
+        self._allowed_tools = effective_tools(
+            base_toolsets=self.config.base_toolsets,
+            enabled_toolsets=enabled_toolsets,
+            optional_toolsets=self.config.optional_toolsets,
+            toolsets=self.config.toolsets,
+            channel_override=self.run_context.get("toolset_override"),
+        )
+
+    async def _inject_learned_skills(self, user_message: str) -> None:
+        """Append relevant learned skills into explicit skills content."""
+        if not (
+            self._skill_store
+            and self.config.skills.inject_learned
+            and self._skill_scope_resolver
+        ):
+            return
+        from nexus.skills.store import build_learned_skills_block
+
+        scope = self._skill_scope_resolver.resolve(self.run_context)
+        skills = await self._skill_store.search(
+            scope, user_message, k=self.config.skills.retrieval_k
+        )
+        block = build_learned_skills_block(skills)
+        if not block:
+            return
+        if self._explicit_skills_content:
+            self._explicit_skills_content = self._explicit_skills_content + "\n\n" + block
+        else:
+            self._explicit_skills_content = block
 
     async def _load_user_memory(self) -> dict[str, str]:
         """Load cross-session user facts for injection into the system prompt."""
@@ -253,15 +385,15 @@ class AgentRunner:
         session = None
         if sid:
             session = await self.session_manager.load_session(
-                sid, **self._session_lookup_kwargs()
+                sid, scope=self._session_scope()
             )
 
         if not session:
             session = await self.session_manager.create_session(
                 agent_id=self.config.name,
                 session_id=sid,
-                tenant_id=self.run_context.tenant_id,
-                user_id=self.run_context.user_id,
+                scope=self._session_scope(),
+                user_name=self.run_context.user_name,
             )
             self.run_context.session_id = session.session_id
 
@@ -274,7 +406,7 @@ class AgentRunner:
         if self.memory_curator.should_trigger(turn_index, at_end=False):
             await self.memory_curator.curate(session, turn_index)
             reloaded = await self.session_manager.load_session(
-                session.session_id, **self._session_lookup_kwargs(session)
+                session.session_id, scope=self._session_scope(session)
             )
             if reloaded is not None:
                 session = reloaded
@@ -473,10 +605,12 @@ class AgentRunner:
         session = await self._get_or_create_session(session_id)
         self._user_memory = await self._load_user_memory()
         self._setup_skills()
+        self._resolve_toolsets(self._enabled_toolsets)
+        await self._inject_learned_skills(user_message)
 
         if initial_context:
             session.metadata.update(initial_context)
-            await self.session_manager.save_session(session)
+            await self._maybe_save_session(session)
 
         await self.event_emitter.emit(
             AgentStartedEvent(
@@ -570,14 +704,7 @@ class AgentRunner:
                         duration_ms=int((time.time() - start_time) * 1000),
                         status="completed",
                     )
-                    await self.session_manager.append_turn(
-                        session.session_id,
-                        final_turn,
-                        **self._session_lookup_kwargs(session),
-                    )
-                    session = await self.session_manager.load_session(
-                        session.session_id, **self._session_lookup_kwargs(session)
-                    )
+                    session = await self._persist_turn(session, final_turn)
                     session = await self._maybe_curate_after_turn(session, session_turn_index)
                     session_turn_index += 1
                     run_turn_index += 1
@@ -627,6 +754,50 @@ class AgentRunner:
                             tool_args=clean_args,
                         )
                     )
+
+                    execution = self.tool_registry.get_execution_mode(tc_req.tool_name)
+                    call_id = getattr(tc_req, "id", "") or ""
+                    if execution == "client" or tc_req.tool_name.endswith("request_user_input"):
+                        kind = (
+                            "elicitation"
+                            if tc_req.tool_name.endswith("request_user_input")
+                            else "client_tool"
+                        )
+                        pending = PendingInteraction(
+                            tc_id=tc_id,
+                            call_id=call_id,
+                            tool_name=tc_req.tool_name,
+                            args=clean_args,
+                            kind=kind,
+                        )
+                        session.pending_interactions.append(pending)
+                        tc_record = ToolCallRecord(
+                            tc_id=tc_id,
+                            tc_index=tc_index,
+                            tool_name=tc_req.tool_name,
+                            call_id=call_id,
+                            tool_input=clean_args,
+                            raw_response="",
+                            tokens_raw=0,
+                        )
+                        turn_tool_records.append(tc_record)
+                        if stream:
+                            yield AgentStreamEvent(
+                                event_type=(
+                                    "elicitation" if kind == "elicitation" else "client_tool_call"
+                                ),
+                                data={
+                                    "agent_id": self.config.name,
+                                    "turn_index": session_turn_index,
+                                    "tool_name": tc_req.tool_name,
+                                    "tool_args": clean_args,
+                                    "tc_id": tc_id,
+                                    "call_id": call_id,
+                                    "kind": kind,
+                                },
+                            )
+                        status = "paused"
+                        break
 
                     tool_start = time.time()
                     try:
@@ -680,6 +851,7 @@ class AgentRunner:
                         tc_id=tc_id,
                         tc_index=tc_index,
                         tool_name=tc_req.tool_name,
+                        call_id=call_id,
                         tool_input=clean_args,
                         raw_response=result_str,
                         tokens_raw=TokenCounter.count_string(result_str, self.config.llm.model),
@@ -698,6 +870,7 @@ class AgentRunner:
                     }
                 ]
 
+                turn_status = "paused" if status == "paused" else "completed"
                 turn_record = TurnRecord(
                     turn_index=session_turn_index,
                     user_message=current_user_message if run_turn_index == 0 else None,
@@ -708,17 +881,24 @@ class AgentRunner:
                     total_tokens_out=llm_response.usage.completion_tokens,
                     tokens_saved_this_turn=tokens_saved_this_turn,
                     duration_ms=int((time.time() - start_time) * 1000),
-                    status="completed",
+                    status=turn_status,
                 )
 
-                await self.session_manager.append_turn(
-                    session.session_id,
-                    turn_record,
-                    **self._session_lookup_kwargs(session),
-                )
-                session = await self.session_manager.load_session(
-                    session.session_id, **self._session_lookup_kwargs(session)
-                )
+                session = await self._persist_turn(session, turn_record)
+                if status == "paused":
+                    await self._maybe_save_session(session)
+                    if stream:
+                        yield AgentStreamEvent(
+                            event_type="paused",
+                            data={
+                                "session_id": session.session_id,
+                                "pending_interactions": [
+                                    p.model_dump(mode="json")
+                                    for p in session.pending_interactions
+                                ],
+                            },
+                        )
+                    break
                 session = await self._maybe_curate_after_turn(session, session_turn_index)
 
                 await self.event_emitter.emit(
@@ -761,7 +941,7 @@ class AgentRunner:
         if status != "error" and self.memory_curator.active:
             try:
                 refreshed = await self.session_manager.load_session(
-                    session.session_id, **self._session_lookup_kwargs(session)
+                    session.session_id, scope=self._session_scope(session)
                 )
                 if refreshed is not None:
                     session = refreshed
@@ -788,8 +968,11 @@ class AgentRunner:
             total_tokens_out=total_tokens_out,
             total_tokens_saved_by_rcs=session.total_tokens_saved_by_rcs,
             duration_ms=duration_ms,
-            status=status,
+            status=status,  # type: ignore[arg-type]
             error=error_msg,
+            pending_interactions=[
+                p.model_dump(mode="json") for p in session.pending_interactions
+            ],
         )
         state.result = run_result
 
@@ -817,12 +1000,14 @@ class AgentRunner:
         session_id: Optional[str] = None,
         initial_context: Optional[dict[str, Any]] = None,
         stream: Optional[bool] = None,
+        enabled_toolsets: Optional[list[str]] = None,
     ) -> AgentRunResult:
         """Run the agent loop and return the complete result (non-streaming mode)."""
         if self._resolve_stream(stream):
             raise ValueError(
                 "Streaming mode enabled; use run_stream() or pass stream=False."
             )
+        self._enabled_toolsets = enabled_toolsets
 
         state = _LoopState()
         async for _ in self._run_loop(
@@ -842,12 +1027,14 @@ class AgentRunner:
         user_message: str,
         session_id: Optional[str] = None,
         stream: Optional[bool] = None,
+        enabled_toolsets: Optional[list[str]] = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         """Run the agent loop in streaming mode, yielding incremental events."""
         if not self._resolve_stream(stream):
             raise ValueError(
                 "Non-streaming mode; use run() or pass stream=True."
             )
+        self._enabled_toolsets = enabled_toolsets
 
         state = _LoopState()
         async for event in self._run_loop(
@@ -860,3 +1047,44 @@ class AgentRunner:
             yield event
 
         assert state.result is not None
+
+    async def resume(
+        self,
+        session_id: str,
+        results: list[dict[str, Any]],
+        *,
+        stream: Optional[bool] = None,
+    ) -> AgentRunResult:
+        """Resume a paused run after client tools / elicitations return.
+
+        ``results`` items: ``{"tc_id"|"call_id": ..., "content": "..."}``.
+        """
+        session = await self.session_manager.load_session(
+            session_id, scope=self._session_scope()
+        )
+        if session is None:
+            raise ValueError(f"Session not found: {session_id}")
+        if not session.pending_interactions:
+            raise ValueError("Session has no pending interactions to resume")
+
+        # Map results onto pending interactions and fill empty tool responses
+        by_tc = {r.get("tc_id"): r for r in results if r.get("tc_id")}
+        by_call = {r.get("call_id"): r for r in results if r.get("call_id")}
+        for pending in list(session.pending_interactions):
+            match = by_tc.get(pending.tc_id) or by_call.get(pending.call_id)
+            content = (match or {}).get("content", "")
+            for turn in reversed(session.turns):
+                for tc in turn.tool_calls:
+                    if tc.tc_id == pending.tc_id and not tc.raw_response:
+                        tc.raw_response = str(content)
+                        break
+        session.pending_interactions = []
+        await self._maybe_save_session(session)
+
+        # Continue the loop with an empty user message (tool results already in session)
+        return await self.run(
+            user_message="",
+            session_id=session_id,
+            stream=False if stream is None else stream,
+            enabled_toolsets=self._enabled_toolsets,
+        )

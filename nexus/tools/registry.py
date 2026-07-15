@@ -52,6 +52,7 @@ class ToolRegistry:
                     "tags": getattr(val, "_tool_tags", []),
                     "requires_approval": getattr(val, "_tool_requires_approval", False),
                     "timeout_seconds": getattr(val, "_tool_timeout_seconds", 30),
+                    "execution": getattr(val, "_tool_execution", "server"),
                     "plugin": plugin_name,
                 }
                 logger.info("Registered tool: %s", full_name)
@@ -69,6 +70,7 @@ class ToolRegistry:
             "tags": getattr(func, "_tool_tags", []),
             "requires_approval": getattr(func, "_tool_requires_approval", False),
             "timeout_seconds": getattr(func, "_tool_timeout_seconds", 30),
+            "execution": getattr(func, "_tool_execution", "server"),
             "plugin": plugin_name,
         }
         logger.info("Registered standalone tool: %s", full_name)
@@ -138,6 +140,11 @@ class ToolRegistry:
             schemas.append(schema)
 
         return schemas
+
+    def get_execution_mode(self, full_name: str) -> str:
+        """Return ``server`` or ``client`` for a registered tool."""
+        meta = self._tool_metadata.get(full_name) or {}
+        return meta.get("execution", "server")
 
     async def execute(
         self,

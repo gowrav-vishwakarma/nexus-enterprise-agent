@@ -8,6 +8,8 @@
 - **Tool registry** — `ToolRegistry`; catalog of tools with JSON schemas sent to the model.
 - **Plugin** — A class grouping related tools under one namespace.
 - **Allow-list** — `tool_plugins` on `AgentConfig`; which plugin namespaces this agent may use.
+- **Toolset** — A named pack of tools (and nested packs) the client can enable per request.
+- **Client tool** — A tool with `execution="client"`; the run pauses until your UI returns a result via `resume()`.
 
 ## Why you need a registry
 
@@ -37,10 +39,31 @@ registry.register_tool(echo)  # → global.echo
 |----------------|-----------|---------|--------------|
 | `name` | No | function name | Tool name the LLM sees |
 | `description` | No | docstring | Human-readable description |
+| `tags` | No | `[]` | Optional tags for metadata and filtering |
 | `timeout_seconds` | No | `30` | Max seconds for tool execution |
 | `requires_approval` | No | `False` | **Planned** human-in-the-loop gate — not enforced in runner yet; use external HITL ([runtime-control.md](../guides/runtime-control.md)) |
+| `execution` | No | `"server"` | `"server"` runs in-process; `"client"` pauses the run and waits for `AgentRunner.resume()` |
 
 `register_tool(fn, plugin_name="utilities")` → `utilities.echo`.
+
+### Client tools (`execution="client"`)
+
+Use client tools when the browser or mobile app must run the tool (pick a file, show a form, call a device API):
+
+```python
+@tool(name="pick_file", execution="client", description="Ask the user to pick a file")
+def pick_file(prompt: str) -> str:
+    """Schema-only stub; the real work happens in the client."""
+    return ""
+```
+
+When the model calls a client tool:
+
+1. The runner appends a `PendingInteraction` and sets status `paused`
+2. Streaming emits `client_tool_call` (or `elicitation` for `*.request_user_input`) then `paused`
+3. Your app runs the tool and calls `resume(session_id, results=[...])`
+
+Details: [runtime-control.md](../guides/runtime-control.md#pause-and-resume-client-tools).
 
 ## @tool_plugin classes
 
@@ -88,9 +111,60 @@ The parameter can be named `ctx`, `context`, or anything else — only the type 
 
 Registry = everything your app *could* expose. `tool_plugins` = what *this agent* may see.
 
+## Toolsets
+
+A **toolset** is a named pack of fully-qualified tool names (and optional nested packs). Use toolsets when a product UI lets users toggle capability packs per chat.
+
+### Toolset fields
+
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| `name` | Yes | — | Pack id (also the dict key on `AgentConfig.toolsets`) |
+| `description` | No | `""` | Shown in UI catalogs |
+| `visibility` | No | `"hidden"` | `"hidden"` or `"frontend"` (only frontend packs appear in the catalog) |
+| `default_enabled` | No | `False` | Hint for UIs; does not auto-enable by itself |
+| `includes` | No | `[]` | Other toolset names to pull in recursively |
+| `tools` | No | `[]` | Fully-qualified tool names, e.g. `memory.write` |
+
+### AgentConfig toolset fields
+
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| `toolsets` | No | `{}` | Map of name → `Toolset` definitions |
+| `base_toolsets` | No | `[]` | Always-on toolset names for this agent |
+| `optional_toolsets` | No | `[]` | Packs the client may enable per request |
+
+### Enabling packs on a run
+
+Pass `enabled_toolsets` to `run()` / `run_stream()`. Only names listed in `optional_toolsets` (or defined in `toolsets`) are accepted:
+
+```python
+result = await runner.run(
+    "Summarize this PDF",
+    session_id="chat-1",
+    enabled_toolsets=["attachments", "web"],
+)
+```
+
+Effective tools = expand(`base_toolsets` + `enabled_toolsets`).
+
+### Frontend catalog
+
+```python
+from nexus.tools.toolsets import list_frontend_toolsets
+
+catalog = list_frontend_toolsets(
+    agent_config.toolsets,
+    tool_descriptions={"memory.write": "Save a fact"},
+)
+# → ToolsetCatalog entries with visibility=frontend only
+```
+
+Expose this from your `/tools` or settings API so the UI can show toggleable packs.
+
 ## One registry, many agents
 
-Build one `ToolRegistry` at app startup. Pass the same instance to every runner. Per-agent differences come from `tool_plugins` on each `AgentConfig`.
+Build one `ToolRegistry` at app startup. Pass the same instance to every runner. Per-agent differences come from `tool_plugins` and toolsets on each `AgentConfig`.
 
 ## YAML orchestration plugins
 
@@ -106,4 +180,6 @@ You can also pass a pre-built `ToolRegistry` to `OrchestrationRuntime.from_manif
 ## Next steps
 
 - [Getting started (Python)](../getting-started-python.md)
+- [Runtime control](../guides/runtime-control.md) — pause/resume for client tools
 - [Skills](skills.md) — different from custom tools; uses agentskills.io folders
+- [Agent runner](agent-runner.md) — `enabled_toolsets` and `resume()`

@@ -24,6 +24,13 @@ class SessionStorageConfig(BaseModel):
         default=None,
         description="Import path for custom StorageAdapter when adapter='custom'",
     )
+    codec_class: Optional[str] = Field(
+        default=None,
+        description=(
+            "Import path for a SessionCodec. Default uses DefaultSessionCodec "
+            "(canonical AgentSession JSON)."
+        ),
+    )
 
 
 class MemoryStorageConfig(BaseModel):

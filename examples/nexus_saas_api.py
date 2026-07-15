@@ -43,6 +43,7 @@ from nexus.skills.config import SkillsConfig
 from nexus.runner.agent_runner import AgentRunner
 from nexus.multiagent.orchestrator import AgentOrchestrator
 from nexus.session.manager import SessionManager
+from nexus.session.scope import SessionScope
 from nexus.tools.context import RunContext
 from nexus.tools.registry import ToolRegistry
 from nexus.tools.decorators import tool, tool_plugin
@@ -688,8 +689,7 @@ async def get_session(
     manager = get_shared_session_manager(tenant_ctx.tenant_id, tenant_ctx.storage_config)
     session = await manager.load_session(
         session_id,
-        tenant_id=tenant_ctx.tenant_id,
-        user_id=x_user_id,
+        scope=SessionScope(tenant_id=tenant_ctx.tenant_id, user_id=x_user_id),
     )
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -713,8 +713,7 @@ async def get_session_group(
     order = [m.strip() for m in member_order.split(",")] if member_order else None
     view = await manager.load_session_group(
         root_session_id,
-        tenant_id=tenant_ctx.tenant_id,
-        user_id=x_user_id,
+        scope=SessionScope(tenant_id=tenant_ctx.tenant_id, user_id=x_user_id),
         pattern=pattern,  # type: ignore[arg-type]
         member_order=order,
         include_internal=include_internal,

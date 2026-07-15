@@ -22,7 +22,10 @@
 | `context_summary` | No | disabled (`summarize_on=None`) | Rolling `summary_text` when context fill exceeds ratio |
 | `storage` | No | `None` | Fallback storage when runner has none |
 | `tool_plugins` | No | `[]` | Allow-list of tool plugin namespaces (`[]` = all) |
-| `skills` | No | disabled | agentskills.io skill folders |
+| `toolsets` | No | `{}` | Named toolset packs — see [tools.md](tools.md) |
+| `base_toolsets` | No | `[]` | Always-on toolset names |
+| `optional_toolsets` | No | `[]` | Packs the client may enable per request |
+| `skills` | No | disabled | Static + learned skills — see [skills.md](skills.md) |
 | `result_type` | No | `None` | Pydantic model for structured output |
 | `trace_enabled` | No | `False` | Emit observability events |
 | `trace_sink` | No | `"stdout"` | `"stdout"` or `"otel"` |

@@ -9,6 +9,7 @@ from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, TurnRecord, ToolCallRecord
 from nexus.session.adapters.memory import MemoryStorageAdapter
 from nexus.session.adapters.file import FileStorageAdapter
+from nexus.session.scope import SessionScope
 from nexus.storage.paths import session_file
 
 
@@ -69,6 +70,7 @@ async def test_file_storage_adapter_tenant_scoped():
     with tempfile.TemporaryDirectory() as tmpdir:
         adapter = FileStorageAdapter(data_root=tmpdir, pretty_print=True, tenant_scoped=True)
         manager = SessionManager(storage_adapter=adapter)
+        scope = SessionScope(tenant_id="t1", user_id="u1")
 
         sess = await manager.create_session(
             agent_id="agent-1",
@@ -81,9 +83,7 @@ async def test_file_storage_adapter_tenant_scoped():
         expected = session_file("t1", "u1", "file-sess-1", data_root=tmpdir)
         assert expected.exists()
 
-        loaded = await manager.load_session(
-            "file-sess-1", tenant_id="t1", user_id="u1"
-        )
+        loaded = await manager.load_session("file-sess-1", scope=scope)
         assert loaded is not None
         assert loaded.agent_id == "agent-1"
 
@@ -97,29 +97,21 @@ async def test_file_storage_adapter_tenant_scoped():
             user_message="run this code",
             tool_calls=[tc],
         )
-        await manager.append_turn(
-            "file-sess-1", turn, tenant_id="t1", user_id="u1"
-        )
+        await manager.append_turn("file-sess-1", turn, scope=scope)
 
-        loaded = await manager.load_session(
-            "file-sess-1", tenant_id="t1", user_id="u1"
-        )
+        loaded = await manager.load_session("file-sess-1", scope=scope)
         assert len(loaded.turns) == 1
         assert loaded.turns[0].tool_calls[0].tool_name == "run_code"
 
         sessions = await manager.list_sessions(
-            agent_id="agent-1", tenant_id="t1", user_id="u1"
+            agent_id="agent-1", scope=scope
         )
         assert len(sessions) == 1
         assert sessions[0].session_id == "file-sess-1"
 
-        await manager.delete_session(
-            "file-sess-1", tenant_id="t1", user_id="u1"
-        )
+        await manager.delete_session("file-sess-1", scope=scope)
         assert not expected.exists()
-        assert await manager.load_session(
-            "file-sess-1", tenant_id="t1", user_id="u1"
-        ) is None
+        assert await manager.load_session("file-sess-1", scope=scope) is None
 
 
 @pytest.mark.asyncio

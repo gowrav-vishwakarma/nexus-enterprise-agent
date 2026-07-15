@@ -59,6 +59,7 @@ flowchart TD
 | Runner and runtime | [reference/agent-runner.md](reference/agent-runner.md) |
 | Who is calling | [reference/run-context.md](reference/run-context.md) |
 | Save chat history | [reference/storage.md](reference/storage.md) |
+| Custom storage adapter | [guides/custom-storage-adapter.md](guides/custom-storage-adapter.md) |
 | Tools | [reference/tools.md](reference/tools.md) |
 | Memory | [reference/memory.md](reference/memory.md) |
 | Context summary | [reference/context-summary.md](reference/context-summary.md) |
@@ -72,6 +73,7 @@ flowchart TD
 | Streaming | [reference/streaming.md](reference/streaming.md) |
 | Events and observability | [reference/events.md](reference/events.md) |
 | Skills | [reference/skills.md](reference/skills.md) |
+| Skills storage (learned) | [guides/skills-storage.md](guides/skills-storage.md) |
 | Environment variables | [reference/environment.md](reference/environment.md) |
 | SaaS example | [guides/saas-example.md](guides/saas-example.md) |
 | Prompt templates | [guides/prompts-jinja.md](guides/prompts-jinja.md) |
