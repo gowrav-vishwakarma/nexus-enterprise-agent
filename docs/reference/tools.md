@@ -33,6 +33,7 @@ def echo(text: str) -> str:
 
 registry = ToolRegistry()
 registry.register_tool(echo)  # → global.echo
+registry.register_tool(echo, plugin_name="")  # → echo (bare / flat name)
 ```
 
 | @tool parameter | Required? | Default | What it does |
@@ -45,6 +46,8 @@ registry.register_tool(echo)  # → global.echo
 | `execution` | No | `"server"` | `"server"` runs in-process; `"client"` pauses the run and waits for `AgentRunner.resume()` |
 
 `register_tool(fn, plugin_name="utilities")` → `utilities.echo`.
+
+Pass `plugin_name=""` or `None` to register a **flat** tool name (no `plugin.` prefix). Useful when a product already exposes bare names such as `execute_sql` or `memory_write`. `execute()` already resolves no-dot names via its fallback when the caller passes the bare name as `plugin` with an empty `tool`.
 
 ### Client tools (`execution="client"`)
 
@@ -100,7 +103,13 @@ class LookupPlugin:
 | Typed tool args (e.g. `account_id: str`) | LLM in the tool call | Yes |
 | `RunContext` (any param name) | Your app via `run_context=` | No |
 
-The parameter can be named `ctx`, `context`, or anything else — only the type `RunContext` matters. Read extra per-request values from `ctx.metadata` with `ctx.get("key")`. Full field list: [run-context.md](run-context.md).
+The parameter can be named `ctx`, `context`, or anything else. Nexus detects:
+
+- Plain `RunContext`
+- `Optional[RunContext]` / `RunContext | None` (common when tools also accept `**kwargs`)
+- Parameters literally named `ctx` or `run_context` (even without a resolved annotation)
+
+`*args` / `**kwargs` are never included in the LLM schema. Read extra per-request values from `ctx.metadata` with `ctx.get("key")`. Full field list: [run-context.md](run-context.md).
 
 ## tool_plugins allow-list
 
@@ -147,6 +156,9 @@ result = await runner.run(
 ```
 
 Effective tools = expand(`base_toolsets` + `enabled_toolsets`).
+
+When an agent defines `toolsets` or `base_toolsets`, the runner uses those packs as the **allow-list** for which tools reach the model. It does **not** also apply the `tool_plugins` namespace filter on that pass. That matters for **flat** tools registered with `plugin_name=""`: they are not in any plugin namespace, so a combined `tool_plugins` + toolsets filter could drop them incorrectly. Configure toolsets (and `enabled_toolsets` on each run) instead of relying on `tool_plugins` alone when you use flat names.
+
 
 ### Frontend catalog
 

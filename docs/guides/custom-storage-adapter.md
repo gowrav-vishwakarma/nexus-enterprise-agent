@@ -59,7 +59,7 @@ Subclass this when your SQL table is not the default Nexus sessions table. You i
 | Hook | Required? | What it does |
 |------|-----------|--------------|
 | `table()` | Yes | Qualified table name, e.g. `ankpal."AiTalkChats"` |
-| `json_column()` | No (default `"data"`) | Column that holds the session JSON blob |
+| `json_column()` | No (default `"data"`) | Column that holds the session JSON blob. You may quote camelCase names in SQL (e.g. `"\"chatJson\""`); `BaseSQLStorageAdapter` strips quotes when reading the row dict from drivers like psycopg `dict_row`. |
 | `id_column()` | No (default `"session_id"`) | Primary session id column |
 | `row_columns(session)` | Yes | Side columns to upsert (no JSON column) |
 | `scope_where(scope)` | Yes | `(sql_fragment, params)` for tenant/company/user filters |

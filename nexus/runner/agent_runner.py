@@ -668,9 +668,16 @@ class AgentRunner:
                         data={"agent_id": self.config.name, "turn_index": session_turn_index},
                     )
 
+                # When toolsets are configured they are the allow-list; do not
+                # also filter by plugin namespaces (that drops flat tools with plugin="").
+                plugin_names = (
+                    None
+                    if (self.config.toolsets or self.config.base_toolsets)
+                    else self._effective_tool_plugins()
+                )
                 tool_schemas = self._filter_tool_schemas(
                     self.tool_registry.get_tool_schemas_for_llm(
-                        plugin_names=self._effective_tool_plugins(),
+                        plugin_names=plugin_names,
                         rcs_config=self.config.rcs,
                     )
                 )

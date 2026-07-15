@@ -5,6 +5,7 @@ When you change Nexus code, update the matching documentation in the same change
 ## Documentation style
 
 Follow [docs/style-guide.md](docs/style-guide.md). Write for beginners. Define terms on first use.
+When checking behaviour, read the docs first, then the code; if they disagree, update the docs in the same change.
 
 ## What to update when code changes
 

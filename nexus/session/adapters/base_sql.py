@@ -100,6 +100,25 @@ class BaseSQLStorageAdapter(StorageAdapter):
         """Default: JSON string. Override for driver-native JSON types."""
         return json.dumps(self._encode(session), default=str)
 
+    def _row_key(self, column_sql: str) -> str:
+        """Map a SQL identifier to the dict key returned by the driver.
+
+        Quoted identifiers like ``\"chatJson\"`` become ``chatJson`` in
+        psycopg ``dict_row`` results.
+        """
+        return column_sql.strip().strip('"')
+
+    def _row_json(self, row: dict[str, Any]) -> Any:
+        """Read the JSON blob from a result row."""
+        key = self._row_key(self.json_column())
+        if key in row:
+            return row[key]
+        # Fallbacks for drivers that keep quotes or use aliases
+        sql_name = self.json_column()
+        if sql_name in row:
+            return row[sql_name]
+        raise KeyError(key)
+
     # ── StorageAdapter ──────────────────────────────────────────────────────
 
     async def save_session(self, session: AgentSession) -> None:
@@ -136,7 +155,7 @@ class BaseSQLStorageAdapter(StorageAdapter):
         row = await self._fetch_one(sql, params)
         if not row:
             return None
-        session = self._decode(row[self.json_column()])
+        session = self._decode(self._row_json(row))
         if scope and not scope.matches_session(session):
             return None
         return session
@@ -162,7 +181,7 @@ class BaseSQLStorageAdapter(StorageAdapter):
         sql += f" LIMIT %s OFFSET %s"
         params = [*params, limit, offset]
         rows = await self._fetch_all(sql, params)
-        sessions = [self._decode(r[self.json_column()]) for r in rows]
+        sessions = [self._decode(self._row_json(r)) for r in rows]
         if agent_id:
             sessions = [s for s in sessions if s.agent_id == agent_id]
         if scope:
@@ -189,7 +208,7 @@ class BaseSQLStorageAdapter(StorageAdapter):
         excluded = exclude_session_ids or set()
         sessions = []
         for r in rows:
-            session = self._decode(r[self.json_column()])
+            session = self._decode(self._row_json(r))
             if session.session_id in excluded:
                 continue
             if scope and not scope.matches_session(session):
@@ -269,7 +288,7 @@ class BaseSQLStorageAdapter(StorageAdapter):
         row = await tx.fetch_one(sql, params)
         if not row:
             return None
-        return self._decode(row[self.json_column()])
+        return self._decode(self._row_json(row))
 
     async def _write_locked(self, tx: Any, session: AgentSession) -> None:
         cols = self.row_columns(session)
