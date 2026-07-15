@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexus-enterprise-agent"
-version = "0.1.1"
+version = "0.2.0"
 description = "Enterprise-ready, SaaS-native Python multi-agent framework"
 readme = "README.md"
 license = {text = "MIT"}
