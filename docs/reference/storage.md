@@ -50,6 +50,22 @@ scope = run_context.to_scope()
 session = await adapter.load_session(session_id, scope=scope)
 ```
 
+## StorageAdapter interface
+
+Every chat-history backend implements `StorageAdapter` (`nexus.session.adapters.base`). Built-in adapters and `BaseSQLStorageAdapter` already do this. If you write a backend from scratch, implement all of these (`async`):
+
+| Method | Required? | What it does |
+|--------|-----------|--------------|
+| `save_session(session)` | Yes | Upsert one chat thread |
+| `load_session(session_id, *, scope=None)` | Yes | Load one thread (or `None`) |
+| `list_sessions(*, agent_id=None, scope=None, limit=50, offset=0)` | Yes | List threads |
+| `list_sessions_by_prefix(prefix, *, scope=None, exclude_session_ids=None)` | Yes | Multi-agent history by id prefix |
+| `delete_session(session_id, *, scope=None)` | Yes | Delete one thread |
+| `append_turn(session_id, turn, *, scope=None)` | Yes | Append a turn after each agent loop |
+| `update_tc_summary(...)` | Yes | Patch a tool-call summary (RCS) |
+
+Full signatures, BaseSQL hooks, composite primary keys, and `_execute_in_transaction`: [Custom storage adapter](../guides/custom-storage-adapter.md).
+
 ## SessionCodec
 
 A **SessionCodec** maps between the in-memory `AgentSession` and the JSON blob you store. Use a codec when your product’s JSON shape differs from Nexus’s canonical dump, but you still want the built-in adapters.
@@ -78,11 +94,13 @@ When your **table layout** differs (column names, composite keys), write a custo
 
 | Class | What it does |
 |-------|--------------|
-| `BaseSQLStorageAdapter` | Skeleton for SQL tables whose columns differ from Nexus defaults; handles codec + row-lock mutate for `append_turn` |
+| `StorageAdapter` | Full ABC: `save_session`, `load_session`, list/delete, `append_turn`, `update_tc_summary` |
+| `BaseSQLStorageAdapter` | Skeleton for SQL tables whose columns differ from Nexus defaults; handles codec + row-lock mutate for `append_turn`. Override `save_session` when the primary key is composite |
 | `AiTalkChatsMemoryAdapter` | In-memory example of an AITalk-shaped table (`chatJson`, `companyId`, …) for tests and demos |
 
 Full walkthrough: [Custom storage adapter](../guides/custom-storage-adapter.md).
 
+Cross-session **user memory** (facts across chats) uses a different protocol — see [Custom memory stores](../guides/custom-memory-store.md) and [Memory](memory.md).
 ## Tenant-scoped layout
 
 Default data root: `./tenants` (override with `NEXUS_DATA_ROOT`):

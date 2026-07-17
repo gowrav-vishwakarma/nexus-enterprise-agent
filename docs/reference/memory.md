@@ -118,7 +118,7 @@ If either is missing, load and write are skipped silently.
 | `PostgreSQLCrossSessionMemoryStore` | Shared Postgres |
 | `RedisCrossSessionMemoryStore` | Shared Redis |
 
-Implement your own store with `load`, `save`, `merge_entities` for product tables. Set `SessionStorageConfig.custom_memory_adapter_class` or pass the instance to `AgentRunner`. See [Custom memory stores](../guides/custom-memory-store.md).
+Implement your own store with `load`, `save`, `merge_entities` for product tables (optional `search` for richer `memory.search`). Set `SessionStorageConfig.custom_memory_adapter_class` or pass the instance to `AgentRunner`. See [Custom memory stores](../guides/custom-memory-store.md).
 
 ## Prompt injection
 
