@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Optional
@@ -12,8 +13,9 @@ except ImportError:
     aioredis = None  # type: ignore
 
 from nexus.session.adapters.base import StorageAdapter
-from nexus.session.adapters._serde import session_from_json, session_to_json
+from nexus.session.codec import DefaultSessionCodec, SessionCodec
 from nexus.session.models import AgentSession, TurnRecord
+from nexus.session.scope import SessionScope
 from nexus.storage.paths import normalize_tenant_id, normalize_user_id
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,7 @@ class RedisStorageAdapter(StorageAdapter):
         ttl_seconds: Optional[int] = None,
         max_connections: int = 50,
         client: Any = None,
+        codec: Optional[SessionCodec] = None,
     ) -> None:
         if aioredis is None:
             raise ImportError(
@@ -46,6 +49,7 @@ class RedisStorageAdapter(StorageAdapter):
         self.session_key_template = session_key_template or "{prefix}session:{session_id}"
         self.index_key_template = index_key_template or "{prefix}idx:{tenant}:{user}"
         self.ttl_seconds = ttl_seconds
+        self._codec: SessionCodec = codec or DefaultSessionCodec()
         self._client = client
         self._owns_client = client is None
         if client is not None:
@@ -84,6 +88,9 @@ class RedisStorageAdapter(StorageAdapter):
             user=user,
         )
 
+    def _encode_session(self, session: AgentSession) -> str:
+        return json.dumps(self._codec.dumps(session), default=str)
+
     async def _apply_ttl(self, *keys: str) -> None:
         if self.ttl_seconds:
             for key in keys:
@@ -91,7 +98,7 @@ class RedisStorageAdapter(StorageAdapter):
 
     async def save_session(self, session: AgentSession) -> None:
         key = self._session_key(session.session_id)
-        payload = session_to_json(session)
+        payload = self._encode_session(session)
         await self._redis.set(key, payload)
         idx = self._index_key(session.tenant_id, session.user_id)
         score = session.created_at.timestamp()
@@ -102,34 +109,33 @@ class RedisStorageAdapter(StorageAdapter):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> Optional[AgentSession]:
         raw = await self._redis.get(self._session_key(session_id))
         if raw is None:
             return None
-        session = session_from_json(raw)
-        if tenant_id and session.tenant_id != tenant_id:
-            return None
-        if user_id and session.user_id != user_id:
+        session = self._codec.loads(raw)
+        if scope is not None and not scope.matches_session(session):
             return None
         return session
 
     async def list_sessions(
         self,
+        *,
         agent_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AgentSession]:
+        tenant_id = scope.tenant_id if scope else None
+        user_id = scope.user_id if scope else None
         if tenant_id is None or user_id is None:
-            return await self._scan_list(agent_id, tenant_id, user_id, limit, offset)
+            return await self._scan_list(agent_id, scope, limit, offset)
         idx = self._index_key(tenant_id, user_id)
         ids = await self._redis.zrevrange(idx, offset, offset + limit - 1)
         sessions: list[AgentSession] = []
         for sid in ids:
-            session = await self.load_session(sid, tenant_id=tenant_id, user_id=user_id)
+            session = await self.load_session(sid, scope=scope)
             if session is None:
                 continue
             if agent_id and session.agent_id != agent_id:
@@ -140,8 +146,7 @@ class RedisStorageAdapter(StorageAdapter):
     async def _scan_list(
         self,
         agent_id: Optional[str],
-        tenant_id: Optional[str],
-        user_id: Optional[str],
+        scope: Optional[SessionScope],
         limit: int,
         offset: int,
     ) -> list[AgentSession]:
@@ -153,12 +158,10 @@ class RedisStorageAdapter(StorageAdapter):
             raw = await self._redis.get(key)
             if not raw:
                 continue
-            session = session_from_json(raw)
+            session = self._codec.loads(raw)
             if agent_id and session.agent_id != agent_id:
                 continue
-            if tenant_id and session.tenant_id != tenant_id:
-                continue
-            if user_id and session.user_id != user_id:
+            if scope is not None and not scope.matches_session(session):
                 continue
             results.append(session)
         results.sort(key=lambda s: s.updated_at, reverse=True)
@@ -168,11 +171,12 @@ class RedisStorageAdapter(StorageAdapter):
         self,
         session_id_prefix: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         exclude_session_ids: Optional[set[str]] = None,
     ) -> list[AgentSession]:
         excluded = exclude_session_ids or set()
+        tenant_id = scope.tenant_id if scope else None
+        user_id = scope.user_id if scope else None
         if tenant_id is not None and user_id is not None:
             idx = self._index_key(tenant_id, user_id)
             ids = await self._redis.zrange(idx, 0, -1)
@@ -180,7 +184,7 @@ class RedisStorageAdapter(StorageAdapter):
             for sid in ids:
                 if not sid.startswith(session_id_prefix) or sid in excluded:
                     continue
-                session = await self.load_session(sid, tenant_id=tenant_id, user_id=user_id)
+                session = await self.load_session(sid, scope=scope)
                 if session:
                     sessions.append(session)
             sessions.sort(key=lambda s: s.created_at)
@@ -192,7 +196,7 @@ class RedisStorageAdapter(StorageAdapter):
             sid = key.split(":")[-1] if ":" in key else key
             if sid in excluded:
                 continue
-            session = await self.load_session(sid, tenant_id=tenant_id, user_id=user_id)
+            session = await self.load_session(sid, scope=scope)
             if session:
                 sessions.append(session)
         sessions.sort(key=lambda s: s.created_at)
@@ -202,10 +206,9 @@ class RedisStorageAdapter(StorageAdapter):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
-        session = await self.load_session(session_id, tenant_id=tenant_id, user_id=user_id)
+        session = await self.load_session(session_id, scope=scope)
         await self._redis.delete(self._session_key(session_id))
         if session:
             idx = self._index_key(session.tenant_id, session.user_id)
@@ -216,12 +219,9 @@ class RedisStorageAdapter(StorageAdapter):
         session_id: str,
         turn: TurnRecord,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
-        session = await self.load_session(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        session = await self.load_session(session_id, scope=scope)
         if session is None:
             logger.warning("append_turn: session %s not found in redis", session_id)
             return
@@ -236,12 +236,9 @@ class RedisStorageAdapter(StorageAdapter):
         summarized_response: str,
         summarized_by_turn: int,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
-        session = await self.load_session(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        session = await self.load_session(session_id, scope=scope)
         if session is None:
             return
         for turn in session.turns:

@@ -20,7 +20,9 @@ class OpenAISTT(STTAdapter):
         self._model = config.model or "whisper-1"
         self._base_url = (config.base_url or "https://api.openai.com/v1").rstrip("/")
 
-    async def transcribe(self, audio: bytes, mime_type: str = "audio/wav") -> str:
+    async def transcribe(
+        self, audio: bytes, mime_type: str = "audio/wav", *, language: str | None = None
+    ) -> str:
         """Send the audio blob to the transcription endpoint and return text."""
         import httpx
 
@@ -28,8 +30,9 @@ class OpenAISTT(STTAdapter):
         clean_mime = mime_type.split(";")[0] if ";" in mime_type else mime_type
         files = {"file": (f"audio.{ext}", io.BytesIO(audio), clean_mime)}
         data = {"model": self._model}
-        if self.config.language:
-            data["language"] = self.config.language
+        lang = language or self.config.language
+        if lang:
+            data["language"] = lang
         headers = {"Authorization": f"Bearer {self.config.get_api_key()}"}
 
         async with httpx.AsyncClient(timeout=60) as client:

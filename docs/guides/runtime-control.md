@@ -16,8 +16,9 @@ Nexus is built for **SaaS-native dynamic assembly**: different tenants get diffe
 Nexus does **not** ship LangGraph-style features today:
 
 - No conditional edges in YAML (`if tool X returns Y → go to agent Z`)
-- No checkpoint nodes or built-in pause/resume mid-loop
-- No automatic human approval gate on tool calls (config fields exist but are not enforced yet)
+- No automatic human approval gate on tool calls (`requires_approval` is metadata only today)
+
+Nexus **does** support mid-loop pause for **client tools** and elicitations via `AgentRunner.resume()` (see [Pause and resume](#pause-and-resume-client-tools)).
 
 You **can** take control. The patterns below are all supported today.
 
@@ -179,7 +180,7 @@ if escalated:
     # optionally start a different runner or return early
 ```
 
-`AgentStreamEvent` types: `content`, `tool_call`, `tool_result`, `final_response`, `error`, `event`.
+`AgentStreamEvent` types: `content`, `tool_call`, `tool_result`, `client_tool_call`, `elicitation`, `paused`, `final_response`, `error`, `event`.
 
 See [streaming.md](../reference/streaming.md) and [events.md](../reference/events.md).
 
@@ -236,12 +237,63 @@ Event types include `tool_call.started`, `tool_call.completed`, `turn.completed`
 
 ---
 
-## Layer 5: External human-in-the-loop (HITL)
+## Layer 5: Pause and resume (client tools)
 
-Built-in pause-after-N-turns is **not enforced** yet (`human_in_loop_after_turns` in config). Use this pattern today:
+<a id="pause-and-resume-client-tools"></a>
+
+Use this when the **browser or mobile app** must run a tool, or when the model asks the user a structured question.
+
+### Mark a tool as client-side
+
+```python
+@tool(name="pick_file", execution="client", description="Ask the user to pick a file")
+def pick_file(prompt: str) -> str:
+    return ""
+```
+
+Tools whose name ends with `request_user_input` are treated as **elicitations** (same pause path, `event_type="elicitation"`).
+
+### Stream events
+
+| Event | Meaning |
+|-------|---------|
+| `client_tool_call` | Client tool requested; `data` has `tc_id`, `call_id`, `tool_name`, `tool_args` |
+| `elicitation` | User-input tool requested |
+| `paused` | Loop stopped; `data.pending_interactions` lists what to fulfill |
+
+Blocking `run()` returns `AgentRunResult` with `status="paused"` and the same `pending_interactions`.
+
+### Resume API
+
+```python
+result = await runner.resume(
+    session_id,
+    results=[
+        {"tc_id": "TC1", "content": "user picked report.pdf"},
+        # or match by provider id:
+        # {"call_id": "call_abc", "content": "..."},
+    ],
+)
+```
+
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| `session_id` | Yes | — | Chat thread that was paused |
+| `results` | Yes | — | List of `{"tc_id"\|"call_id": ..., "content": "..."}` |
+| `stream` | No | `False` | Passed through to the continued `run()` |
+
+The runner fills empty tool responses, clears `pending_interactions`, saves (if `should_persist`), and continues the loop.
+
+See [tools.md](../reference/tools.md) and [streaming.md](../reference/streaming.md).
+
+---
+
+## Layer 6: External human-in-the-loop (HITL)
+
+Built-in pause-after-N-turns is **not enforced** yet (`human_in_loop_after_turns` in config). For operator approval that is **not** a client tool:
 
 1. Run until `final_response` or your supervision breaks the stream.
-2. Chat history is already saved (if storage is configured).
+2. Chat history is already saved (if storage is configured and `should_persist`).
 3. Show UI to the human operator.
 4. Resume with a new `user_message` on the **same** `session_id`:
 
@@ -253,7 +305,7 @@ result = await runner.run(
 )
 ```
 
-Same approach for tool approval: do not call the sensitive tool automatically; expose an operator endpoint that calls `runner.run()` with the approval as the next user message.
+Prefer Layer 5 (`execution="client"` + `resume()`) when the UI itself must execute the tool.
 
 ---
 
@@ -263,7 +315,7 @@ Same approach for tool approval: do not call the sensitive tool automatically; e
 |----------------|------------------------|
 | Graph state | `RunContext.metadata` + `session.metadata` + turn history |
 | Conditional edge after node | LLM routing, or **your** `run_stream` / wrapper |
-| Human interrupt node | External HITL: stop, persist, resume |
+| Human interrupt node | Client tools + `resume()`, or external HITL: stop, persist, new message |
 | Fixed sequence | `pattern: pipeline` |
 | Dynamic delegation | `pattern: supervisor` + `delegate_to_*` |
 | Observe every step | `run_stream()` + `NexusEventEmitter` |
@@ -288,11 +340,14 @@ Design direction for these features is in [NEXUS_AGENT_PRD.md](../../NEXUS_AGENT
 | Scenario | Recommended approach |
 |----------|---------------------|
 | Gate tools by SaaS plan | Config factory + `tool_plugins` allow-list |
+| Toggle capability packs per chat | `toolsets` + `enabled_toolsets` on `run()` |
 | Share data between tools in one run | `ctx.set()` / `ctx.get()` on `RunContext` |
+| Browser must pick a file / show a form | `@tool(execution="client")` + `resume()` |
 | Escalate to human on tool signal | `run_stream` + break on `tool_result` |
 | Fixed research → write → review | `pattern: pipeline` in manifest |
 | Dynamic specialist routing | `pattern: supervisor` |
 | Deterministic Python workflow | Wrap `AgentRunner` or pipeline pattern |
+| Cron job must not save chat | `RunContext(is_cron=True)` |
 | Voice: user interrupts agent | `duplex: full` cascaded pipeline |
 | Phone DTMF menus | `duplex: half` + `ivr_menu` plugin |
 

@@ -173,6 +173,7 @@ class MemoryCurator:
                 getattr(ctx, "tenant_id", None),
                 ctx.user_id,
                 namespace,
+                company_id=getattr(ctx, "company_id", None),
             )
             if record and record.entity_memory:
                 return dict(record.entity_memory)
@@ -201,6 +202,7 @@ class MemoryCurator:
                 namespace,
                 update.entities,
                 max_entities=self.config.max_entities,
+                company_id=getattr(ctx, "company_id", None),
             )
             if self.event_emitter and record.entity_memory:
                 from nexus.events.models import NexusEvent, NexusEventType

@@ -20,6 +20,7 @@ Annotated examples: [../assets/complete-manifest.annotated.yaml](../assets/compl
 | `defaults` | No | empty | Shared blocks merged into agents/groups |
 | `storage` | No | `adapter: memory` | Where chat history is saved |
 | `plugins` | No | `{}` | Plugin name → `module.path.ClassName` |
+| `servers` | No | `{}` | Named gRPC media servers (STT/TTS/VAD/LID) — see [server.md](server.md) |
 | `agents` | No | `{}` | Named agent definitions |
 | `groups` | No | `{}` | Named team definitions |
 | `channels` | No | `{}` | Channel name → channel spec (adapter import path, secrets) — see [realtime-agents.md](realtime-agents.md) |
@@ -46,11 +47,48 @@ Agents accept the same fields as `AgentConfig` plus orchestration persona keys:
 | `persona.prompt_args` | No | `{}` | Extra Jinja variables (flattened at render time; stored on persona) |
 | `turns` | No | `TurnConfig()` defaults | Loop limits |
 | `tool_plugins` | No | `[]` | Allow-list of plugin namespaces |
+| `toolsets` | No | `{}` | Named toolset packs (name → tools / includes / visibility) |
+| `base_toolsets` | No | `[]` | Always-on toolset names for this agent |
+| `optional_toolsets` | No | `[]` | Packs the client may enable per request via `enabled_toolsets` |
 | `memory` | No | disabled | Cross-session user memory settings |
 | `context_summary` | No | disabled | Rolling conversation summary (`summarize_on`) |
 | `rcs` | No | disabled | Long-context summarization |
-| `skills` | No | disabled | agentskills.io folders |
+| `skills` | No | disabled | Static agentskills.io folders + optional learned skill store |
 | `storage` | No | `None` | Per-agent storage fallback |
+
+### Agent `skills` (learned store fields)
+
+When documenting the agent `skills:` block, these fields control learned skills (full tables: [skills.md](skills.md)):
+
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| `skills.enabled` | No | `False` | Turn skills on |
+| `skills.scope.keys` | No | `tenant_id`, `company_id`, `user_id` | Partition for learned skills |
+| `skills.store_backend` | No | `"none"` | `"none"`, `"memory"`, `"file"`, or `"custom"` |
+| `skills.store_class` | No | `None` | Import path when backend is `custom` |
+| `skills.store_config` | No | `{}` | Backend kwargs (e.g. file `root`) |
+| `skills.retrieval_k` | No | `6` | Max learned skills injected per turn |
+| `skills.inject_learned` | No | `True` | Inject learned skills into the system prompt |
+| `skills.expose_manage_tools` | No | `False` | Register `skill_manage.*` tools |
+
+### Agent toolsets (YAML sketch)
+
+```yaml
+agents:
+  assistant:
+    toolsets:
+      core:
+        description: Always available
+        tools: [memory.write, memory.search]
+      attachments:
+        description: File tools
+        visibility: frontend
+        tools: [files.read]
+    base_toolsets: [core]
+    optional_toolsets: [attachments]
+```
+
+Enable optional packs per request with `enabled_toolsets` on `run()` / `run_stream()` — see [tools.md](tools.md).
 
 See [agent-config.md](agent-config.md) for nested fields (`turns`, `memory`, `rcs`, `skills`).
 
@@ -81,13 +119,34 @@ under an `agent:` block:
 |------|-----------|---------|--------------|
 | `modality` | No | `voice_cascaded` | `voice_cascaded` (STT→LLM→TTS), `voice_s2s` (speech-to-speech), `vision_text` |
 | `duplex` | No | `full` | `half` (IVR, strict turns) or `full` (barge-in) |
-| `stt` | No | mock | Speech-to-text: `provider`, `model`, `language`, `api_key` |
-| `tts` | No | mock | Text-to-speech: `provider`, `model`, `voice`, `api_key` |
-| `vad` | No | energy | Turn detection: `provider`, `silence_ms`, `threshold` |
+| `stt` | No | mock | Speech-to-text: `provider`, `server_ref`, `language`, `sample_rate` |
+| `tts` | No | mock | Text-to-speech: `provider`, `server_ref`, `voice`, `sample_rate` |
+| `vad` | No | energy | Turn detection: `threshold`, `silence_ms`, `min_speech_ms`, `barge_in_min_speech_ms` |
+| `languages` | No | derived | Allowed/default language codes: `allowed` (list), `default` (ISO code) |
+| `initial_response` | No | `none` | Connect greeting/IVR: `mode`, `text`, `via_llm`, `llm_trigger`, `ivr_script` |
+| `lid` | No | — | Per-turn language ID: `provider`, `server_ref`, `fallback_language`, `sample_rate` |
 | `s2s` | No | openai_realtime | Speech-to-speech model: `provider`, `model`, `voice` |
 | `agent` | Yes | — | The underlying `AgentConfig` (persona, llm, tools, ...) |
 
-See [realtime-agents.md](realtime-agents.md) for full voice/channel docs.
+See [realtime-agents.md](realtime-agents.md) for voice/channel docs and [server.md](server.md) for every `servers:` / `server_ref` field with examples.
+
+## `servers:` block (gRPC media)
+
+Optional top-level map of named media servers. Keys are **labels** you choose; agents reference them via `server_ref`.
+
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| *(key)* | Yes | — | Arbitrary label (e.g. `indic_stt`, `whisper_lid`) |
+| `kind` | Yes | — | `stt`, `tts`, `vad`, or `lid` |
+| `engine` | Yes | — | Engine plugin id |
+| `host` | No | `127.0.0.1` | Bind / connect address |
+| `port` | Yes | — | gRPC port |
+| `device` | No | — | `cpu`, `cuda`, … |
+| `replicas` | No | `1` | TTS replica count |
+| `sample_rate` | No | — | Native audio rate (Hz) |
+| `extra` | No | `{}` | Engine-specific options |
+
+Full tables, agent adapter fields, recipes, and Voice Lab two-YAML setup: [server.md](server.md).
 
 ## `llm` block (agent or defaults)
 

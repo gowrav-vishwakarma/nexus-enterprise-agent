@@ -9,6 +9,7 @@ import pytest
 from nexus.session.adapters.sqlite import SQLiteStorageAdapter
 from nexus.session.manager import SessionManager
 from nexus.session.models import ToolCallRecord, TurnRecord
+from nexus.session.scope import SessionScope
 from nexus.storage.paths import sessions_db_path
 
 
@@ -18,6 +19,7 @@ async def test_sqlite_create_and_load_tenant_scoped():
     with tempfile.TemporaryDirectory() as tmpdir:
         adapter = SQLiteStorageAdapter(data_root=tmpdir, tenant_scoped=True)
         manager = SessionManager(storage_adapter=adapter)
+        scope = SessionScope(tenant_id="t1", user_id="u1")
 
         sess = await manager.create_session(
             agent_id="agent-sqlite", session_id="sq-1", tenant_id="t1", user_id="u1"
@@ -25,7 +27,7 @@ async def test_sqlite_create_and_load_tenant_scoped():
         db_path = sessions_db_path("t1", "u1", data_root=tmpdir)
         assert db_path.exists()
 
-        loaded = await manager.load_session("sq-1", tenant_id="t1", user_id="u1")
+        loaded = await manager.load_session("sq-1", scope=scope)
 
         assert loaded is not None
         assert loaded.agent_id == "agent-sqlite"
@@ -39,6 +41,7 @@ async def test_sqlite_append_turn():
         manager = SessionManager(
             storage_adapter=SQLiteStorageAdapter(data_root=tmpdir, tenant_scoped=True)
         )
+        scope = SessionScope(tenant_id="t1", user_id="u1")
 
         await manager.create_session(
             agent_id="agent-sqlite",
@@ -49,9 +52,9 @@ async def test_sqlite_append_turn():
 
         tc = ToolCallRecord(tc_index=0, tool_name="calc", raw_response="42")
         turn = TurnRecord(turn_index=0, user_message="What is 6×7?", tool_calls=[tc])
-        await manager.append_turn("sq-2", turn, tenant_id="t1", user_id="u1")
+        await manager.append_turn("sq-2", turn, scope=scope)
 
-        loaded = await manager.load_session("sq-2", tenant_id="t1", user_id="u1")
+        loaded = await manager.load_session("sq-2", scope=scope)
         assert len(loaded.turns) == 1
         assert loaded.turns[0].tool_calls[0].tool_name == "calc"
         assert loaded.turns[0].tool_calls[0].raw_response == "42"
@@ -64,6 +67,7 @@ async def test_sqlite_update_tc_summary():
         manager = SessionManager(
             storage_adapter=SQLiteStorageAdapter(data_root=tmpdir, tenant_scoped=True)
         )
+        scope = SessionScope(tenant_id="t1", user_id="u1")
 
         await manager.create_session(
             agent_id="a", session_id="sq-3", tenant_id="t1", user_id="u1"
@@ -72,16 +76,15 @@ async def test_sqlite_update_tc_summary():
         await manager.append_turn(
             "sq-3",
             TurnRecord(turn_index=0, tool_calls=[tc]),
-            tenant_id="t1",
-            user_id="u1",
+            scope=scope,
         )
 
         await manager.update_tc_summary(
             "sq-3", "TC1", "short summary", summarized_by_turn=1,
-            tenant_id="t1", user_id="u1",
+            scope=scope,
         )
 
-        loaded = await manager.load_session("sq-3", tenant_id="t1", user_id="u1")
+        loaded = await manager.load_session("sq-3", scope=scope)
         updated_tc = loaded.turns[0].tool_calls[0]
         assert updated_tc.summarized_response == "short summary"
         assert updated_tc.summarized_by_turn == 1
@@ -89,9 +92,9 @@ async def test_sqlite_update_tc_summary():
 
         await manager.update_tc_summary(
             "sq-3", "TC1", "[]", summarized_by_turn=2,
-            tenant_id="t1", user_id="u1",
+            scope=scope,
         )
-        loaded = await manager.load_session("sq-3", tenant_id="t1", user_id="u1")
+        loaded = await manager.load_session("sq-3", scope=scope)
         assert loaded.turns[0].tool_calls[0].is_dropped is True
 
 
@@ -102,6 +105,7 @@ async def test_sqlite_list_and_delete():
         manager = SessionManager(
             storage_adapter=SQLiteStorageAdapter(data_root=tmpdir, tenant_scoped=True)
         )
+        acme_scope = SessionScope(tenant_id="acme", user_id="u1")
 
         await manager.create_session(
             agent_id="bot", session_id="sq-4", tenant_id="acme", user_id="u1"
@@ -114,14 +118,14 @@ async def test_sqlite_list_and_delete():
         )
 
         acme_sessions = await manager.list_sessions(
-            agent_id="bot", tenant_id="acme", user_id="u1"
+            agent_id="bot", scope=acme_scope
         )
         assert len(acme_sessions) == 2
         assert all(s.tenant_id == "acme" for s in acme_sessions)
 
-        await manager.delete_session("sq-4", tenant_id="acme", user_id="u1")
-        assert await manager.load_session("sq-4", tenant_id="acme", user_id="u1") is None
-        assert await manager.load_session("sq-5", tenant_id="acme", user_id="u1") is not None
+        await manager.delete_session("sq-4", scope=acme_scope)
+        assert await manager.load_session("sq-4", scope=acme_scope) is None
+        assert await manager.load_session("sq-5", scope=acme_scope) is not None
 
 
 @pytest.mark.asyncio

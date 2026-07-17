@@ -7,6 +7,7 @@ import pytest
 from nexus.session.manager import SessionManager
 from nexus.config.storage import SessionStorageConfig
 from nexus.session.models import TurnRecord
+from nexus.session.scope import SessionScope
 
 
 @pytest.fixture
@@ -51,8 +52,7 @@ async def test_redis_append_turn(redis_manager):
     await redis_manager.append_turn(
         "redis-sess-2",
         TurnRecord(turn_index=0, user_message="hi"),
-        tenant_id="t1",
-        user_id="u1",
+        scope=SessionScope(tenant_id="t1", user_id="u1"),
     )
     loaded = await redis_manager.load_session("redis-sess-2")
     assert loaded is not None
@@ -74,6 +74,6 @@ async def test_redis_list_by_prefix(redis_manager):
         user_id="u1",
     )
     found = await redis_manager.list_sessions_by_prefix(
-        "grp_x_", tenant_id="t1", user_id="u1"
+        "grp_x_", scope=SessionScope(tenant_id="t1", user_id="u1")
     )
     assert len(found) == 2

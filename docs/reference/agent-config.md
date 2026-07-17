@@ -22,7 +22,10 @@
 | `context_summary` | No | disabled (`summarize_on=None`) | Rolling `summary_text` when context fill exceeds ratio |
 | `storage` | No | `None` | Fallback storage when runner has none |
 | `tool_plugins` | No | `[]` | Allow-list of tool plugin namespaces (`[]` = all) |
-| `skills` | No | disabled | agentskills.io skill folders |
+| `toolsets` | No | `{}` | Named toolset packs — see [tools.md](tools.md) |
+| `base_toolsets` | No | `[]` | Always-on toolset names |
+| `optional_toolsets` | No | `[]` | Packs the client may enable per request |
+| `skills` | No | disabled | Static + learned skills — see [skills.md](skills.md) |
 | `result_type` | No | `None` | Pydantic model for structured output |
 | `trace_enabled` | No | `False` | Emit observability events |
 | `trace_sink` | No | `"stdout"` | `"stdout"` or `"otel"` |
@@ -58,7 +61,7 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 
 | Name | Required? | Default | What it does |
 |------|-----------|---------|--------------|
-| `provider` | No | `openai` | Adapter: `openai`, `anthropic`, `litellm`, `gemini`, `groq`, `ollama`, etc. |
+| `provider` | No | `openai` | Provider hint for model-string prefixing (`openai`, `anthropic`, `litellm`, `gemini`, `groq`, `ollama`, etc.). **All providers route through the unified `LiteLLMAdapter`.** |
 | `model` | No | `gpt-4o` | Model name for the provider |
 | `api_key` | No | `""` | Secret API key |
 | `base_url` | No | `None` | Custom endpoint (proxies, local servers) |
@@ -68,7 +71,7 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 | `max_retries` | No | `3` | Retry count on failure |
 | `retry_delay` | No | `1.0` | Seconds between retries |
 | `extra_headers` | No | `{}` | Extra HTTP headers |
-| `default_params` | No | `{}` | Extra params sent to the provider |
+| `default_params` | No | `{}` | Extra params sent to the provider (`max_tokens`, `temperature`, `extra_body`, …). Use `extra_body.chat_template_kwargs.enable_thinking: false` for voice with Qwen3. |
 
 `base_url` overrides the endpoint; it does **not** choose the adapter. Set `provider` explicitly.
 

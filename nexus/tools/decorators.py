@@ -11,6 +11,7 @@ def tool(
     tags: Optional[list[str]] = None,
     requires_approval: bool = False,
     timeout_seconds: int = 30,
+    execution: str = "server",
 ) -> Callable[[F], F]:
     """Decorator to register a function or method as an agent tool.
 
@@ -20,6 +21,8 @@ def tool(
         tags: Optional list of tags for metadata and filtering.
         requires_approval: Whether this tool requires human-in-the-loop approval.
         timeout_seconds: Maximum execution time in seconds.
+        execution: ``server`` (default) or ``client`` — client tools pause the
+            run and wait for ``AgentRunner.resume()`` with the tool result.
     """
 
     def decorator(func: F) -> F:
@@ -29,6 +32,7 @@ def tool(
         func._tool_tags = tags or []
         func._tool_requires_approval = requires_approval
         func._tool_timeout_seconds = timeout_seconds
+        func._tool_execution = execution
         return func
 
     return decorator

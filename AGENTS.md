@@ -5,6 +5,7 @@ When you change Nexus code, update the matching documentation in the same change
 ## Documentation style
 
 Follow [docs/style-guide.md](docs/style-guide.md). Write for beginners. Define terms on first use.
+When checking behaviour, read the docs first, then the code; if they disagree, update the docs in the same change.
 
 ## What to update when code changes
 
@@ -16,11 +17,15 @@ Follow [docs/style-guide.md](docs/style-guide.md). Write for beginners. Define t
 | `.env.example` | `docs/reference/environment.md` |
 | `examples/orchestration/*` | `docs/getting-started.md`, `docs/examples.md` |
 | `examples/nexus_saas_api.py` | `docs/guides/saas-example.md` |
-| Public exports in `nexus/__init__.py` | `docs/index.md` if the main API surface changed |
+| `nexus/server/*` or `nexus/orchestration/schema.py` `servers:` | `docs/reference/server.md`, `docs/guides/model-servers.md`, `examples/servers.yaml` |
+
+## how to run python code
+
+the project is made with uv, so any python code must be run with uv to pick all dependencies.
 
 ## README policy
 
-Keep [README.md](README.md) short (~100 lines). It is a quick start only. Move depth to `docs/`.
+Keep [README.md](README.md) short (~1000 lines). It is a quick start only. Move depth to `docs/`.
 
 ## Do not edit
 

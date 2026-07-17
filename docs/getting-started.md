@@ -148,21 +148,66 @@ You can also pass a pre-built `ToolRegistry` to `from_manifest()` — YAML plugi
 
 Python walkthrough: [getting-started-python.md](getting-started-python.md).
 
-## Voice and realtime (optional)
+## Voice agents (optional)
 
-Nexus supports text agents first, but the same manifest can add voice:
+Nexus supports text agents first, but the same manifest can add voice via
+`RealtimeRuntime`. The canonical path is **gRPC media servers + Voice Lab**:
 
-- **Cascaded voice (STT → LLM → TTS)** — modular stages; good for local models and phone IVR.
+- **Cascaded voice (STT → LLM → TTS)** — modular stages over gRPC; good for local models and browser testing.
 - **Speech-to-speech (S2S)** — one realtime audio model with bridged tools.
 
-Start with the [pipelines guide](guides/pipelines.md) for a decision table and runnable examples, then [realtime-agents reference](reference/realtime-agents.md) for providers and env vars.
+### YAML way
 
-Quick local try:
+The manifest declares media servers and a voice agent that references them:
+
+```yaml
+servers:
+  indic_stt:
+    kind: stt
+    engine: conformer
+    port: 50051
+  indic_tts:
+    kind: tts
+    engine: parler
+    port: 50052
+    sample_rate: 44100
+
+agents:
+  voice_grpc:
+    modality: voice_cascaded
+    duplex: full
+    stt: {provider: nexus_server, server_ref: indic_stt, language: hi}
+    tts: {provider: nexus_server, server_ref: indic_tts, sample_rate: 44100}
+    agent:
+      llm: *llm_fast
+      persona: {prompt: voice_system}
+```
+
+Full example: [examples/orchestration/voice_grpc.yaml](../examples/orchestration/voice_grpc.yaml).
+
+### Python way
+
+```python
+from nexus.realtime.runtime import RealtimeRuntime
+from nexus.realtime import RealtimeSession
+from nexus.realtime.transport.websocket import WebSocketTransport
+
+manifest = OrchestrationManifest.load("examples/orchestration/voice_grpc.yaml")
+runtime = RealtimeRuntime.from_manifest(manifest, run_context=ctx)
+pipeline = runtime.build_pipeline("voice_grpc")
+session = RealtimeSession(pipeline, WebSocketTransport(websocket), session_id=sid)
+await session.run_audio()
+```
+
+### Quick browser test
 
 ```bash
-uv run python examples/realtime_local_voice.py --check
-uv run python examples/realtime_local_voice.py --wav path/to/sample.wav
+./scripts/run_voice_lab.sh
 ```
+
+Opens http://localhost:8787. Guide: [guides/voice-lab.md](guides/voice-lab.md).
+
+For pipeline choice (cascaded vs S2S vs IVR), see [guides/pipelines.md](guides/pipelines.md) and [reference/realtime-agents.md](reference/realtime-agents.md).
 
 ## Next steps
 

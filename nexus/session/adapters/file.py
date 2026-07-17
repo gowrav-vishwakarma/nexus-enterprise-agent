@@ -3,15 +3,15 @@
 import asyncio
 import json
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from filelock import FileLock
 
 from nexus.session.adapters.base import StorageAdapter
-from nexus.session.adapters._serde import session_from_json, session_to_json
+from nexus.session.codec import DefaultSessionCodec, SessionCodec
 from nexus.session.models import AgentSession, TurnRecord
+from nexus.session.scope import SessionScope
 from nexus.storage.paths import (
     get_data_root,
     lookup_session,
@@ -35,6 +35,7 @@ class FileStorageAdapter(StorageAdapter):
         overwrite_mode: str = "full_rewrite",
         pretty_print: bool = False,
         tenant_scoped: bool = True,
+        codec: Optional[SessionCodec] = None,
     ):
         self.tenant_scoped = tenant_scoped
         if tenant_scoped:
@@ -49,6 +50,7 @@ class FileStorageAdapter(StorageAdapter):
             self.filename_template = filename_template
         self.overwrite_mode = overwrite_mode
         self.pretty_print = pretty_print
+        self._codec: SessionCodec = codec or DefaultSessionCodec()
         self._locks: dict[str, FileLock] = {}
         self._io_lock = asyncio.Lock()
         if self.base_path is not None:
@@ -58,12 +60,15 @@ class FileStorageAdapter(StorageAdapter):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         session: Optional[AgentSession] = None,
     ) -> tuple[Optional[str], Optional[str]]:
-        tid = tenant_id or (session.tenant_id if session else None)
-        uid = user_id or (session.user_id if session else None)
+        tid = (scope.tenant_id if scope else None) or (
+            session.tenant_id if session else None
+        )
+        uid = (scope.user_id if scope else None) or (
+            session.user_id if session else None
+        )
         if tid is not None and uid is not None:
             return tid, uid
         if self.tenant_scoped:
@@ -113,10 +118,14 @@ class FileStorageAdapter(StorageAdapter):
         return self._locks[key]
 
     def _serialize_session(self, session: AgentSession) -> str:
-        return session_to_json(session, pretty=self.pretty_print)
+        return json.dumps(
+            self._codec.dumps(session),
+            indent=2 if self.pretty_print else None,
+            default=str,
+        )
 
     def _deserialize_session(self, data: str) -> AgentSession:
-        return session_from_json(data)
+        return self._codec.loads(data)
 
     async def save_session(self, session: AgentSession) -> None:
         tid, uid = await self._resolve_location(session.session_id, session=session)
@@ -135,22 +144,27 @@ class FileStorageAdapter(StorageAdapter):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> Optional[AgentSession]:
-        tid, uid = await self._resolve_location(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        tid, uid = await self._resolve_location(session_id, scope=scope)
         path = self._get_path(tid, uid, session_id)
         lock = self._get_lock(tid, uid, session_id)
         async with self._io_lock:
             with lock:
                 if not path.exists():
-                    if self.tenant_scoped and tenant_id is None and user_id is None:
-                        return await self._scan_for_session(session_id)
-                    return None
-                content = path.read_text()
-                return self._deserialize_session(content)
+                    if self.tenant_scoped and (
+                        scope is None
+                        or (scope.tenant_id is None and scope.user_id is None)
+                    ):
+                        session = await self._scan_for_session(session_id)
+                    else:
+                        return None
+                else:
+                    content = path.read_text()
+                    session = self._deserialize_session(content)
+        if session is not None and scope is not None and not scope.matches_session(session):
+            return None
+        return session
 
     async def _scan_for_session(self, session_id: str) -> Optional[AgentSession]:
         """Last-resort scan when index and hints are unavailable."""
@@ -172,11 +186,10 @@ class FileStorageAdapter(StorageAdapter):
                 continue
         return None
 
-    def _iter_session_files(
-        self,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-    ):
+    def _iter_session_files(self, scope: Optional[SessionScope] = None):
+        tenant_id = scope.tenant_id if scope else None
+        user_id = scope.user_id if scope else None
+
         if not self.tenant_scoped:
             yield from self.base_path.glob("*.json")  # type: ignore[union-attr]
             return
@@ -210,22 +223,20 @@ class FileStorageAdapter(StorageAdapter):
 
     async def list_sessions(
         self,
+        *,
         agent_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AgentSession]:
         results = []
-        for path in self._iter_session_files(tenant_id, user_id):
+        for path in self._iter_session_files(scope):
             try:
                 content = path.read_text()
                 session = self._deserialize_session(content)
                 if agent_id and session.agent_id != agent_id:
                     continue
-                if tenant_id and session.tenant_id != tenant_id:
-                    continue
-                if user_id and session.user_id != user_id:
+                if scope is not None and not scope.matches_session(session):
                     continue
                 results.append(session)
             except Exception:
@@ -237,22 +248,19 @@ class FileStorageAdapter(StorageAdapter):
         self,
         session_id_prefix: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         exclude_session_ids: Optional[set[str]] = None,
     ) -> list[AgentSession]:
         excluded = exclude_session_ids or set()
         results = []
-        for path in self._iter_session_files(tenant_id, user_id):
+        for path in self._iter_session_files(scope):
             try:
                 session = self._deserialize_session(path.read_text())
                 if not session.session_id.startswith(session_id_prefix):
                     continue
                 if session.session_id in excluded:
                     continue
-                if tenant_id and session.tenant_id != tenant_id:
-                    continue
-                if user_id and session.user_id != user_id:
+                if scope is not None and not scope.matches_session(session):
                     continue
                 results.append(session)
             except Exception:
@@ -264,12 +272,9 @@ class FileStorageAdapter(StorageAdapter):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
-        tid, uid = await self._resolve_location(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        tid, uid = await self._resolve_location(session_id, scope=scope)
         path = self._get_path(tid, uid, session_id)
         lock = self._get_lock(tid, uid, session_id)
         async with self._io_lock:
@@ -286,12 +291,9 @@ class FileStorageAdapter(StorageAdapter):
         session_id: str,
         turn: TurnRecord,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
-        session = await self.load_session(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        session = await self.load_session(session_id, scope=scope)
         if session:
             session.turns.append(turn)
             session.update_timestamp()
@@ -304,12 +306,9 @@ class FileStorageAdapter(StorageAdapter):
         summarized_response: str,
         summarized_by_turn: int,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
-        session = await self.load_session(
-            session_id, tenant_id=tenant_id, user_id=user_id
-        )
+        session = await self.load_session(session_id, scope=scope)
         if session:
             for turn in session.turns:
                 for tc in turn.tool_calls:

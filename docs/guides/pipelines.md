@@ -8,7 +8,7 @@
 - **Agent loop** — The text pattern: LLM → maybe tools → LLM again until done (ReAct).
 - **Modality** — How media is handled: `text`, `vision_text`, `voice_cascaded`, `voice_s2s`.
 - **Pattern** — How multi-agent teams coordinate: `supervisor`, `pipeline`, `parallel`, `voice_team`.
-- **Transport** — How audio moves between client and server (WebSocket, phone/SIP, WebRTC).
+- **Transport** — How audio moves between client and server (WebSocket, phone/SIP).
 
 ## Why this guide exists
 
@@ -24,7 +24,7 @@ For full parameter tables, follow the links to `docs/reference/`. For taking cha
 | Lead agent delegates to specialists | Multi-agent `supervisor` | YAML `groups.pattern: supervisor` |
 | Fixed step-by-step workflow | Multi-agent `pipeline` | YAML `groups.pattern: pipeline` |
 | Same question to several agents at once | Multi-agent `parallel` | YAML `groups.pattern: parallel` |
-| Voice: separate STT, LLM, TTS stages | Cascaded voice | `CascadedVoicePipeline`, `modality: voice_cascaded` |
+| Voice: separate STT, LLM, TTS stages (gRPC) | Cascaded voice | Voice Lab + `voice_grpc.yaml` |
 | Voice: one realtime audio model | Speech-to-speech (S2S) | `SpeechToSpeechPipeline`, `modality: voice_s2s` |
 | Voice team (responder + silent lookup agent) | Voice team | `VoiceTeam`, `pattern: voice_team` |
 | Images + text | Vision | `VisionAgentRunner`, `modality: vision_text` |
@@ -140,26 +140,46 @@ groups:
 
 ## 3. Cascaded voice (STT → LLM → TTS)
 
-**What it does:** Modular stages — voice activity detection (VAD) → speech-to-text (STT) → text agent loop → text-to-speech (TTS). Audio can stream out sentence-by-sentence before the full reply is ready.
+**What it does:** Modular stages — voice activity detection (VAD) → speech-to-text (STT) → text agent loop → text-to-speech (TTS). Media servers run as separate gRPC processes; the agent connects via `provider: nexus_server` and `server_ref`. Audio streams out sentence-by-sentence before the full reply is ready.
 
-**When to use it:** You want to swap STT/TTS providers, run fully local models, or need half-duplex phone (IVR) flows.
+**When to use it:** You want to swap STT/TTS engines, run local GPU models, or need half-duplex phone (IVR) flows.
 
-**Manifest:**
+**Manifest (gRPC — canonical):**
+
+```yaml
+servers:
+  indic_stt: {kind: stt, engine: conformer, port: 50051}
+  indic_tts: {kind: tts, engine: parler, port: 50052, sample_rate: 44100}
+  whisper_lid: {kind: lid, engine: faster_whisper, port: 50054}
+
+modality: voice_cascaded
+stt: {provider: nexus_server, server_ref: indic_stt, language: hi}
+tts: {provider: nexus_server, server_ref: indic_tts, sample_rate: 44100}
+lid: {provider: nexus_server, server_ref: whisper_lid, fallback_language: hi}  # optional
+vad: {provider: energy}
+duplex: full   # or half for IVR
+```
+
+With `lid` enabled, language is re-detected on **each utterance** before STT. Users can switch languages mid-conversation; spoken requests like "talk to me in Gujarati" stick for LLM/TTS output. State is per session (`RunContext`), not global.
+
+**Manifest (cloud providers):**
 
 ```yaml
 modality: voice_cascaded
-stt: {provider: openai, model: whisper-1}
+stt: {provider: deepgram, model: nova-3}
 tts: {provider: openai, model: tts-1}
 vad: {provider: energy}
-duplex: full   # or half for IVR
+duplex: full
 ```
 
 **Python:**
 
 ```python
+from nexus.realtime.runtime import RealtimeRuntime
 from nexus.realtime import CascadedVoicePipeline
 
-pipeline = CascadedVoicePipeline(rt_config, storage_config=session_manager)
+runtime = RealtimeRuntime.from_manifest(manifest, run_context=ctx)
+pipeline = runtime.build_pipeline("voice_grpc")  # or CascadedVoicePipeline(rt_config, ...)
 
 # One audio blob (half-duplex / voice note):
 async for ev in pipeline.process_utterance(wav_bytes, session_id="s1"):
@@ -180,16 +200,15 @@ async for ev in pipeline.process_text("book a flight", session_id="s1"):
 
 | Example | What it demonstrates |
 |---------|---------------------|
-| [realtime_local_voice.py](../../examples/realtime_local_voice.py) | CLI one-shot local turn (`--check` probes servers) |
-| [realtime_local_voice_ui.py](../../examples/realtime_local_voice_ui.py) | Browser push-to-talk (STT→LLM→TTS) |
-| [realtime_browser_voice.py](../../examples/realtime_browser_voice.py) | Full-duplex WebSocket with barge-in |
-| [voice_local.yaml](../../examples/orchestration/voice_local.yaml) | English: Whisper + Kokoro + Ollama |
-| [voice_local_indic.yaml](../../examples/orchestration/voice_local_indic.yaml) | Hindi cascaded stack |
+| [voice_grpc.yaml](../../examples/orchestration/voice_grpc.yaml) | gRPC cascaded voice manifest (STT/TTS/VAD + liteLLM) |
+| [voice_lab.py](../../examples/voice_lab.py) | Browser UI + `RealtimeRuntime` + WebSocket |
+| [servers.yaml](../../examples/servers.yaml) | gRPC media server config |
+| [run_voice_lab.sh](../../scripts/run_voice_lab.sh) | One-command launcher |
 | [ivr_support.yaml](../../examples/orchestration/ivr_support.yaml) | Half-duplex phone menus |
 
-**Self-hosted profiles:** [VOICE_PROFILES.md](../../examples/orchestration/VOICE_PROFILES.md).
+**Guides:** [voice-lab.md](voice-lab.md), [model-servers.md](model-servers.md).
 
-**Reference:** [realtime-agents.md](../reference/realtime-agents.md), [environment.md](../reference/environment.md) (`NEXUS_STT_*`, `NEXUS_TTS_*`).
+**Reference:** [realtime-agents.md](../reference/realtime-agents.md), [environment.md](../reference/environment.md).
 
 ---
 
@@ -309,8 +328,9 @@ await session.run_audio()
 |-----------|----------|
 | `WebSocketTransport` | Browser PCM16 |
 | `TwilioMediaStreamTransport` | Phone via Twilio/SIP (mu-law 8 kHz) |
-| `LiveKitTransport` | WebRTC |
 | `InMemoryTransport` | Tests |
+
+Media servers (STT/TTS/VAD/LID) connect via gRPC — see [model-servers.md](model-servers.md).
 
 **Production wiring:** [realtime_saas_api.py](../../examples/realtime_saas_api.py) — sessions, voice WebSocket, Twilio.
 

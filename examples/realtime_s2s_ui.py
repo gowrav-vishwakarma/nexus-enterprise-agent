@@ -7,7 +7,7 @@ live (you can talk over it / barge in). Nothing is mocked, no paid API.
 Prereqs:
     # in local-ai-stack (separate folder):
     ./run-s2s-moshi.sh          # real Moshi model server :8998 (first run downloads weights)
-    # in agent-framework:
+    # in nexus-enterprise-agent:
     uv sync --extra moshi --extra fastapi   # client deps (websockets, sphn, numpy)
 
 Run:

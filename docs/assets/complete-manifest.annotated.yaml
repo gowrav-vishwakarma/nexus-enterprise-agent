@@ -132,15 +132,34 @@ groups:
 # Realtime (voice/vision) agents are normal agents plus media keys
 # (modality, duplex, stt, tts, vad, s2s) with the text config under `agent:`.
 # They are loaded by RealtimeRuntime, not the text runtime.
-# See docs/reference/realtime-agents.md and examples/orchestration/ivr_support.yaml.
+# See docs/reference/realtime-agents.md and examples/orchestration/voice_grpc.yaml.
+# servers: (optional) — gRPC media model servers (STT/TTS/VAD/LID).
+# Keys are arbitrary labels; agents reference them via server_ref.
+# servers:
+#   indic_stt:
+#     kind: stt
+#     engine: conformer
+#     port: 50051
+#     extra: {model_id: ai4bharat/indic-conformer-600m-multilingual}
+#   indic_tts:
+#     kind: tts
+#     engine: parler
+#     port: 50052
+#     sample_rate: 44100
+#     extra: {model_id: ai4bharat/indic-parler-tts}
+#   whisper_lid:
+#     kind: lid
+#     engine: faster_whisper
+#     port: 50054
 # agents:
-#   ivr_support:
-#     modality: voice_cascaded          # voice_cascaded | voice_s2s | vision_text
-#     duplex: half                      # half (IVR) | full (barge-in)
-#     stt: {provider: deepgram, model: nova-3, api_key: ${ENV:DEEPGRAM_API_KEY}}
-#     tts: {provider: openai, voice: alloy, api_key: ${ENV:OPENAI_API_KEY}}
-#     vad: {provider: energy, silence_ms: 700}
-#     agent:                            # the underlying AgentConfig
-#       llm: *default_llm
-#       tool_plugins: [ivr_menu]
-#       persona: {role: IVR Agent, goal: Route callers}
+  voice_grpc:
+    modality: voice_cascaded          # voice_cascaded | voice_s2s | vision_text
+    duplex: full                      # half (IVR) | full (barge-in)
+    stt: {provider: nexus_server, server_ref: indic_stt, language: hi}
+    tts: {provider: nexus_server, server_ref: indic_tts, sample_rate: 44100}
+    vad: {provider: energy, silence_ms: 600}
+    lid: {provider: nexus_server, server_ref: whisper_lid, fallback_language: hi}
+    agent:                            # the underlying AgentConfig
+      llm: *default_llm
+      tool_plugins: [voice_tools]
+      persona: {role: Voice Assistant, prompt: voice_system}

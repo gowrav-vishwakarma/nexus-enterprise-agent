@@ -7,6 +7,7 @@ import pytest
 from nexus.config.storage import SessionStorageConfig
 from nexus.session.manager import SessionManager
 from nexus.session.models import TurnRecord, ToolCallRecord
+from nexus.session.scope import SessionScope
 
 
 @pytest.fixture
@@ -68,5 +69,7 @@ async def test_pg_append_and_update_tc(pg_manager):
 async def test_pg_list_by_prefix(pg_manager):
     await pg_manager.create_session(agent_id="a", session_id="pre_a", tenant_id="t1", user_id="u1")
     await pg_manager.create_session(agent_id="b", session_id="pre_b", tenant_id="t1", user_id="u1")
-    found = await pg_manager.list_sessions_by_prefix("pre_", tenant_id="t1", user_id="u1")
+    found = await pg_manager.list_sessions_by_prefix(
+        "pre_", scope=SessionScope(tenant_id="t1", user_id="u1")
+    )
     assert len(found) >= 2

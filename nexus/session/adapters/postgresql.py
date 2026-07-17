@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Literal, Optional
@@ -12,8 +13,9 @@ except ImportError:
     asyncpg = None  # type: ignore
 
 from nexus.session.adapters.base import StorageAdapter
-from nexus.session.adapters._serde import session_from_json, session_to_json
+from nexus.session.codec import DefaultSessionCodec, SessionCodec
 from nexus.session.models import AgentSession, TurnRecord
+from nexus.session.scope import SessionScope
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,7 @@ class PostgreSQLStorageAdapter(StorageAdapter):
         auto_migrate: bool = False,
         connect_args: Optional[dict[str, Any]] = None,
         pool: Any = None,
+        codec: Optional[SessionCodec] = None,
     ) -> None:
         if asyncpg is None:
             raise ImportError(
@@ -98,6 +101,7 @@ class PostgreSQLStorageAdapter(StorageAdapter):
         self._pool = pool
         self._owns_pool = pool is None
         self._schema_ready = False
+        self._codec: SessionCodec = codec or DefaultSessionCodec()
         self.sessions_table = _resolve_table_name(
             sessions_table=sessions_table,
             table_prefix=table_prefix,
@@ -135,6 +139,9 @@ class PostgreSQLStorageAdapter(StorageAdapter):
             await conn.execute(ddl)
         self._schema_ready = True
 
+    def _encode_session(self, session: AgentSession) -> str:
+        return json.dumps(self._codec.dumps(session), default=str)
+
     def _session_to_row(self, session: AgentSession) -> tuple:
         return (
             session.session_id,
@@ -144,7 +151,7 @@ class PostgreSQLStorageAdapter(StorageAdapter):
             session.is_active,
             session.created_at,
             session.updated_at,
-            session_to_json(session),
+            self._encode_session(session),
         )
 
     async def save_session(self, session: AgentSession) -> None:
@@ -177,8 +184,7 @@ class PostgreSQLStorageAdapter(StorageAdapter):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> Optional[AgentSession]:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
@@ -189,12 +195,13 @@ class PostgreSQLStorageAdapter(StorageAdapter):
             await self._ensure_schema(conn)
             conditions = ["session_id = $1"]
             params: list[Any] = [session_id]
-            if tenant_id is not None:
-                conditions.append(f"tenant_id = ${len(params) + 1}")
-                params.append(tenant_id)
-            if user_id is not None:
-                conditions.append(f"user_id = ${len(params) + 1}")
-                params.append(user_id)
+            if scope is not None:
+                if scope.tenant_id is not None:
+                    conditions.append(f"tenant_id = ${len(params) + 1}")
+                    params.append(scope.tenant_id)
+                if scope.user_id is not None:
+                    conditions.append(f"user_id = ${len(params) + 1}")
+                    params.append(scope.user_id)
             where = " AND ".join(conditions)
             row = await conn.fetchrow(
                 f"SELECT data FROM {self.sessions_table} WHERE {where}",
@@ -202,14 +209,16 @@ class PostgreSQLStorageAdapter(StorageAdapter):
             )
             if row is None:
                 return None
-            return session_from_json(row["data"])
+            session = self._codec.loads(row["data"])
+            if scope is not None and not scope.matches_session(session):
+                return None
+            return session
 
     async def _list_query(
         self,
         *,
         agent_id: Optional[str],
-        tenant_id: Optional[str],
-        user_id: Optional[str],
+        scope: Optional[SessionScope],
         session_id_prefix: Optional[str],
         exclude_session_ids: Optional[set[str]],
         limit: int,
@@ -234,10 +243,11 @@ class PostgreSQLStorageAdapter(StorageAdapter):
 
             if agent_id:
                 add("agent_id = ?", agent_id)
-            if tenant_id:
-                add("tenant_id = ?", tenant_id)
-            if user_id:
-                add("user_id = ?", user_id)
+            if scope is not None:
+                if scope.tenant_id is not None:
+                    add("tenant_id = ?", scope.tenant_id)
+                if scope.user_id is not None:
+                    add("user_id = ?", scope.user_id)
             if session_id_prefix:
                 add("session_id LIKE ?", f"{session_id_prefix}%")
 
@@ -249,7 +259,9 @@ class PostgreSQLStorageAdapter(StorageAdapter):
                 f"ORDER BY {order} LIMIT ${n} OFFSET ${n + 1}",
                 *params,
             )
-            sessions = [session_from_json(r["data"]) for r in rows]
+            sessions = [self._codec.loads(r["data"]) for r in rows]
+            if scope is not None:
+                sessions = [s for s in sessions if scope.matches_session(s)]
             if exclude_session_ids:
                 sessions = [
                     s for s in sessions if s.session_id not in exclude_session_ids
@@ -258,16 +270,15 @@ class PostgreSQLStorageAdapter(StorageAdapter):
 
     async def list_sessions(
         self,
+        *,
         agent_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AgentSession]:
         return await self._list_query(
             agent_id=agent_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
+            scope=scope,
             session_id_prefix=None,
             exclude_session_ids=None,
             limit=limit,
@@ -278,14 +289,12 @@ class PostgreSQLStorageAdapter(StorageAdapter):
         self,
         session_id_prefix: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
         exclude_session_ids: Optional[set[str]] = None,
     ) -> list[AgentSession]:
         return await self._list_query(
             agent_id=None,
-            tenant_id=tenant_id,
-            user_id=user_id,
+            scope=scope,
             session_id_prefix=session_id_prefix,
             exclude_session_ids=exclude_session_ids,
             limit=10000,
@@ -296,8 +305,7 @@ class PostgreSQLStorageAdapter(StorageAdapter):
         self,
         session_id: str,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
@@ -308,12 +316,13 @@ class PostgreSQLStorageAdapter(StorageAdapter):
             await self._ensure_schema(conn)
             conditions = ["session_id = $1"]
             params: list[Any] = [session_id]
-            if tenant_id is not None:
-                conditions.append(f"tenant_id = ${len(params) + 1}")
-                params.append(tenant_id)
-            if user_id is not None:
-                conditions.append(f"user_id = ${len(params) + 1}")
-                params.append(user_id)
+            if scope is not None:
+                if scope.tenant_id is not None:
+                    conditions.append(f"tenant_id = ${len(params) + 1}")
+                    params.append(scope.tenant_id)
+                if scope.user_id is not None:
+                    conditions.append(f"user_id = ${len(params) + 1}")
+                    params.append(scope.user_id)
             where = " AND ".join(conditions)
             await conn.execute(
                 f"DELETE FROM {self.sessions_table} WHERE {where}",
@@ -325,8 +334,7 @@ class PostgreSQLStorageAdapter(StorageAdapter):
         session_id: str,
         mutator,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
@@ -344,13 +352,16 @@ class PostgreSQLStorageAdapter(StorageAdapter):
                 if row is None:
                     logger.warning("session %s not found for mutation", session_id)
                     return
-                session = session_from_json(row["data"])
+                session = self._codec.loads(row["data"])
+                if scope is not None and not scope.matches_session(session):
+                    logger.warning("session %s scope mismatch for mutation", session_id)
+                    return
                 mutator(session)
                 session.updated_at = datetime.now()
                 await conn.execute(
                     f"UPDATE {self.sessions_table} SET data = $1::jsonb, "
                     f"updated_at = $2 WHERE session_id = $3",
-                    session_to_json(session),
+                    self._encode_session(session),
                     session.updated_at,
                     session_id,
                 )
@@ -360,15 +371,12 @@ class PostgreSQLStorageAdapter(StorageAdapter):
         session_id: str,
         turn: TurnRecord,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
         def mutate(session: AgentSession) -> None:
             session.turns.append(turn)
 
-        await self._load_mutate_save(
-            session_id, mutate, tenant_id=tenant_id, user_id=user_id
-        )
+        await self._load_mutate_save(session_id, mutate, scope=scope)
 
     async def update_tc_summary(
         self,
@@ -377,8 +385,7 @@ class PostgreSQLStorageAdapter(StorageAdapter):
         summarized_response: str,
         summarized_by_turn: int,
         *,
-        tenant_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        scope: Optional[SessionScope] = None,
     ) -> None:
         def mutate(session: AgentSession) -> None:
             for turn in session.turns:
@@ -390,6 +397,4 @@ class PostgreSQLStorageAdapter(StorageAdapter):
                             tc.is_dropped = True
                         return
 
-        await self._load_mutate_save(
-            session_id, mutate, tenant_id=tenant_id, user_id=user_id
-        )
+        await self._load_mutate_save(session_id, mutate, scope=scope)

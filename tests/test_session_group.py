@@ -12,6 +12,7 @@ from nexus.session.adapters.memory import MemoryStorageAdapter
 from nexus.session.ids import member_session_id
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, ToolCallRecord, TurnRecord
+from nexus.session.scope import SessionScope
 
 
 def _turn(
@@ -39,11 +40,8 @@ def _delegate_tc(member: str, ts: datetime) -> ToolCallRecord:
 
 
 async def _save(manager: SessionManager, session: AgentSession) -> None:
-    existing = await manager.load_session(
-        session.session_id,
-        tenant_id=session.tenant_id,
-        user_id=session.user_id,
-    )
+    scope = SessionScope(tenant_id=session.tenant_id, user_id=session.user_id)
+    existing = await manager.load_session(session.session_id, scope=scope)
     if existing:
         await manager.save_session(session)
     else:
@@ -53,11 +51,7 @@ async def _save(manager: SessionManager, session: AgentSession) -> None:
             tenant_id=session.tenant_id,
             user_id=session.user_id,
         )
-        created = await manager.load_session(
-            session.session_id,
-            tenant_id=session.tenant_id,
-            user_id=session.user_id,
-        )
+        created = await manager.load_session(session.session_id, scope=scope)
         created.turns = session.turns
         await manager.save_session(created)
 
@@ -66,15 +60,16 @@ async def _save(manager: SessionManager, session: AgentSession) -> None:
 async def test_single_agent_session_group():
     manager = SessionManager(storage_adapter=MemoryStorageAdapter())
     root = "chat-1"
+    scope = SessionScope(tenant_id="t1", user_id="u1")
     await manager.create_session(
         agent_id="assistant", session_id=root, tenant_id="t1", user_id="u1"
     )
-    sess = await manager.load_session(root, tenant_id="t1", user_id="u1")
+    sess = await manager.load_session(root, scope=scope)
     sess.turns.append(_turn(0, user_message="hi"))
     await manager.save_session(sess)
 
     view = await manager.load_session_group(
-        root, tenant_id="t1", user_id="u1", pattern="single"
+        root, scope=scope, pattern="single"
     )
     assert view.root_session_id == root
     assert view.pattern == "single"
@@ -102,8 +97,7 @@ async def test_pipeline_session_group_order():
 
     view = await manager.load_session_group(
         root,
-        tenant_id="t1",
-        user_id="u1",
+        scope=SessionScope(tenant_id="t1", user_id="u1"),
         pattern="pipeline",
         member_order=["researcher", "analyst"],
     )
@@ -154,7 +148,7 @@ async def test_supervisor_session_group_nested_children():
         await _save(manager, session)
 
     view = await manager.load_session_group(
-        root, tenant_id="t1", user_id="u1", pattern="supervisor"
+        root, scope=SessionScope(tenant_id="t1", user_id="u1"), pattern="supervisor"
     )
     assert view.pattern == "supervisor"
     assert len(view.sessions) == 1
@@ -201,7 +195,7 @@ async def test_repeated_delegation_turn_slices():
     await _save(manager, researcher)
 
     view = await manager.load_session_group(
-        root, tenant_id="t1", user_id="u1", pattern="supervisor"
+        root, scope=SessionScope(tenant_id="t1", user_id="u1"), pattern="supervisor"
     )
     children = view.sessions[0].children
     assert len(children) == 2
@@ -232,12 +226,13 @@ async def test_curator_session_excluded_by_default():
     await _save(manager, curator)
     await _save(manager, member)
 
-    view = await manager.load_session_group(root, tenant_id="t1", user_id="u1")
+    scope = SessionScope(tenant_id="t1", user_id="u1")
+    view = await manager.load_session_group(root, scope=scope)
     assert len(view.sessions) == 1
     assert view.sessions[0].member_name == "worker"
 
     view_with_internal = await manager.load_session_group(
-        root, tenant_id="t1", user_id="u1", include_internal=True
+        root, scope=scope, include_internal=True
     )
     assert len(view_with_internal.sessions) == 2
 
@@ -253,7 +248,7 @@ async def test_list_sessions_by_prefix_memory():
         )
 
     found = await manager.list_sessions_by_prefix(
-        f"{root}_", tenant_id="t1", user_id="u1"
+        f"{root}_", scope=SessionScope(tenant_id="t1", user_id="u1")
     )
     assert {s.session_id for s in found} == {
         member_session_id(root, "a"),
@@ -276,7 +271,7 @@ async def test_list_sessions_by_prefix_file_and_sqlite():
                 user_id="u1",
             )
         file_found = await file_manager.list_sessions_by_prefix(
-            f"{root}_", tenant_id="t1", user_id="u1"
+            f"{root}_", scope=SessionScope(tenant_id="t1", user_id="u1")
         )
         assert len(file_found) == 2
 
@@ -296,7 +291,7 @@ async def test_list_sessions_by_prefix_file_and_sqlite():
                 user_id="u1",
             )
         sqlite_found = await sqlite_manager.list_sessions_by_prefix(
-            f"{root}_", tenant_id="t1", user_id="u1"
+            f"{root}_", scope=SessionScope(tenant_id="t1", user_id="u1")
         )
         assert len(sqlite_found) == 2
 

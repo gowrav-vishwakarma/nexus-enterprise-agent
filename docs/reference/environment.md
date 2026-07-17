@@ -54,35 +54,75 @@ Layout under `NEXUS_DATA_ROOT`:
 
 When `NEXUS_LLM_BASE_URL` is set, the SaaS example routes all tenants through that endpoint.
 
-## Realtime / voice (app-level, optional)
+**Reasoning models (Qwen3, gpt-oss):** Voice agents disable thinking at the source via
+`default_params.extra_body.chat_template_kwargs.enable_thinking: false` in
+`voice_grpc.yaml`. Nexus also applies this default for any self-hosted `base_url`.
+See [llm-litellm.md](../guides/llm-litellm.md#reasoning-models-extra_body-and-headers).
 
-Used by the realtime examples and manifests. STT/TTS default to `mock` (no keys)
-so demos run offline. See [realtime-agents.md](realtime-agents.md).
+## Realtime / voice — Voice Lab (gRPC)
+
+Used by Voice Lab and `voice_grpc.yaml`. Media servers run as gRPC processes;
+the agent connects via `provider: nexus_server` and `server_ref`.
 
 | Variable | What it does |
 |----------|--------------|
-| `NEXUS_STT_PROVIDER` | STT provider (`mock`, `openai`, `deepgram`, `local`) |
+| `LITELLM_BASE_URL` | LLM endpoint (LiteLLM proxy, Ollama, vLLM) |
+| `LITELLM_API_KEY` | API key for LLM endpoint |
+| `VOICE_LLM_MODEL` | Voice agent model — **exact name on your LiteLLM proxy** (e.g. `openai/qwen`, not `qwen`) |
+| `VOICE_LLM_MAX_TOKENS` | Max tokens per voice reply (manifest default `400`) |
+| `VOICE_LLM_TEMPERATURE` | LLM temperature for voice (manifest default `0.4`) |
+| `NEXUS_LLM_*` | SaaS / legacy aliases — Voice Lab maps these to `LITELLM_*` / `VOICE_LLM_MODEL` |
+| `STT_ENGINE` | STT server engine (`conformer`, `mock`) |
+| `TTS_ENGINE` | TTS server engine (`parler`, `mock`) |
+| `VAD_ENGINE` | VAD server engine (`silero`, `mock`) |
+| `STT_DEVICE` / `TTS_DEVICE` | GPU/CPU for media servers |
+| `TTS_SAMPLE_RATE` | TTS output rate (Parler = 44100, mock/kokoro = 24000) |
+| `TTS_SPEED` | Speaking rate multiplier (`1.0` normal, `1.2` faster, `0.85` slower) |
+| `STT_LANGUAGE` | STT language code + LID fallback (legacy; prefer `VOICE_DEFAULT_LANGUAGE`) |
+| `VOICE_DEFAULT_LANGUAGE` | Default language for `voice_grpc` manifest: reply, STT, LID (`en` or `hi`) |
+| `LID_ENGINE` | LID server engine (`faster_whisper`, `mock`) |
+| `LID_PORT` | LID gRPC port (default `50054`) |
+| `LID_DEVICE` | LID GPU/CPU (`cpu`, `cuda`) |
+| `LID_MODEL` | Whisper model size for LID (`small`, `medium`, …) |
+| `VAD_PROVIDER` | Agent-side VAD (`energy` or `nexus_server`) |
+| `VAD_THRESHOLD` | Speech energy threshold (higher = ignore quieter noise) |
+| `VAD_SILENCE_MS` | Trailing silence (ms) before assistant turn (`MIN_SILENCE_MS` is a legacy alias) |
+| `VAD_MIN_SPEECH_MS` | Minimum speech length (ms) to accept as a turn |
+| `VAD_BARGE_IN_MIN_SPEECH_MS` | While TTS plays, ms of speech required to interrupt |
+| `NEXUS_SERVERS_CONFIG` | YAML to start media processes (default `examples/servers.yaml`) |
+| `NEXUS_VOICE_MANIFEST` | Agent YAML path |
+| `NEXUS_VOICE_STRICT_LANG` | `1`/`true` to fail startup on language validation errors |
+| `VOICE_LAB_PORT` | Voice Lab UI port (default `8787`) |
+| `NEXUS_SERVERS_CONFIG` | Media servers YAML (default `examples/servers.yaml`) |
+
+gRPC ports (defaults): STT `50051`, TTS `50052`, VAD `50053`, LID `50054`.
+
+> **Parler TTS:** install separately (`uv pip install parler-tts`) then repin
+> protobuf (`uv pip install "protobuf>=5.26"`). `run_voice_lab.sh` does this
+> when `TTS_ENGINE=parler`. Model weights download on first use.
+
+See [voice-lab.md](../guides/voice-lab.md), [model-servers.md](../guides/model-servers.md), and the full [server.md](server.md) reference.
+
+## Realtime / voice — cloud providers
+
+For manifests that use cloud STT/TTS directly (no gRPC servers), e.g. `ivr_support.yaml`:
+
+| Variable | What it does |
+|----------|--------------|
+| `NEXUS_STT_PROVIDER` | STT provider (`mock`, `openai`, `deepgram`) |
 | `NEXUS_STT_MODEL` | STT model (e.g. `nova-3`) |
-| `NEXUS_TTS_PROVIDER` | TTS provider (`mock`, `openai`, `local`) |
+| `NEXUS_TTS_PROVIDER` | TTS provider (`mock`, `openai`) |
 | `NEXUS_TTS_MODEL` / `NEXUS_TTS_VOICE` | TTS model / voice |
 | `DEEPGRAM_API_KEY` | Deepgram STT key |
 | `OPENAI_VISION_MODEL` | Vision model for image attachments (default `gpt-4o`) |
 
-### Self-hosted / offline-first (BYOM)
+## Speech-to-speech (S2S)
 
-Point the OpenAI-compatible adapters at your own local model servers (no paid API).
-Used by `voice_local.yaml`, `voice_s2s_local.yaml`, and the `realtime_local_voice*`
-/ `realtime_s2s_ui` examples.
+Used by `voice_s2s_local.yaml` and `realtime_s2s_ui.py`:
 
 | Variable | What it does |
 |----------|--------------|
-| `NEXUS_STT_BASE_URL` | Local STT endpoint (e.g. `http://localhost:8001/v1`) |
-| `NEXUS_TTS_BASE_URL` | Local TTS endpoint (e.g. `http://localhost:8002/v1`) |
-| `NEXUS_LLM_BASE_URL` / `NEXUS_LLM_MODEL` | Local LLM (e.g. Ollama `http://localhost:11434/v1`, `gpt-oss:latest`) |
-| `NEXUS_S2S_PROVIDER` / `NEXUS_S2S_BASE_URL` | Speech-to-speech (`moshi`, `human-1`, `ws://localhost:8998`) |
-| `NEXUS_LLM_MODEL` | Local LLM id (`gpt-oss:latest`, `qwen2.5:7b`, …) |
-| `NEXUS_STT_LANGUAGE` | STT language code for Indic-Conformer (e.g. `hi`) |
-| `NEXUS_TTS_VOICE` | TTS voice: Indic Parler (`Divya`, `Rohit`, …) or Kokoro Hindi (`hf_alpha`, `hm_omega`) |
+| `NEXUS_S2S_PROVIDER` / `NEXUS_S2S_BASE_URL` | S2S provider (`moshi`, `human-1`, `ws://localhost:8998`) |
 
 ## Messaging channels (app-level, optional)
 

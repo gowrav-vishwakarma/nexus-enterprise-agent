@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexus-enterprise-agent"
-version = "0.1.1"
+version = "0.2.0"
 description = "Enterprise-ready, SaaS-native Python multi-agent framework"
 readme = "README.md"
 license = {text = "MIT"}
@@ -65,7 +65,8 @@ otel = [
 # FastAPI integration
 fastapi = [
     "fastapi>=0.111",
-    "uvicorn>=0.30",
+    "uvicorn[standard]>=0.30",
+    "websockets>=12",
     "sse-starlette>=2.1",
     "python-dotenv>=1.0",
     "python-multipart>=0.0.9",
@@ -77,8 +78,32 @@ realtime = [
     "httpx>=0.27",
 ]
 
+# gRPC client for Nexus media servers (lightweight — no torch)
+grpc = [
+    "grpcio>=1.60",
+    "grpcio-tools>=1.60",
+    "protobuf>=5.26",
+    "numpy>=1.26",
+]
+
+# Nexus media model servers (GPU engines — heavy).
+# NOTE: the Indic Parler TTS engine is NOT listed here on purpose. parler-tts
+# depends (transitively) on protobuf<5, which is incompatible with the gRPC
+# stubs (protobuf>=5). Install it separately AFTER syncing, then repin protobuf:
+#   uv pip install parler-tts
+#   uv pip install "protobuf>=5.26"
+# Model weights (ai4bharat/indic-parler-tts) download automatically on first use.
+server = [
+    "nexus-enterprise-agent[grpc]",
+    "torch>=2.0",
+    "torchaudio>=2.0",
+    "numpy>=1.26",
+    "transformers>=4.46",
+    "faster-whisper>=1.0",
+    "onnxruntime>=1.17",
+]
+
 # Kyutai Moshi speech-to-speech client (the MODEL runs in a separate server).
-# Light, torch-free: just the WebSocket + Opus codec the adapter needs.
 moshi = [
     "websockets>=12",
     "sphn>=0.1.4",
@@ -87,12 +112,12 @@ moshi = [
 
 # All dependencies
 all = [
-    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi,realtime,moshi]",
+    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi,realtime,moshi,grpc]",
 ]
 
-# Full test suite (all adapters + storage + FastAPI)
+# Full test suite (all adapters + storage + FastAPI + gRPC)
 test = [
-    "nexus-enterprise-agent[dev,litellm,openai,anthropic,sqlite,postgres,redis,file,fastapi]",
+    "nexus-enterprise-agent[dev,litellm,openai,anthropic,sqlite,postgres,redis,file,fastapi,grpc]",
 ]
 
 # Dev / integration-test dependencies
@@ -125,5 +150,6 @@ asyncio_mode = "auto"
 addopts = "-m 'not live_llm'"
 markers = [
     "live_llm: real LLM API calls; opt-in only (pytest -m live_llm)",
+    "live_gpu: real GPU model server smoke tests; opt-in only",
 ]
 

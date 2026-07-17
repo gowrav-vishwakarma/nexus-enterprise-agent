@@ -13,6 +13,7 @@ from nexus.session.ids import (
 )
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, TurnRecord
+from nexus.session.scope import SessionScope
 
 PatternKind = Literal["auto", "pipeline", "supervisor", "single"]
 
@@ -194,21 +195,18 @@ async def load_session_group(
     root_session_id: str,
     *,
     session_id_prefix: str = "",
-    tenant_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    scope: Optional[SessionScope] = None,
     pattern: PatternKind = "auto",
     member_order: Optional[list[str]] = None,
     include_internal: bool = False,
 ) -> SessionGroupView:
     """Load all sessions for a root chat id and build a nested execution view."""
-    lookup = {"tenant_id": tenant_id, "user_id": user_id}
     prefix = group_session_prefix(root_session_id, session_id_prefix)
 
-    root_session = await manager.load_session(root_session_id, **lookup)
+    root_session = await manager.load_session(root_session_id, scope=scope)
     member_sessions = await manager.list_sessions_by_prefix(
         prefix,
-        tenant_id=tenant_id,
-        user_id=user_id,
+        scope=scope,
     )
 
     if not include_internal:

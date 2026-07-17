@@ -214,3 +214,159 @@ async def test_sqlite_cross_session_memory_tenant_scoped():
 
         user2 = await store.load("tenant-a", "user-2", "agent")
         assert user2.entity_memory["preference"] == "sms"
+
+
+@pytest.mark.asyncio
+async def test_runner_loads_multi_store_always_inject():
+    """Named inject=always stores are loaded and key-prefixed when merged."""
+    from nexus.config.memory import MemoryStoreConfig
+
+    store = InMemoryCrossSessionMemoryStore()
+    await store.merge_entities(
+        "t1", "u1", "aitalk:user", {"lang": "en"}, max_entities=50
+    )
+    await store.merge_entities(
+        "t1", "u1", "aitalk:memory", {"note": "prefers GST"}, max_entities=50
+    )
+
+    llm = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    agent = AgentConfig(
+        name="aitalk",
+        llm=llm,
+        memory=MemoryConfig(
+            enabled=True,
+            expose_tools=False,
+            extract_after_each_turn=False,
+            stores=[
+                MemoryStoreConfig(name="user", inject="always", description="Profile"),
+                MemoryStoreConfig(name="memory", inject="always", description="Notes"),
+            ],
+        ),
+    )
+    runner = AgentRunner(
+        config=agent,
+        tool_registry=ToolRegistry(),
+        storage_config=SessionManager(),
+        cross_session_memory_store=store,
+        run_context=RunContext(tenant_id="t1", user_id="u1", company_id="42"),
+    )
+    facts = await runner._load_user_memory()
+    assert facts["user/lang"] == "en"
+    assert facts["memory/note"] == "prefers GST"
+
+
+@pytest.mark.asyncio
+async def test_char_budget_trims_inject_only():
+    from nexus.config.memory import MemoryStoreConfig
+
+    store = InMemoryCrossSessionMemoryStore()
+    await store.merge_entities(
+        "t1",
+        "u1",
+        "aitalk:memory",
+        {
+            "a": "short",
+            "b": "this is a much longer value that should be trimmed",
+        },
+        max_entities=50,
+    )
+    llm = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    agent = AgentConfig(
+        name="aitalk",
+        llm=llm,
+        memory=MemoryConfig(
+            enabled=True,
+            stores=[
+                MemoryStoreConfig(name="memory", inject="always", char_budget=20),
+            ],
+        ),
+    )
+    runner = AgentRunner(
+        config=agent,
+        tool_registry=ToolRegistry(),
+        storage_config=SessionManager(),
+        cross_session_memory_store=store,
+        run_context=RunContext(tenant_id="t1", user_id="u1"),
+    )
+    facts = await runner._load_user_memory()
+    # Soft trim for inject; store still has both keys.
+    record = await store.load("t1", "u1", "aitalk:memory")
+    assert len(record.entity_memory) == 2
+    assert sum(len(f"{k}: {v}") for k, v in facts.items()) <= 20 + 5  # small slack for single line
+
+
+def test_memory_injector_multi_store_sections():
+    from nexus.config.memory import MemoryStoreConfig
+    from nexus.context.memory_injector import MemoryPromptInjector
+
+    cfg = MemoryConfig(
+        enabled=True,
+        stores=[
+            MemoryStoreConfig(name="user", description="USER PROFILE", inject="always"),
+            MemoryStoreConfig(name="memory", description="MEMORY", inject="always"),
+        ],
+    )
+    block = MemoryPromptInjector.inject(
+        "You are helpful.",
+        {"user/lang": "en", "memory/note": "GST"},
+        cfg,
+    )
+    assert "### USER PROFILE" in block
+    assert "### MEMORY" in block
+    assert "- lang: en" in block
+    assert "- note: GST" in block
+
+
+@pytest.mark.asyncio
+async def test_company_id_forwarded_on_load():
+    """Custom stores receive company_id from the runner."""
+    calls: list[dict] = []
+
+    class TrackingStore(InMemoryCrossSessionMemoryStore):
+        async def load(self, tenant_id, user_id, namespace, *, company_id=None):
+            calls.append({"company_id": company_id, "namespace": namespace})
+            return await super().load(
+                tenant_id, user_id, namespace, company_id=company_id
+            )
+
+    store = TrackingStore()
+    await store.merge_entities(
+        "t1", "u1", "bot:user", {"k": "v"}, max_entities=10, company_id="9"
+    )
+    llm = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    from nexus.config.memory import MemoryStoreConfig
+
+    agent = AgentConfig(
+        name="bot",
+        llm=llm,
+        memory=MemoryConfig(
+            enabled=True,
+            stores=[MemoryStoreConfig(name="user", inject="always")],
+        ),
+    )
+    runner = AgentRunner(
+        config=agent,
+        tool_registry=ToolRegistry(),
+        storage_config=SessionManager(),
+        cross_session_memory_store=store,
+        run_context=RunContext(tenant_id="t1", user_id="u1", company_id="9"),
+    )
+    await runner._load_user_memory()
+    assert calls and calls[0]["company_id"] == "9"
+
+
+def test_persistence_factory_custom_memory_adapter():
+    from nexus.config.storage import SessionStorageConfig
+    from nexus.persistence.factory import PersistenceFactory
+
+    bundle = PersistenceFactory.from_storage_config(
+        SessionStorageConfig(
+            adapter="memory",
+            custom_memory_adapter_class=(
+                "nexus.memory.cross_session_store.InMemoryCrossSessionMemoryStore"
+            ),
+        )
+    )
+    assert isinstance(
+        bundle.cross_session_memory_store, InMemoryCrossSessionMemoryStore
+    )

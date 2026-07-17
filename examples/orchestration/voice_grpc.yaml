@@ -1,0 +1,154 @@
+version: "1"
+root: voice_grpc
+
+# Full-stack voice lab manifest — real gRPC media servers + liteLLM LLM.
+# Start: ./scripts/run_voice_lab.sh
+#
+# Companion files (loaded automatically by matching filename):
+#   voice_grpc_prompts.py  -> persona system prompt (PROMPTS["voice_system"])
+#   voice_grpc_tools.py     -> dummy date/time tools (VoiceToolsPlugin)
+
+# Python module holding the PROMPTS dict (defaults to <manifest>_prompts.py).
+prompts_module: ./voice_grpc_prompts.py
+
+# ---------------------------------------------------------------------------
+# Media servers (STT / TTS / VAD / LID). The KEY (indic_stt, whisper_lid, …)
+# is an arbitrary label — agents reference it via `server_ref` in stt/tts/vad/lid.
+# Full reference: docs/reference/server.md
+# Voice Lab starts processes from examples/servers.yaml — keep names/ports in sync.
+# ---------------------------------------------------------------------------
+servers:
+  indic_stt:
+    kind: stt
+    engine: ${ENV:STT_ENGINE|conformer}
+    port: ${ENV:STT_PORT|50051}
+    device: ${ENV:STT_DEVICE|cpu}
+    extra:
+      model_id: ${ENV:STT_MODEL_ID|ai4bharat/indic-conformer-600m-multilingual}
+      decoding: ${ENV:STT_DECODING|rnnt}
+  indic_tts:
+    kind: tts
+    engine: ${ENV:TTS_ENGINE|parler}
+    port: ${ENV:TTS_PORT|50052}
+    device: ${ENV:TTS_DEVICE|cuda}
+    replicas: ${ENV:TTS_REPLICAS|2}
+    # Native output rate of the engine. Parler = 44100, kokoro/mock = 24000.
+    # This must match the `tts.sample_rate` used by the agent below.
+    sample_rate: ${ENV:TTS_SAMPLE_RATE|44100}
+    extra:
+      model_id: ${ENV:TTS_MODEL_ID|ai4bharat/indic-parler-tts}
+  silero_vad:
+    kind: vad
+    engine: ${ENV:VAD_ENGINE|silero}
+    port: ${ENV:VAD_PORT|50053}
+
+  whisper_lid:
+    kind: lid
+    engine: ${ENV:LID_ENGINE|faster_whisper}
+    port: ${ENV:LID_PORT|50054}
+    device: ${ENV:LID_DEVICE|cpu}
+    extra:
+      model_size: ${ENV:LID_MODEL|small}
+
+  # --- Example: add an English TTS server and switch tts.server_ref to it ---
+  # en_tts:
+  #   kind: tts
+  #   engine: kokoro          # any registered engine plugin
+  #   port: 50062
+  #   device: ${ENV:TTS_DEVICE|cpu}
+  #   sample_rate: 24000
+  #   extra:
+  #     model_id: hexgrad/Kokoro-82M
+
+defaults:
+  llm_fast: &llm_fast
+    provider: litellm
+    model: ${ENV:VOICE_LLM_MODEL|ollama/qwen3:4b}
+    base_url: ${ENV:LITELLM_BASE_URL|http://localhost:4000}
+    api_key: ${ENV:LITELLM_API_KEY|}
+    # Per-request LLM args are passed straight through to the provider. Use this
+    # to disable reasoning at the source (lowest latency) for thinking models like
+    # Qwen3 — Nexus also defaults enable_thinking=False for proxies, but setting it
+    # here makes it explicit and lets you add proxy/engine-specific switches.
+    default_params:
+      max_tokens: ${ENV:VOICE_LLM_MAX_TOKENS|400}
+      temperature: ${ENV:VOICE_LLM_TEMPERATURE|0.4}
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false   # vLLM / SGLang / Qwen chat template
+        # think: false             # uncomment if your proxy forwards to Ollama
+        # reasoning_effort: low    # for gpt-oss / reasoning-effort models
+    # Custom HTTP headers (e.g. auth, routing) are forwarded on every call:
+    # extra_headers:
+    #   x-my-route: voice
+
+storage:
+  adapter: memory
+
+# Plugin name -> import path. The agent below opts in via `tool_plugins`.
+plugins:
+  voice_tools: examples.orchestration.voice_grpc_tools.VoiceToolsPlugin
+
+agents:
+  voice_grpc:
+    modality: voice_cascaded
+    duplex: full
+    languages:
+      # Worldwide default is English; set VOICE_DEFAULT_LANGUAGE=hi for Hindi-first.
+      allowed: [hi, en, gu, ta, te, bn, mr]
+      default: ${ENV:VOICE_DEFAULT_LANGUAGE|en}
+    initial_response:
+      mode: proactive
+      via_llm: true
+      llm_trigger: >-
+        The user just connected. Greet them warmly in ONE short sentence (under 12
+        words) in the default language (English unless configured otherwise).
+    stt:
+      provider: nexus_server
+      server_ref: indic_stt
+      language: ${ENV:VOICE_DEFAULT_LANGUAGE|en}
+      sample_rate: 16000
+    tts:
+      provider: nexus_server
+      server_ref: indic_tts
+      voice: ${ENV:TTS_VOICE|Divya speaks in a clear expressive voice at a moderate pace.}
+      # Playback rate sent to the browser. Keep in sync with the server's
+      # native rate above (Parler = 44100).
+      sample_rate: ${ENV:TTS_SAMPLE_RATE|44100}
+      # Speaking rate: 1.0 = normal, >1 faster, <1 slower.
+      # OpenAI TTS uses this natively; Parler time-stretches the PCM.
+      speed: ${ENV:TTS_SPEED|1.0}
+      # Engine-specific options — passed through as-is (like LLM default_params).
+      # Unknown keys are ignored by engines that do not use them.
+      params: {}
+      # Example Parler overrides (optional):
+      # params:
+      #   description: Divya speaks quickly and clearly in a quiet room.
+    vad:
+      # Turn detection + barge-in (full duplex). Tune via env or edit values:
+      #   threshold              — how loud counts as speech (higher = ignore noise)
+      #   silence_ms             — quiet time before assistant turn starts
+      #   min_speech_ms          — ignore blips shorter than this
+      #   barge_in_min_speech_ms — while TTS plays, talk this long to interrupt
+      provider: ${ENV:VAD_PROVIDER|energy}
+      server_ref: silero_vad
+      threshold: ${ENV:VAD_THRESHOLD|0.04}
+      silence_ms: ${ENV:VAD_SILENCE_MS|600}
+      min_speech_ms: ${ENV:VAD_MIN_SPEECH_MS|200}
+      barge_in_min_speech_ms: ${ENV:VAD_BARGE_IN_MIN_SPEECH_MS|250}
+      sample_rate: 16000
+    lid:
+      provider: nexus_server
+      server_ref: whisper_lid
+      fallback_language: ${ENV:VOICE_DEFAULT_LANGUAGE|en}
+      sample_rate: 16000
+    agent:
+      llm: *llm_fast
+      tool_plugins: [voice_tools]
+      turns:
+        max_turns: ${ENV:VOICE_MAX_TURNS|12}
+      persona:
+        role: ${ENV:VOICE_AGENT_ROLE|Voice Assistant}
+        goal: Natural spoken conversation
+        # System prompt lives in voice_grpc_prompts.py (PROMPTS["voice_system"]).
+        prompt: voice_system
