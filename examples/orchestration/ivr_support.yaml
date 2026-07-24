@@ -11,8 +11,9 @@ defaults:
 storage:
   adapter: memory
 
-plugins:
-  ivr_menu: nexus.realtime.tools.ivr.IVRMenuPlugin
+# The IVR tools are registered on a pre-built ToolRegistry in
+# examples/realtime_ivr_server.py. The agent selects the pack via `toolset:`.
+plugins: {}
 
 # A half-duplex, cascaded voice agent for a phone IVR.
 # STT/TTS default to "mock" so the example runs without provider keys; set the
@@ -52,7 +53,7 @@ agents:
       silence_ms: 700
     agent:
       llm: *default_llm
-      tool_plugins: [ivr_menu]
+      toolset: ivr_menu
       turns:
         max_turns: 8
       persona:

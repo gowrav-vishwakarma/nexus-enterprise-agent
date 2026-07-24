@@ -118,10 +118,11 @@ pieces you can edit:
   `PROMPTS["voice_system"]`. The agent references it via `persona.prompt:
   voice_system`. Edit the string/callable there instead of inlining prompt text
   in YAML.
-- **Tools** — `examples/orchestration/voice_grpc_tools.py` defines a
-  `VoiceToolsPlugin` (a dummy `get_current_datetime` tool). It is registered in
-  the manifest `plugins:` block and enabled per-agent via `agent.tool_plugins:
-  [voice_tools]`. Add your own `@tool` methods to expose more capabilities.
+- **Tools** — `examples/orchestration/voice_grpc_tools.py` defines a flat
+  `@tool` function (`get_current_datetime`) and a `register_voice_tools(registry)`
+  helper. `examples/voice_lab.py` builds a `ToolRegistry` with that toolset, and the
+  manifest selects it via `agent.toolset: voice_tools`. Add your own `@tool`
+  methods and register them in the same toolset to expose more capabilities.
 
 ### Media servers and `server_ref`
 

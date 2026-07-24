@@ -6,9 +6,9 @@
 
 - **Tool** — A Python function the LLM can request to run.
 - **Tool registry** — `ToolRegistry`; catalog of tools with JSON schemas sent to the model.
-- **Plugin** — A class grouping related tools under one namespace.
-- **Allow-list** — `tool_plugins` on `AgentConfig`; which plugin namespaces this agent may use.
-- **Toolset** — A named pack of tools (and nested packs) the client can enable per request.
+- **Toolset** — A named pack of tools (and nested packs) defined on the registry; selected per agent via `AgentConfig.toolset`.
+- **Plugin** — A class grouping related tools under one namespace (legacy path).
+- **Allow-list** — `AgentConfig.toolset` (modern) or `tool_plugins` (legacy plugin namespace filter).
 - **Client tool** — A tool with `execution="client"`; the run pauses until your UI returns a result via `resume()`.
 
 ## Why you need a registry
@@ -32,8 +32,7 @@ def echo(text: str) -> str:
     return text
 
 registry = ToolRegistry()
-registry.register_tool(echo)  # → global.echo
-registry.register_tool(echo, plugin_name="")  # → echo (bare / flat name)
+registry.add_tool(echo)  # → echo (flat name, no plugin prefix)
 ```
 
 | @tool parameter | Required? | Default | What it does |
@@ -45,9 +44,7 @@ registry.register_tool(echo, plugin_name="")  # → echo (bare / flat name)
 | `requires_approval` | No | `False` | **Planned** human-in-the-loop gate — not enforced in runner yet; use external HITL ([runtime-control.md](../guides/runtime-control.md)) |
 | `execution` | No | `"server"` | `"server"` runs in-process; `"client"` pauses the run and waits for `AgentRunner.resume()` |
 
-`register_tool(fn, plugin_name="utilities")` → `utilities.echo`.
-
-Pass `plugin_name=""` or `None` to register a **flat** tool name (no `plugin.` prefix). Useful when a product already exposes bare names such as `execute_sql` or `memory_write`. `execute()` already resolves no-dot names via its fallback when the caller passes the bare name as `plugin` with an empty `tool`.
+`registry.add_tool(fn)` is the preferred modern API: it registers a flat tool name with no `plugin.` prefix. This matches products that already expose bare names such as `execute_sql` or `memory_write`. The legacy `register_tool(fn, plugin_name="utilities")` still registers `utilities.echo` if you need class-style namespaces, and `execute()` resolves bare, flat, and legacy namespaced names automatically.
 
 ### Client tools (`execution="client"`)
 
@@ -68,7 +65,9 @@ When the model calls a client tool:
 
 Details: [runtime-control.md](../guides/runtime-control.md#pause-and-resume-client-tools).
 
-## @tool_plugin classes
+## @tool_plugin classes (legacy)
+
+Class-based plugins are still supported but are no longer the primary path. Prefer flat `@tool` functions + `add_toolset()` for new code.
 
 ```python
 from nexus.tools.decorators import tool, tool_plugin
@@ -111,18 +110,22 @@ The parameter can be named `ctx`, `context`, or anything else. Nexus detects:
 
 `*args` / `**kwargs` are never included in the LLM schema. Read extra per-request values from `ctx.metadata` with `ctx.get("key")`. Full field list: [run-context.md](run-context.md).
 
-## tool_plugins allow-list
+## Toolsets
+
+A **toolset** is a named pack of tools (and optional nested packs) defined on the `ToolRegistry`. Use toolsets when a product UI lets users toggle capability packs per chat, or when you want a flat-name tool allow-list.
+
+## tool_plugins allow-list (legacy)
+
+`tool_plugins` is the legacy namespace filter for class-based plugins.
 
 | Value | Effect |
 |-------|--------|
 | `[]` (default) | All registered tools eligible |
 | `["web_search"]` | Only `web_search.*` tools sent to LLM |
 
-Registry = everything your app *could* expose. `tool_plugins` = what *this agent* may see.
+Registry = everything your app *could* expose. `tool_plugins` = what *this agent* may see. Prefer `AgentConfig.toolset` for new code; see below.
 
-## Toolsets
-
-A **toolset** is a named pack of fully-qualified tool names (and optional nested packs). Use toolsets when a product UI lets users toggle capability packs per chat.
+## Defining toolsets
 
 Toolsets are **owned by the `ToolRegistry`**. You define them on the same registry that holds the tools, so every referenced tool is validated at define time. An agent then points at a toolset with a single `AgentConfig.toolset` field.
 
@@ -156,7 +159,7 @@ Use `registry.add_tool(fn)` to register a standalone @tool with a flat name. Use
 | Name | Required? | Default | What it does |
 |------|-----------|---------|--------------|
 | `name` | Yes | — | Pack id |
-| `tools` | No | `()` | Fully-qualified tool names, e.g. `memory.write` (must be registered) |
+| `tools` | No | `()` | Registered tool name strings **or** `@tool` callables (must be registered) |
 | `includes` | No | `()` | Other toolset names to pull in recursively (must be defined first) |
 | `description` | No | `""` | Shown in UI catalogs |
 | `visibility` | No | `"hidden"` | `"hidden"` or `"frontend"` (only frontend packs appear in the catalog) |
@@ -190,7 +193,7 @@ runner.grant_toolset("attachments")          # union in a defined toolset
 runner.revoke_tools(["tenant.old_tool"])     # remove tool name(s)
 ```
 
-Brand-new tools registered on the shared registry at runtime (`registry.register_tool(...)`) become callable once granted — or immediately if the agent has no toolset restriction (`toolset=None`). When the agent is unrestricted, `grant_tools`/`grant_toolset` are no-ops because everything is already visible.
+Brand-new tools registered on the shared registry at runtime (`registry.add_tool(...)`) become callable once granted — or immediately if the agent has no toolset restriction (`toolset=None`). When the agent is unrestricted, `grant_tools`/`grant_toolset` are no-ops because everything is already visible.
 
 ### Frontend catalog
 
@@ -243,18 +246,32 @@ Because `define_toolset` validates its tools and includes when called, a typo fa
 
 ## One registry, many agents
 
-Build one `ToolRegistry` at app startup. Define its toolsets, then pass the same instance to every runner. Per-agent differences come from `tool_plugins` and the single `toolset` field on each `AgentConfig`.
+Build one `ToolRegistry` at app startup. Define its toolsets, then pass the same instance to every runner. Per-agent differences come from the single `toolset` field on each `AgentConfig` (and the legacy `tool_plugins` namespace filter if you still use class-based plugins).
 
-## YAML orchestration plugins
+## YAML orchestration toolsets
+
+The modern path is to build the registry in Python and pass it to `OrchestrationRuntime.from_manifest()`:
+
+```python
+registry = ToolRegistry()
+registry.add_toolset("researcher", [web_search])
+runtime = OrchestrationRuntime.from_manifest(manifest, run_context=ctx, tool_registry=registry)
+```
+
+```yaml
+agents:
+  researcher:
+    toolset: researcher
+```
+
+The legacy `plugins:` block still works for class-based plugins:
 
 ```yaml
 plugins:
-  web_search: examples.nexus_saas_api.WebSearchPlugin
+  web_search: myapp.plugins.WebSearchPlugin
 ```
 
 Import path format: `module.path.ClassName`. Class is instantiated; its tools are registered.
-
-You can also pass a pre-built `ToolRegistry` to `OrchestrationRuntime.from_manifest()`.
 
 ## Next steps
 

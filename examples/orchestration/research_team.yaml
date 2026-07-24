@@ -7,18 +7,16 @@ defaults:
     provider: openai
     model: ${ENV:OPENAI_MODEL|gpt-4o}
     api_key: ${ENV:OPENAI_API_KEY|mock-key}
-  agent:
-    turns:
-      max_turns: 5
 
 storage:
   adapter: sqlite
   adapter_config:
     data_root: ${ENV:NEXUS_DATA_ROOT|./data}
 
-plugins:
-  web_search: examples.nexus_saas_api.WebSearchPlugin
-  database: examples.nexus_saas_api.DatabasePlugin
+# The tools for this team are registered on a pre-built ToolRegistry in
+# examples/orchestration/run_team.py. Agents select the pack they need via
+# `toolset:` below.
+plugins: {}
 
 agents:
   supervisor:
@@ -32,7 +30,7 @@ agents:
 
   researcher:
     llm: *default_llm
-    tool_plugins: [web_search]
+    toolset: researcher
     persona:
       role: Researcher
       goal: Gather facts from the web
@@ -42,7 +40,7 @@ agents:
 
   analyst:
     llm: *default_llm
-    tool_plugins: [database]
+    toolset: analyst
     persona:
       role: Analyst
       goal: Analyze structured data

@@ -35,7 +35,15 @@ def echo(text: str) -> str:
     return text
 
 
+@tool(name="remember")
+def remember(fact: str) -> str:
+    return f"Remembered: {fact}"
+
+
 async def main():
+    registry = ToolRegistry()
+    registry.add_toolset("core", [echo, remember])
+
     config = AgentConfig(
         name="assistant",
         llm=LLMProviderConfig(
@@ -47,10 +55,8 @@ async def main():
             role="Helpful assistant",
             goal="Answer clearly.",
         ),
+        toolset="core",
     )
-
-    registry = ToolRegistry()
-    registry.register_tool(echo)
 
     runner = AgentRunner(
         config=config,
@@ -88,16 +94,37 @@ The LLM cannot call your Python functions directly. You must:
 
 1. Decorate a function with `@tool`
 2. Register it on a `ToolRegistry`
-3. Pass that registry to `AgentRunner`
+3. Group tools into named toolsets with `add_toolset()`
+4. Point an agent at a toolset via `AgentConfig.toolset`
 
 ```python
-registry.register_tool(echo)           # → global.echo
-registry.register_tool(echo, plugin_name="util")  # → util.echo
+@tool(name="web_search")
+def web_search(query: str) -> str:
+    return f"Results for {query}"
+
+
+@tool(name="database_query")
+def database_query(sql: str) -> str:
+    return f"Rows for {sql}"
+
+
+registry = ToolRegistry()
+registry.add_toolset("researcher", [web_search])
+registry.add_toolset("analyst", [database_query])
+registry.add_toolset(
+    "full_team",
+    includes=["researcher", "analyst"],
+)
+
+config = AgentConfig(
+    ...,
+    toolset="full_team",  # or ["researcher", "analyst"] for a union
+)
 ```
 
-Use `tool_plugins=["web_search"]` on `AgentConfig` to allow-list plugin namespaces. Empty list `[]` means all registered tools are eligible.
+`AgentConfig.toolset` is a single toolset name or a list of names. `None` means the agent sees every registered tool. For SaaS plan gating, pick the right toolset per tenant or request.
 
-Details: [reference/tools.md](reference/tools.md).
+The older `register_tool()` (namespaced) and `tool_plugins` (namespace allow-list) APIs are still supported; use them only when you need class-based plugins. Details: [reference/tools.md](reference/tools.md).
 
 ## Storage
 

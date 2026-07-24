@@ -71,7 +71,7 @@ When documenting the agent `skills:` block, these fields control learned skills 
 
 ### Agent toolset (YAML sketch)
 
-Toolset packs are defined in code on the `ToolRegistry` (`registry.define_toolset(...)`); the manifest only selects which pack(s) an agent uses:
+Toolset packs are defined in code on the `ToolRegistry` (`registry.add_toolset(name, [callables])` or `registry.discover_package(...)`); the manifest only selects which pack(s) an agent uses:
 
 ```yaml
 agents:
@@ -80,7 +80,7 @@ agents:
     # toolset: [core, attachments]  # or a list of names
 ```
 
-Define the packs when you build the registry, then pass that registry to `OrchestrationRuntime.from_manifest(...)`. See [tools.md](tools.md).
+Define the packs when you build the registry, then pass that registry to `OrchestrationRuntime.from_manifest(...)` or `RealtimeRuntime.from_manifest(...)`. See [tools.md](tools.md).
 
 See [agent-config.md](agent-config.md) for nested fields (`turns`, `memory`, `rcs`, `skills`).
 

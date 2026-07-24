@@ -100,7 +100,11 @@ def build_agent_config() -> AgentConfig:
         ),
         # storage (optional, default: None) — fallback when runner has no storage_config.
         storage=None,
-        # tool_plugins (optional, default: []) — allow-list of plugin namespaces; [] = all tools.
+        # toolset (optional, default: None) — name of a toolset defined on the registry;
+        # None means every registered tool is visible. Use instead of (or alongside)
+        # tool_plugins when you register flat tools via add_toolset().
+        toolset=None,
+        # tool_plugins (optional, default: []) — legacy allow-list of plugin namespaces.
         tool_plugins=[],
         # skills (optional) — agentskills.io SKILL.md folders.
         skills=SkillsConfig(
@@ -121,7 +125,7 @@ async def main() -> None:
 
     # ToolRegistry (required) — catalog of tools the LLM can call.
     registry = ToolRegistry()
-    registry.register_tool(echo)  # stored as global.echo by default
+    registry.add_tool(echo)  # flat name "echo" (no plugin prefix)
 
     # AgentRunner — executes the agent loop.
     runner = AgentRunner(

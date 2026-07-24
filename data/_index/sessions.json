@@ -1,0 +1,10 @@
+{
+  "team_94909441-cd70-480f-8874-fd5bc78ab6a1_supervisor": {
+    "tenant_id": "demo-tenant",
+    "user_id": "demo-user"
+  },
+  "team_35cf8d8e-68ed-4010-aa7f-adef10b295c8_supervisor": {
+    "tenant_id": "demo-tenant",
+    "user_id": "demo-user"
+  }
+}

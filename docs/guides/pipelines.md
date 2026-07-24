@@ -76,7 +76,8 @@ print(result.final_response)
 |-----------|-------|-------|
 | `max_turns` | `AgentConfig.turns` | Caps loop iterations |
 | `stop_on_empty_tool_calls` | `TurnConfig` | Stop when LLM returns no tool calls (default `True`) |
-| `tool_plugins` | `AgentConfig` | Allow-list of tool namespaces |
+| `toolset` | `AgentConfig` | Name or list of toolset packs defined on the registry |
+| `tool_plugins` | `AgentConfig` | Legacy allow-list of plugin namespaces |
 
 **Examples:** [examples/orchestration/run_team.py](../../examples/orchestration/run_team.py) (single agent variant), [getting-started.md](../getting-started.md).
 

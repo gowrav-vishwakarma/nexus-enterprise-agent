@@ -51,7 +51,7 @@ Set path with `NEXUS_SKILLS_ROOT` (default `./skills`).
 | `inject_learned` | No | `True` | Inject relevant learned skills into the system prompt |
 | `expose_manage_tools` | No | `False` | Register `skill_manage` tools on the main agent |
 
-When `enabled=True`, the runner auto-registers the `skills` tool plugin. You do **not** add `"skills"` to `tool_plugins` yourself.
+When `enabled=True`, the runner auto-registers the `skills` tool plugin. You do **not** add `"skills"` to `tool_plugins` yourself. Also do **not** add `"skills"` to a `toolset` allow-list; the runner manages skill tools independently of your registry-defined toolsets.
 
 ### SkillScopeConfig
 

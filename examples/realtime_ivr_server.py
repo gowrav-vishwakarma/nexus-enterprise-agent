@@ -20,10 +20,21 @@ from pathlib import Path
 from nexus.orchestration.manifest import OrchestrationManifest
 from nexus.realtime.runtime import RealtimeRuntime
 from nexus.realtime.session import RealtimeSession
+from nexus.realtime.tools.ivr import IVRMenuPlugin
 from nexus.realtime.transport.memory import InMemoryTransport
 from nexus.tools.context import RunContext
+from nexus.tools.registry import ToolRegistry
 
 MANIFEST = Path(__file__).parent / "orchestration" / "ivr_support.yaml"
+
+
+def build_ivr_registry() -> ToolRegistry:
+    """Build a registry with the IVR plugin tools exposed as a toolset."""
+    registry = ToolRegistry()
+    registry.register_plugin(IVRMenuPlugin())
+    ivr_tools = [name for name in registry.tool_names() if name.startswith("ivr_menu.")]
+    registry.add_toolset("ivr_menu", ivr_tools)
+    return registry
 
 
 async def main(caller_says: str) -> None:
@@ -33,7 +44,11 @@ async def main(caller_says: str) -> None:
         user_id="+15551234567",
         session_id="call-001",
     )
-    runtime = RealtimeRuntime.from_manifest(manifest, run_context=run_context)
+    runtime = RealtimeRuntime.from_manifest(
+        manifest,
+        run_context=run_context,
+        tool_registry=build_ivr_registry(),
+    )
     pipeline = runtime.build_pipeline("ivr_support")
 
     transport = InMemoryTransport()

@@ -12,9 +12,17 @@ from uuid import uuid4
 
 from nexus import OrchestrationManifest, OrchestrationRuntime, RunContext
 
-# Optional: pass a pre-built ToolRegistry if your app registers tools in code.
+# Optional: build a ToolRegistry in code and pass it to from_manifest(). This is
+# the modern path: define flat @tool functions, group them with add_toolset(),
+# and select packs in YAML via `agents.<name>.toolset:`.
 # from nexus import ToolRegistry
-# tool_registry = ToolRegistry()
+# from nexus.tools.decorators import tool
+# @tool(name="web_search")
+# def web_search(query: str) -> str:
+#     return f"Results for {query}"
+# registry = ToolRegistry()
+# registry.add_toolset("researcher", [web_search])
+# tool_registry = registry
 
 # Optional: override storage per tenant in SaaS apps.
 # from nexus.persistence import PersistenceResolver
@@ -42,7 +50,8 @@ async def main() -> None:
             metadata={},               # optional, default: {} — extra key/value bag for tools
         ),
         # tool_registry (optional, default: None)
-        # Pre-built registry. YAML plugins: still loaded and registered on top.
+        # Pre-built registry from add_tool() / add_toolset(). YAML plugins: still
+        # loaded and registered on top when plugins: is non-empty.
         tool_registry=None,
         # persistence_resolver (optional, default: None)
         # Override manifest storage per tenant/user (SaaS pattern).

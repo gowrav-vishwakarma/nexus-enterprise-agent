@@ -27,13 +27,19 @@ defaults:
 agents:
   erp_assistant:
     llm: *llm_smart
-    tool_plugins: [erp_tools]
+    # Modern path: select a toolset defined on a pre-built ToolRegistry.
+    toolset: erp_tools
+    # Legacy plugin-namespace path:
+    # tool_plugins: [erp_tools]
 
   voice_grpc:
     modality: voice_cascaded
     agent:
       llm: *llm_fast
-      tool_plugins: [voice_tools]
+      # Modern path: select a toolset defined on a pre-built ToolRegistry.
+      toolset: voice_tools
+      # Legacy plugin-namespace path:
+      # tool_plugins: [voice_tools]
 ```
 
 ## Reasoning models, `extra_body`, and headers

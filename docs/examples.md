@@ -13,9 +13,9 @@ Not sure which example fits your use case? See the [pipelines guide](guides/pipe
 
 | Path | What you will learn |
 |------|---------------------|
-| [examples/orchestration/research_team.yaml](../examples/orchestration/research_team.yaml) | Supervisor + nested pipeline team |
+| [examples/orchestration/research_team.yaml](../examples/orchestration/research_team.yaml) | Supervisor + nested pipeline team; agents select toolsets |
 | [examples/orchestration/research_team_prompts.py](../examples/orchestration/research_team_prompts.py) | PROMPTS dict, Jinja templates |
-| [examples/orchestration/run_team.py](../examples/orchestration/run_team.py) | CLI to load manifest and run |
+| [examples/orchestration/run_team.py](../examples/orchestration/run_team.py) | CLI to load manifest, build a ToolRegistry with add_toolset(), and run |
 
 ```bash
 uv run python examples/orchestration/run_team.py "Your question here"
@@ -41,7 +41,7 @@ Guide: [guides/saas-example.md](guides/saas-example.md).
 |------|---------------------|
 | [examples/orchestration/voice_grpc.yaml](../examples/orchestration/voice_grpc.yaml) | Cascaded voice manifest with gRPC media servers + liteLLM |
 | [examples/orchestration/voice_grpc_prompts.py](../examples/orchestration/voice_grpc_prompts.py) | Voice system prompt (`PROMPTS["voice_system"]`) |
-| [examples/orchestration/voice_grpc_tools.py](../examples/orchestration/voice_grpc_tools.py) | Dummy date/time tool plugin |
+| [examples/orchestration/voice_grpc_tools.py](../examples/orchestration/voice_grpc_tools.py) | Flat `@tool` functions + toolset registration helper |
 | [examples/servers.yaml](../examples/servers.yaml) | gRPC STT/TTS/VAD/LID server config |
 | [examples/voice_lab.py](../examples/voice_lab.py) | FastAPI + `RealtimeRuntime` + WebSocket browser UI |
 | [scripts/run_voice_lab.sh](../scripts/run_voice_lab.sh) | One-command launcher (media servers + UI) |

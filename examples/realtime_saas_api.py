@@ -283,6 +283,9 @@ async def sip_inbound(request: Request):
 # One generic webhook routes any registered channel through the SAME agent core.
 # Attachments reuse STT (voice notes) and vision (images): see ChannelRouter.
 
+# The messaging-channel demo is intentionally tool-less. To give the assistant
+# capabilities, build a ToolRegistry with add_tool()/add_toolset() and point
+# _text_agent_config() at a toolset via AgentConfig.toolset.
 SHARED_TOOL_REGISTRY = ToolRegistry()
 SHARED_SESSION_MANAGER = SessionManager()
 CHANNELS = ChannelRegistry()

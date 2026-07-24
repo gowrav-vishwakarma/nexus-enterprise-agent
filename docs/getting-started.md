@@ -46,7 +46,8 @@ A manifest has:
 - `groups` — teams (supervisor or pipeline pattern)
 - `defaults` — shared LLM and turn limits
 - `storage` — where chat history is saved
-- `plugins` — Python classes that provide tools
+- `plugins` — optional Python classes that provide tools (legacy plugin path)
+- `agents.<name>.toolset` — which named toolset the agent may use
 
 For every field with defaults, see the annotated copy: [assets/complete-manifest.annotated.yaml](assets/complete-manifest.annotated.yaml).
 
@@ -86,8 +87,25 @@ Or from Python:
 ```python
 import asyncio
 from nexus import OrchestrationManifest, OrchestrationRuntime, RunContext
+from nexus.tools.decorators import tool
+from nexus.tools.registry import ToolRegistry
+
+
+@tool(name="web_search")
+def web_search(query: str) -> str:
+    return f"Results for {query}"
+
+
+@tool(name="database_query")
+def database_query(sql: str) -> str:
+    return f"Rows for {sql}"
+
 
 async def main():
+    registry = ToolRegistry()
+    registry.add_toolset("researcher", [web_search])
+    registry.add_toolset("analyst", [database_query])
+
     manifest = OrchestrationManifest.load("examples/orchestration/research_team.yaml")
     runtime = OrchestrationRuntime.from_manifest(
         manifest,
@@ -96,6 +114,7 @@ async def main():
             user_id="demo-user",
             session_id="chat-1",  # set before building runtime for teams
         ),
+        tool_registry=registry,
     )
     result = await runtime.run("Analyze Q4 revenue")
     print(result.final_response)
@@ -121,22 +140,33 @@ llm:
   api_key: ${ENV:OPENAI_API_KEY}
 ```
 
-## Tool plugins
+## Toolsets
 
-Declare import paths in YAML:
+Tools are grouped into named packs on a `ToolRegistry`. Build the registry in Python and pass it to `from_manifest()`; then each agent selects the pack it needs.
 
-```yaml
-plugins:
-  web_search: examples.nexus_saas_api.WebSearchPlugin
+```python
+from nexus.tools.decorators import tool
+from nexus.tools.registry import ToolRegistry
+
+
+@tool(name="web_search")
+def web_search(query: str) -> str:
+    return f"Results for {query}"
+
+
+registry = ToolRegistry()
+registry.add_toolset("researcher", [web_search])
 ```
 
-Each agent can allow-list plugins:
-
 ```yaml
-tool_plugins: [web_search]
+agents:
+  researcher:
+    toolset: researcher
 ```
 
-You can also pass a pre-built `ToolRegistry` to `from_manifest()` — YAML plugins still load on top.
+`toolset` can be a single name or a list (`[researcher, analyst]`). `None` means the agent sees every registered tool. For plan-tier gating, define toolsets per tier and set `toolset` from your config factory. Details: [reference/tools.md](reference/tools.md).
+
+The legacy plugin path still works: declare `plugins:` in YAML and use `tool_plugins:` on an agent. A pre-built `ToolRegistry` passed to `from_manifest()` and YAML `plugins:` can be combined.
 
 ## When to use YAML vs Python
 

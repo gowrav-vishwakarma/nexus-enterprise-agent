@@ -1,9 +1,12 @@
 """NEXUS Framework — Multi-Tenant SaaS Example.
 
-Demonstrates plan-based feature gating, per-tenant storage, cross-session
-user memory (``user_memory``), RCS, and agent group configurations in a
-FastAPI environment. Chat history and durable facts are scoped to tenant +
+Demonstrates plan-based feature gating via **toolsets**, per-tenant storage,
+cross-session user memory (``user_memory``), RCS, and agent group configurations
+in a FastAPI environment. Chat history and durable facts are scoped to tenant +
 user via ``X-Tenant-ID`` and ``X-User-ID``.
+
+Tools are defined as flat ``@tool`` functions, grouped into named toolsets on a
+shared ``ToolRegistry``, and selected per agent with ``AgentConfig.toolset``.
 """
 
 from __future__ import annotations
@@ -46,7 +49,7 @@ from nexus.session.manager import SessionManager
 from nexus.session.scope import SessionScope
 from nexus.tools.context import RunContext
 from nexus.tools.registry import ToolRegistry
-from nexus.tools.decorators import tool, tool_plugin
+from nexus.tools.decorators import tool
 from nexus.realtime.input import UserInput
 from nexus.realtime.multimodal.runner import VisionAgentRunner
 
@@ -54,31 +57,57 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# 1. TOOL PLUGINS DEFINITIONS (Stubs replacing missing builtins)
+# 1. FLAT TOOL DEFINITIONS (Stubs replacing missing builtins)
 # =============================================================================
 
-@tool_plugin(name="web_search")
-class WebSearchPlugin:
-    @tool(name="search")
-    def search(self, query: str) -> str:
-        """Search the web for a query."""
-        return f"Web search result for: '{query}' - found framework releases."
+@tool(name="web_search", description="Search the web for a query.")
+def web_search(query: str) -> str:
+    return f"Web search result for: '{query}' - found framework releases."
 
 
-@tool_plugin(name="database")
-class DatabasePlugin:
-    @tool(name="query")
-    def query(self, sql: str) -> str:
-        """Query the company database."""
-        return f"Database result: queried '{sql}' (returned 0 rows)."
+@tool(name="database_query", description="Query the company database.")
+def database_query(sql: str) -> str:
+    return f"Database result: queried '{sql}' (returned 0 rows)."
 
 
-@tool_plugin(name="calendar")
-class CalendarPlugin:
-    @tool(name="get_events")
-    def get_events(self) -> str:
-        """Get upcoming calendar events."""
-        return "Calendar: No upcoming events found."
+@tool(name="calendar_events", description="Get upcoming calendar events.")
+def calendar_events() -> str:
+    return "Calendar: No upcoming events found."
+
+
+def register_saas_toolsets(registry: ToolRegistry) -> ToolRegistry:
+    """Register the SaaS demo tools and define plan-tier toolsets."""
+    registry.add_toolset(
+        "web_search",
+        [web_search],
+        description="Web search capability",
+    )
+    registry.add_toolset(
+        "database",
+        [database_query],
+        description="Database query capability",
+    )
+    registry.add_toolset(
+        "calendar",
+        [calendar_events],
+        description="Calendar lookup capability",
+    )
+    registry.add_toolset(
+        "saas_starter",
+        includes=["web_search"],
+        description="Starter plan toolset",
+    )
+    registry.add_toolset(
+        "saas_pro",
+        includes=["web_search", "database", "calendar"],
+        description="Pro plan toolset",
+    )
+    registry.add_toolset(
+        "saas_enterprise",
+        includes=["web_search", "database", "calendar"],
+        description="Enterprise plan toolset",
+    )
+    return registry
 
 
 # =============================================================================
@@ -115,8 +144,10 @@ class PlanLimits(BaseModel):
     # Memory features
     memory_enabled: bool
 
-    # Tools
-    allowed_tool_plugins: list[str]
+    # Tools: names of toolsets this plan may use. The first entry is the default
+    # toolset when a caller requests one that is not allowed.
+    allowed_toolsets: list[str]
+    default_toolset: Optional[str] = None
 
     # Skills (global only in phase 1; tenant/user skills are future)
     skills_enabled: bool
@@ -141,7 +172,8 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         context_window_tokens=4000,
         storage_adapter="memory",
         memory_enabled=False,
-        allowed_tool_plugins=[],
+        allowed_toolsets=[],
+        default_toolset=None,
         skills_enabled=False,
         use_tenant_llm_key=False,
         default_model="gpt-4o-mini",
@@ -160,7 +192,8 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         context_window_tokens=8000,
         storage_adapter="sqlite",
         memory_enabled=True,
-        allowed_tool_plugins=["web_search"],
+        allowed_toolsets=["saas_starter"],
+        default_toolset="saas_starter",
         skills_enabled=False,
         use_tenant_llm_key=False,
         default_model="gpt-4o-mini",
@@ -179,7 +212,8 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         context_window_tokens=32000,
         storage_adapter="postgresql",
         memory_enabled=True,
-        allowed_tool_plugins=["web_search", "database", "calendar"],
+        allowed_toolsets=["saas_starter", "saas_pro", "web_search", "database", "calendar"],
+        default_toolset="saas_pro",
         skills_enabled=True,
         use_tenant_llm_key=True,
         default_model="gpt-4o",
@@ -198,7 +232,8 @@ PLAN_LIMITS: dict[Plan, PlanLimits] = {
         context_window_tokens=128000,
         storage_adapter="postgresql",
         memory_enabled=True,
-        allowed_tool_plugins=["web_search", "database", "calendar", "custom"],
+        allowed_toolsets=["saas_starter", "saas_pro", "saas_enterprise", "web_search", "database", "calendar"],
+        default_toolset="saas_enterprise",
         skills_enabled=True,
         use_tenant_llm_key=True,
         default_model="claude-3-5-sonnet-20241022",
@@ -229,7 +264,7 @@ class TenantRecord(BaseModel):
     system_prompt_prefix: Optional[str] = None
     preferred_provider: Optional[str] = None
     preferred_model: Optional[str] = None
-    custom_tool_plugins: list[str] = []
+    custom_toolsets: list[str] = []
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = True
@@ -391,12 +426,18 @@ class NexusTenantConfigFactory:
         name: str,
         role: str,
         goal: str,
-        tool_plugins: list[str]
+        toolset: Optional[str] = None,
     ) -> AgentConfig:
         limits = PLAN_LIMITS[tenant.plan]
         llm = cls.build_llm_config(tenant, limits)
 
-        allowed_tools = [p for p in tool_plugins if p in limits.allowed_tool_plugins]
+        # Resolve the requested toolset against the plan's allow-list. If the
+        # caller asks for something not allowed (or asks for None), fall back
+        # to the plan's default toolset.
+        if toolset and toolset in limits.allowed_toolsets:
+            resolved_toolset = toolset
+        else:
+            resolved_toolset = limits.default_toolset
 
         if tenant.system_prompt_prefix:
             role = f"{tenant.system_prompt_prefix}\n{role}"
@@ -408,7 +449,7 @@ class NexusTenantConfigFactory:
             turns=TurnConfig(max_turns=limits.max_turns, max_tool_calls_per_turn=limits.max_tool_calls_per_turn),
             rcs=cls.build_rcs_config(tenant, limits, llm),
             memory=MemoryConfig(enabled=limits.memory_enabled),
-            tool_plugins=allowed_tools,
+            toolset=resolved_toolset,
             skills=SkillsConfig(
                 enabled=limits.skills_enabled,
                 activation_mode="auto",
@@ -476,9 +517,7 @@ async def get_resolved_tenant(
 
 # Construct shared tool registry
 SHARED_TOOL_REGISTRY = ToolRegistry()
-SHARED_TOOL_REGISTRY.register_plugin(WebSearchPlugin())
-SHARED_TOOL_REGISTRY.register_plugin(DatabasePlugin())
-SHARED_TOOL_REGISTRY.register_plugin(CalendarPlugin())
+register_saas_toolsets(SHARED_TOOL_REGISTRY)
 
 
 class TenantPersistenceResolver:
@@ -556,7 +595,7 @@ async def chat(
         name="primary_assistant",
         role="Senior Executive Assistant",
         goal="Perform analysis tasks accurately using available tools.",
-        tool_plugins=["web_search", "database", "calendar"]
+        toolset="saas_pro",
     )
 
     run_context = RunContext(
@@ -630,7 +669,7 @@ async def chat_vision(
         name="vision_assistant",
         role="Vision Analyst",
         goal="Describe and reason about images the user shares.",
-        tool_plugins=[],
+        toolset=None,
     )
 
     run_context = RunContext(
@@ -742,7 +781,7 @@ async def run_multi_agent_group(
         name="researcher",
         role="Researcher",
         goal="Gather detailed information using search.",
-        tool_plugins=["web_search"]
+        toolset="web_search",
     )
 
     analyst_cfg = NexusTenantConfigFactory.build_agent_config(
@@ -750,7 +789,7 @@ async def run_multi_agent_group(
         name="analyst",
         role="Analyst",
         goal="Analyze data and formulate structure.",
-        tool_plugins=["database"]
+        toolset="database",
     )
 
     # In Nexus, AgentGroupConfig directly accepts configurations of sub-agents/groups in `members`

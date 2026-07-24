@@ -57,6 +57,9 @@ from nexus.realtime.transport.websocket import WebSocketTransport
 from nexus.server.config import ModelServerSpec, ServersConfig
 from nexus.server.registry import ServerRegistry
 from nexus.tools.context import RunContext
+from nexus.tools.registry import ToolRegistry
+
+from examples.orchestration.voice_grpc_tools import register_voice_tools
 
 if TYPE_CHECKING:
     from nexus.realtime.events import RealtimeStreamEvent
@@ -93,6 +96,10 @@ _manifest: OrchestrationManifest | None = None
 _registry: ServerRegistry | None = None
 _rt_config: RealtimeAgentConfig | None = None
 _language_validation: list[dict[str, str]] = []
+
+# Pre-built tool registry for the voice agent. The manifest selects the
+# voice_tools pack via `agent.toolset: voice_tools`.
+_TOOL_REGISTRY: ToolRegistry = register_voice_tools(ToolRegistry())
 
 
 def _load_manifest() -> OrchestrationManifest:
@@ -309,7 +316,9 @@ async def voice_ws(
 
     manifest = _load_manifest()
     run_context = RunContext(tenant_id=tenant_id, user_id=user_id, session_id=session_id)
-    runtime = RealtimeRuntime.from_manifest(manifest, run_context=run_context)
+    runtime = RealtimeRuntime.from_manifest(
+        manifest, run_context=run_context, tool_registry=_TOOL_REGISTRY
+    )
     pipeline = runtime.build_pipeline(AGENT_NAME)
     transport = _LoggingTransport(websocket, session_id=session_id)
     session = RealtimeSession(pipeline, transport, session_id=session_id)

@@ -21,8 +21,10 @@
 | `memory` | No | disabled | Cross-session user memory (curator + injection) |
 | `context_summary` | No | disabled (`summarize_on=None`) | Rolling `summary_text` when context fill exceeds ratio |
 | `storage` | No | `None` | Fallback storage when runner has none |
-| `tool_plugins` | No | `[]` | Allow-list of tool plugin namespaces (`[]` = all) |
+| `tool_plugins` | No | `[]` | Legacy allow-list of tool plugin namespaces (`[]` = all) |
 | `toolset` | No | `None` | Toolset name or list of names (defined on the tool registry) — `None` = no restriction. See [tools.md](tools.md) |
+
+The `toolset` value refers to a pack you define on the `ToolRegistry` with `add_toolset(name, [callables])` or `discover_package(...)`. Use `toolset` for modern flat-tool allow-lists; keep `tool_plugins` only when you still use class-based `@tool_plugin` namespaces.
 | `skills` | No | disabled | Static + learned skills — see [skills.md](skills.md) |
 | `result_type` | No | `None` | Pydantic model for structured output |
 | `trace_enabled` | No | `False` | Emit observability events |

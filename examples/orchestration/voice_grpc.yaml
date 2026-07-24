@@ -6,7 +6,7 @@ root: voice_grpc
 #
 # Companion files (loaded automatically by matching filename):
 #   voice_grpc_prompts.py  -> persona system prompt (PROMPTS["voice_system"])
-#   voice_grpc_tools.py     -> dummy date/time tools (VoiceToolsPlugin)
+#   voice_grpc_tools.py     -> dummy date/time tools (flat @tool functions)
 
 # Python module holding the PROMPTS dict (defaults to <manifest>_prompts.py).
 prompts_module: ./voice_grpc_prompts.py
@@ -85,9 +85,9 @@ defaults:
 storage:
   adapter: memory
 
-# Plugin name -> import path. The agent below opts in via `tool_plugins`.
-plugins:
-  voice_tools: examples.orchestration.voice_grpc_tools.VoiceToolsPlugin
+# Tools are registered on a pre-built ToolRegistry in voice_lab.py (or your
+# bootstrap). The agent below selects the pack via `toolset:`.
+plugins: {}
 
 agents:
   voice_grpc:
@@ -144,7 +144,7 @@ agents:
       sample_rate: 16000
     agent:
       llm: *llm_fast
-      tool_plugins: [voice_tools]
+      toolset: voice_tools
       turns:
         max_turns: ${ENV:VOICE_MAX_TURNS|12}
       persona:

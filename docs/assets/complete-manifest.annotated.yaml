@@ -50,11 +50,11 @@ storage:
     # tenant_scoped: true               # optional, default: true for file/sqlite
 
 # plugins (optional, default: {})
-# Maps plugin namespace name -> Python import path "module.path.ClassName"
-# The class is instantiated and its tools are registered.
-plugins:
-  web_search: examples.nexus_saas_api.WebSearchPlugin
-  database: examples.nexus_saas_api.DatabasePlugin
+# Legacy path: maps plugin namespace name -> Python import path "module.path.ClassName".
+# The modern path is to build a ToolRegistry in Python (add_tool / add_toolset) and
+# pass it to OrchestrationRuntime.from_manifest(..., tool_registry=registry). Then
+# agents select packs with `toolset:` below. Leave plugins empty when using that path.
+plugins: {}
 
 # agents (optional, default: {})
 # Each key is an agent name you can reference from groups.
@@ -68,7 +68,8 @@ agents:
       prompt: supervisor_system         # key in PROMPTS dict in prompts module
       prompt_args:                      # extra Jinja variables (e.g. domain); rendered each LLM turn
         domain: finance
-    # tool_plugins: []                 # optional, default: [] — allow-list of plugin namespaces
+    # toolset: core                    # optional, default: None — name of a registry-defined toolset
+    # tool_plugins: []                 # optional, default: [] — legacy allow-list of plugin namespaces
     # memory:                          # optional, default: disabled — cross-session user facts
     #   enabled: true
     #   inject_into_prompt: true       # optional, default: true — show user_memory in system prompt
@@ -82,7 +83,7 @@ agents:
 
   researcher:
     llm: *default_llm
-    tool_plugins: [web_search]          # only web_search.* tools go to the LLM
+    toolset: researcher                # select the "researcher" toolset defined on the registry
     persona:
       role: Researcher
       goal: Gather facts from the web
@@ -92,7 +93,7 @@ agents:
 
   analyst:
     llm: *default_llm
-    tool_plugins: [database]
+    toolset: analyst                   # select the "analyst" toolset defined on the registry
     persona:
       role: Analyst
       goal: Analyze structured data
@@ -161,5 +162,5 @@ groups:
     lid: {provider: nexus_server, server_ref: whisper_lid, fallback_language: hi}
     agent:                            # the underlying AgentConfig
       llm: *default_llm
-      tool_plugins: [voice_tools]
+      toolset: voice_tools             # select the "voice_tools" toolset defined on the registry
       persona: {role: Voice Assistant, prompt: voice_system}

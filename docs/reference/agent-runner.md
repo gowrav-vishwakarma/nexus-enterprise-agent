@@ -59,7 +59,7 @@ When `should_persist` is `False`, the loop still runs in memory for that request
 
 Returns `AgentRunResult` with `final_response`, `turns_used`, `status`, `pending_interactions` (when `status="paused"`), etc.
 
-The agent's tool allow-list comes from `AgentConfig.toolset` (resolved against the runner's tool registry), or from a per-run `run_context["toolset_override"]`. See [tools.md](tools.md).
+The agent's tool allow-list comes from `AgentConfig.toolset` (resolved against the runner's tool registry), or from a per-run `run_context["toolset_override"]`. When `toolset` is `None`, every registered tool is visible and the legacy `tool_plugins` namespace filter still applies. Do not combine a non-empty `tool_plugins` with a toolset that contains flat (non-namespaced) tools, or the plugin filter may drop the flat tools. See [tools.md](tools.md).
 
 ## AgentRunner.run_stream()
 

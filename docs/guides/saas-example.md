@@ -13,7 +13,7 @@
 [examples/nexus_saas_api.py](../../examples/nexus_saas_api.py) is a FastAPI app that:
 
 1. Resolves tenant from `X-Tenant-ID` header
-2. Builds `AgentConfig` from plan (tools, memory, RCS, skills)
+2. Builds `AgentConfig` from plan (toolset, memory, RCS, skills)
 3. Resolves `storage_config` per tenant on the runner
 4. Runs chat and returns JSON or Server-Sent Events (SSE)
 
@@ -104,7 +104,7 @@ See [streaming reference](../reference/streaming.md).
 | Agent behavior | `NexusTenantConfigFactory` → `AgentConfig` |
 | Who is calling | `RunContext` from headers |
 | Storage | `TenantPersistenceResolver` → `storage_config` on runner |
-| Shared tools | `SHARED_TOOL_REGISTRY` + per-agent `tool_plugins` |
+| Shared tools | `SHARED_TOOL_REGISTRY` built with `add_toolset()` + per-agent `AgentConfig.toolset` |
 
 ## Voice and channels
 

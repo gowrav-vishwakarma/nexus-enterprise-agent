@@ -4,7 +4,7 @@
 
 ## Key terms
 
-- **Agent config** (`AgentConfig`) — Describes what the agent is: model, personality, turn limits, tools allowed, memory, summarization.
+- **Agent config** (`AgentConfig`) — Describes what the agent is: model, personality, turn limits, toolset, memory, summarization.
 - **Run context** (`RunContext`) — Describes this specific call: which customer, which user, which chat thread.
 - **Runner** (`AgentRunner`) — Runs one agent. You pass config, tools, storage, and run context into it.
 - **Orchestrator** (`AgentOrchestrator`) — Runs a team of agents in a pattern (supervisor or pipeline).
@@ -21,7 +21,7 @@ Nexus splits “what the agent is” from “who is using it and where data live
 
 | Concern | Put it on | Notes |
 |---------|-----------|-------|
-| LLM, persona, turns, tools, skills, memory, RCS, context summary | `AgentConfig` | Built once per agent template |
+| LLM, persona, turns, toolset, skills, memory, RCS, context summary | `AgentConfig` | Built once per agent template |
 | Within-chat turn compression | `context_summary` on `AgentConfig` | Folds oldest turns into `summary_text` when context fill exceeds `summarize_on` |
 | Within-chat tool output compression | `rcs` on `AgentConfig` | Summarizes large tool results in context |
 | Tenant, user, chat id, extra metadata | `RunContext` | New per HTTP request or job |
@@ -33,7 +33,7 @@ Nexus splits “what the agent is” from “who is using it and where data live
 flowchart TB
   subgraph configLayer [AgentConfig - what the agent is]
     name[name persona llm turns]
-    tools[tool_plugins skills memory rcs]
+    tools[toolset tool_plugins skills memory rcs]
   end
 
   subgraph runtimeLayer [Run time - per request]
