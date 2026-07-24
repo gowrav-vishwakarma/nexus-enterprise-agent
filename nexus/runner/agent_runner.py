@@ -45,7 +45,7 @@ from nexus.skills.registry import SkillsRegistry
 from nexus.tools.context import RunContext
 from nexus.tools.interceptor import ContextUpdateInterceptor
 from nexus.tools.registry import ToolRegistry
-from nexus.tools.toolsets import effective_tools, filter_schemas_by_tools
+from nexus.tools.toolsets import filter_schemas_by_tools
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,6 @@ class AgentRunner:
         self._explicit_skills_content: Optional[str] = None
         self._skill_store = None
         self._skill_scope_resolver = None
-        self._enabled_toolsets: Optional[list[str]] = None
         self._allowed_tools: Optional[set[str]] = None
         if self.config.skills.enabled:
             self.skills_registry = SkillsRegistry(self.config.skills)
@@ -321,19 +320,48 @@ class AgentRunner:
             return schemas
         return [s for s in schemas if s.get("name") != "skills.run_skill_script"]
 
-    def _resolve_toolsets(self, enabled_toolsets: Optional[list[str]] = None) -> None:
-        """Compute allowed tool names from base + optional toolsets."""
-        self._enabled_toolsets = enabled_toolsets
-        if not self.config.toolsets and not self.config.base_toolsets:
-            self._allowed_tools = None
+    def _resolve_toolsets(self) -> None:
+        """Compute the allowed tool names from the agent's ``toolset``.
+
+        A per-run ``toolset_override`` in the run context takes precedence over
+        ``config.toolset``. When neither is set the allow-list is ``None`` (no
+        restriction — all registered tools are visible).
+        """
+        override = self.run_context.get("toolset_override")
+        toolset = override if override is not None else self.config.toolset
+        self._allowed_tools = self.tool_registry.resolve_toolset(toolset)
+
+    def grant_tools(self, names: Union[str, list[str]]) -> None:
+        """Add explicit tool names to this agent's allow-list at runtime.
+
+        Takes effect on the next turn (schemas are re-filtered each turn). When
+        the agent has no toolset restriction (``_allowed_tools is None``) every
+        registered tool is already visible, so this is a no-op.
+        """
+        if self._allowed_tools is None:
             return
-        self._allowed_tools = effective_tools(
-            base_toolsets=self.config.base_toolsets,
-            enabled_toolsets=enabled_toolsets,
-            optional_toolsets=self.config.optional_toolsets,
-            toolsets=self.config.toolsets,
-            channel_override=self.run_context.get("toolset_override"),
-        )
+        if isinstance(names, str):
+            names = [names]
+        self._allowed_tools |= set(names)
+
+    def grant_toolset(self, name_or_names: Union[str, list[str]]) -> None:
+        """Resolve a toolset (or names) via the registry and union it in.
+
+        No-op when the agent has no toolset restriction (all tools visible).
+        """
+        if self._allowed_tools is None:
+            return
+        resolved = self.tool_registry.resolve_toolset(name_or_names)
+        if resolved:
+            self._allowed_tools |= resolved
+
+    def revoke_tools(self, names: Union[str, list[str]]) -> None:
+        """Remove tool names from this agent's allow-list at runtime."""
+        if self._allowed_tools is None:
+            return
+        if isinstance(names, str):
+            names = [names]
+        self._allowed_tools -= set(names)
 
     async def _inject_learned_skills(self, user_message: str) -> None:
         """Append relevant learned skills into explicit skills content."""
@@ -662,7 +690,7 @@ class AgentRunner:
         session = await self._get_or_create_session(session_id)
         self._user_memory = await self._load_user_memory()
         self._setup_skills()
-        self._resolve_toolsets(self._enabled_toolsets)
+        self._resolve_toolsets()
         await self._inject_learned_skills(user_message)
 
         if initial_context:
@@ -725,11 +753,12 @@ class AgentRunner:
                         data={"agent_id": self.config.name, "turn_index": session_turn_index},
                     )
 
-                # When toolsets are configured they are the allow-list; do not
-                # also filter by plugin namespaces (that drops flat tools with plugin="").
+                # When a toolset allow-list is active it is the source of truth;
+                # do not also filter by plugin namespaces (that would drop flat
+                # tools with plugin="").
                 plugin_names = (
                     None
-                    if (self.config.toolsets or self.config.base_toolsets)
+                    if self._allowed_tools is not None
                     else self._effective_tool_plugins()
                 )
                 tool_schemas = self._filter_tool_schemas(
@@ -1064,14 +1093,12 @@ class AgentRunner:
         session_id: Optional[str] = None,
         initial_context: Optional[dict[str, Any]] = None,
         stream: Optional[bool] = None,
-        enabled_toolsets: Optional[list[str]] = None,
     ) -> AgentRunResult:
         """Run the agent loop and return the complete result (non-streaming mode)."""
         if self._resolve_stream(stream):
             raise ValueError(
                 "Streaming mode enabled; use run_stream() or pass stream=False."
             )
-        self._enabled_toolsets = enabled_toolsets
 
         state = _LoopState()
         async for _ in self._run_loop(
@@ -1091,14 +1118,12 @@ class AgentRunner:
         user_message: str,
         session_id: Optional[str] = None,
         stream: Optional[bool] = None,
-        enabled_toolsets: Optional[list[str]] = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         """Run the agent loop in streaming mode, yielding incremental events."""
         if not self._resolve_stream(stream):
             raise ValueError(
                 "Non-streaming mode; use run() or pass stream=True."
             )
-        self._enabled_toolsets = enabled_toolsets
 
         state = _LoopState()
         async for event in self._run_loop(
@@ -1150,5 +1175,4 @@ class AgentRunner:
             user_message="",
             session_id=session_id,
             stream=False if stream is None else stream,
-            enabled_toolsets=self._enabled_toolsets,
         )

@@ -3,6 +3,7 @@
 import inspect
 import logging
 import types
+from collections.abc import Iterable
 from typing import Any, Callable, Optional, Type, Union, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, create_model
@@ -10,6 +11,12 @@ from pydantic import BaseModel, create_model
 from nexus.config.rcs import RuntimeContextSummarizerConfig
 from nexus.tools.context import RunContext
 from nexus.tools.schema_injector import RCSSchemaInjector
+from nexus.tools.toolsets import (
+    Toolset,
+    ToolsetCatalog,
+    list_frontend_toolsets,
+    resolve_toolset_tools,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +31,8 @@ class ToolRegistry:
         self._tools: dict[str, tuple[Callable[..., Any], Optional[Any]]] = {}
         # Maps "plugin_name.tool_name" -> tool properties dict (from decorators)
         self._tool_metadata: dict[str, dict[str, Any]] = {}
+        # Maps toolset name -> Toolset (named bundles owned by this registry)
+        self._toolsets: dict[str, Toolset] = {}
 
     def register_plugin(self, plugin: Any) -> None:
         """Register a plugin class or instance.
@@ -92,6 +101,133 @@ class ToolRegistry:
             "plugin": plugin_meta,
         }
         logger.info("Registered standalone tool: %s", full_name)
+
+    def has(self, full_name: str) -> bool:
+        """Return whether *full_name* is registered."""
+        return full_name in self._tools
+
+    def tool_names(self) -> list[str]:
+        """Return all registered tool names (sorted)."""
+        return sorted(self._tools.keys())
+
+    def get_tool(self, full_name: str) -> tuple[Callable[..., Any], Optional[Any]]:
+        """Return ``(callable, parent_instance)`` for a registered tool."""
+        if full_name not in self._tools:
+            raise KeyError(f"Tool '{full_name}' not found in registry")
+        return self._tools[full_name]
+
+    def count(self) -> int:
+        """Number of registered tools."""
+        return len(self._tools)
+
+    # ------------------------------------------------------------------
+    # Toolsets (named bundles owned by this registry)
+    # ------------------------------------------------------------------
+    def define_toolset(
+        self,
+        name: str,
+        tools: Iterable[str] = (),
+        *,
+        includes: Iterable[str] = (),
+        description: str = "",
+        visibility: str = "hidden",
+        default_enabled: bool = False,
+    ) -> Toolset:
+        """Define a named toolset on this registry.
+
+        Validates that every tool in *tools* is registered and every entry in
+        *includes* is an already-defined toolset (define children first), so a
+        bad reference fails immediately at define time rather than at runtime.
+        """
+        tools = list(tools)
+        includes = list(includes)
+
+        missing_tools = [t for t in tools if not self.has(t)]
+        if missing_tools:
+            raise ValueError(
+                f"Toolset '{name}' references tools not in registry: "
+                + ", ".join(sorted(missing_tools))
+            )
+        missing_includes = [c for c in includes if c not in self._toolsets]
+        if missing_includes:
+            raise ValueError(
+                f"Toolset '{name}' includes undefined toolsets (define them first): "
+                + ", ".join(sorted(missing_includes))
+            )
+
+        ts = Toolset(
+            name=name,
+            description=description,
+            visibility=visibility,
+            default_enabled=default_enabled,
+            includes=includes,
+            tools=tools,
+        )
+        self._toolsets[name] = ts
+        return ts
+
+    def get_toolset(self, name: str) -> Toolset:
+        """Return the :class:`Toolset` registered under *name*."""
+        if name not in self._toolsets:
+            raise KeyError(f"Toolset '{name}' not found in registry")
+        return self._toolsets[name]
+
+    def has_toolset(self, name: str) -> bool:
+        """Return whether a toolset named *name* is defined."""
+        return name in self._toolsets
+
+    def list_toolsets(self) -> list[Toolset]:
+        """Return all defined toolsets."""
+        return list(self._toolsets.values())
+
+    def list_frontend_toolsets(
+        self, tool_descriptions: Optional[dict[str, str]] = None
+    ) -> list[ToolsetCatalog]:
+        """Build the catalog of frontend-visible toolsets for product UIs."""
+        return list_frontend_toolsets(
+            self._toolsets, tool_descriptions=tool_descriptions
+        )
+
+    def resolve_toolset(self, name_or_names: Union[str, Iterable[str], None]) -> Optional[set[str]]:
+        """Expand a toolset name (or list of names) into concrete tool names.
+
+        Returns ``None`` when *name_or_names* is ``None`` (meaning "no toolset
+        restriction"). Dotted names that are not defined toolsets resolve to
+        themselves (treated as explicit tool names).
+        """
+        if name_or_names is None:
+            return None
+        if isinstance(name_or_names, str):
+            names: list[str] = [name_or_names]
+        else:
+            names = list(name_or_names)
+        out: set[str] = set()
+        for name in names:
+            out |= resolve_toolset_tools(name, self._toolsets)
+        return out
+
+    def schemas_for(self, names: Iterable[str]) -> list[dict[str, Any]]:
+        """Return LLM tool schema dicts for the given names (preserves *names* order)."""
+        by_name = {s["name"]: s for s in self.get_tool_schemas_for_llm()}
+        return [by_name[n] for n in names if n in by_name]
+
+    def discover_package(
+        self,
+        package_name: str,
+        *,
+        plugin_name: Optional[str] = None,
+        skip: Iterable[str] = (),
+    ) -> "ToolRegistry":
+        """Import submodules of *package_name* and register every @tool."""
+        from nexus.tools.discovery import register_tools
+
+        register_tools(
+            self,
+            package_name,
+            plugin_name=plugin_name,
+            skip=skip,
+        )
+        return self
 
     def _is_run_context_type(self, annotation: Any) -> bool:
         if annotation is RunContext:

@@ -340,7 +340,7 @@ Design direction for these features is in [NEXUS_AGENT_PRD.md](../../NEXUS_AGENT
 | Scenario | Recommended approach |
 |----------|---------------------|
 | Gate tools by SaaS plan | Config factory + `tool_plugins` allow-list |
-| Toggle capability packs per chat | `toolsets` + `enabled_toolsets` on `run()` |
+| Toggle capability packs per chat | Registry `define_toolset` + `toolset` (name/list) per request, or `runner.grant_toolset()` |
 | Share data between tools in one run | `ctx.set()` / `ctx.get()` on `RunContext` |
 | Browser must pick a file / show a form | `@tool(execution="client")` + `resume()` |
 | Escalate to human on tool signal | `run_stream` + break on `tool_result` |

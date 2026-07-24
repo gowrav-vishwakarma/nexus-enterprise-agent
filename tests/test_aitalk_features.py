@@ -21,12 +21,7 @@ from nexus.skills.store import FileSkillStore, InMemorySkillStore, build_learned
 from nexus.tools.context import RunContext
 from nexus.tools.decorators import tool, tool_plugin
 from nexus.tools.registry import ToolRegistry
-from nexus.tools.toolsets import (
-    Toolset,
-    effective_tools,
-    list_frontend_toolsets,
-    resolve_toolset_tools,
-)
+from nexus.tools.toolsets import resolve_toolset_tools
 
 
 @pytest.mark.asyncio
@@ -238,46 +233,60 @@ async def test_skill_manage_plugin_respects_persistable():
     assert await store.list(resolver.resolve(ctx)) == []
 
 
+def _register_named_tool(reg: ToolRegistry, full_name: str) -> None:
+    plugin, _, name = full_name.partition(".")
+
+    @tool(name=name, description=name)
+    def _fn() -> str:
+        return name
+
+    reg.register_tool(_fn, plugin_name=plugin)
+
+
 def test_frontend_toolsets_catalog_like_aitalk():
-    toolsets = {
-        "web_base": Toolset(
-            name="web_base",
-            visibility="hidden",
-            includes=["memory"],
-            tools=["reports.gst"],
-        ),
-        "memory": Toolset(
-            name="memory",
-            visibility="hidden",
-            tools=["memory.write", "memory.search"],
-        ),
-        "bulk_scan": Toolset(
-            name="bulk_scan",
-            description="Bulk purchase-invoice scan",
-            visibility="frontend",
-            default_enabled=False,
-            tools=["bulk.upload", "bulk.list"],
-        ),
-        "profile": Toolset(
-            name="profile",
-            description="Update saved profile",
-            visibility="frontend",
-            tools=["profile.manage"],
-        ),
-    }
-    catalog = list_frontend_toolsets(toolsets)
-    assert {c.toolset for c in catalog} == {"bulk_scan", "profile"}
-    tools = effective_tools(
-        base_toolsets=["web_base"],
-        enabled_toolsets=["bulk_scan"],
-        optional_toolsets=["bulk_scan", "profile"],
-        toolsets=toolsets,
+    reg = ToolRegistry()
+    for full_name in (
+        "reports.gst",
+        "memory.write",
+        "memory.search",
+        "bulk.upload",
+        "bulk.list",
+        "profile.manage",
+    ):
+        _register_named_tool(reg, full_name)
+
+    # Define children first (define_toolset validates includes exist).
+    reg.define_toolset("memory", ["memory.write", "memory.search"])
+    reg.define_toolset("chat_core", ["reports.gst"], includes=["memory"])
+    reg.define_toolset(
+        "bulk_scan",
+        ["bulk.upload", "bulk.list"],
+        description="Bulk purchase-invoice scan",
+        visibility="frontend",
     )
+    reg.define_toolset(
+        "profile",
+        ["profile.manage"],
+        description="Update saved profile",
+        visibility="frontend",
+    )
+
+    catalog = reg.list_frontend_toolsets()
+    assert {c.toolset for c in catalog} == {"bulk_scan", "profile"}
+
+    # A per-request selection: base chat pack + one optional pack.
+    tools = reg.resolve_toolset(["chat_core", "bulk_scan"])
     assert "reports.gst" in tools
     assert "memory.write" in tools
     assert "bulk.upload" in tools
     assert "profile.manage" not in tools
-    assert "bulk.upload" in resolve_toolset_tools("bulk_scan", toolsets)
+    assert "bulk.upload" in resolve_toolset_tools("bulk_scan", reg._toolsets)
+
+
+def test_define_toolset_missing_tool_raises():
+    reg = ToolRegistry()
+    with pytest.raises(ValueError, match="app.missing_tool"):
+        reg.define_toolset("core", ["app.missing_tool"])
 
 
 @pytest.mark.asyncio

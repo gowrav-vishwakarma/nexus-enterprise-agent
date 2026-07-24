@@ -124,49 +124,78 @@ Registry = everything your app *could* expose. `tool_plugins` = what *this agent
 
 A **toolset** is a named pack of fully-qualified tool names (and optional nested packs). Use toolsets when a product UI lets users toggle capability packs per chat.
 
-### Toolset fields
+Toolsets are **owned by the `ToolRegistry`**. You define them on the same registry that holds the tools, so every referenced tool is validated at define time. An agent then points at a toolset with a single `AgentConfig.toolset` field.
 
-| Name | Required? | Default | What it does |
-|------|-----------|---------|--------------|
-| `name` | Yes | — | Pack id (also the dict key on `AgentConfig.toolsets`) |
-| `description` | No | `""` | Shown in UI catalogs |
-| `visibility` | No | `"hidden"` | `"hidden"` or `"frontend"` (only frontend packs appear in the catalog) |
-| `default_enabled` | No | `False` | Hint for UIs; does not auto-enable by itself |
-| `includes` | No | `[]` | Other toolset names to pull in recursively |
-| `tools` | No | `[]` | Fully-qualified tool names, e.g. `memory.write` |
-
-### AgentConfig toolset fields
-
-| Name | Required? | Default | What it does |
-|------|-----------|---------|--------------|
-| `toolsets` | No | `{}` | Map of name → `Toolset` definitions |
-| `base_toolsets` | No | `[]` | Always-on toolset names for this agent |
-| `optional_toolsets` | No | `[]` | Packs the client may enable per request |
-
-### Enabling packs on a run
-
-Pass `enabled_toolsets` to `run()` / `run_stream()`. Only names listed in `optional_toolsets` (or defined in `toolsets`) are accepted:
+### Defining a toolset
 
 ```python
-result = await runner.run(
-    "Summarize this PDF",
-    session_id="chat-1",
-    enabled_toolsets=["attachments", "web"],
+from nexus.tools.registry import ToolRegistry
+
+registry = ToolRegistry()
+# ... register tools first (register_tool / register_plugin / discover_package) ...
+
+# Define children before parents (includes must already exist).
+registry.define_toolset("memory", ["memory.write", "memory.search"])
+registry.define_toolset(
+    "chat_core",
+    ["reports.gst"],
+    includes=["memory"],
+)
+registry.define_toolset(
+    "attachments",
+    ["files.upload", "files.list"],
+    description="Attach and scan files",
+    visibility="frontend",
 )
 ```
 
-Effective tools = expand(`base_toolsets` + `enabled_toolsets`).
+`define_toolset` raises `ValueError` immediately if any tool name is not registered, or if an `includes` entry is not an already-defined toolset. This replaces any separate boot-time validation step — a typo fails at import/build time.
 
-When an agent defines `toolsets` or `base_toolsets`, the runner uses those packs as the **allow-list** for which tools reach the model. It does **not** also apply the `tool_plugins` namespace filter on that pass. That matters for **flat** tools registered with `plugin_name=""`: they are not in any plugin namespace, so a combined `tool_plugins` + toolsets filter could drop them incorrectly. Configure toolsets (and `enabled_toolsets` on each run) instead of relying on `tool_plugins` alone when you use flat names.
+### define_toolset arguments
 
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| `name` | Yes | — | Pack id |
+| `tools` | No | `()` | Fully-qualified tool names, e.g. `memory.write` (must be registered) |
+| `includes` | No | `()` | Other toolset names to pull in recursively (must be defined first) |
+| `description` | No | `""` | Shown in UI catalogs |
+| `visibility` | No | `"hidden"` | `"hidden"` or `"frontend"` (only frontend packs appear in the catalog) |
+| `default_enabled` | No | `False` | Hint for UIs; does not auto-enable by itself |
+
+### Pointing an agent at a toolset
+
+Set a single `AgentConfig.toolset` — a toolset name, a list of names, or `None`:
+
+```python
+config = AgentConfig(
+    name="chat",
+    llm=...,
+    toolset="chat_core",              # one pack
+    # toolset=["chat_core", "attachments"],  # or a computed list per request
+    # toolset=None,                          # no restriction: all tools visible
+)
+```
+
+At run time the runner calls `registry.resolve_toolset(config.toolset)` to build the tool allow-list. When `toolset` is `None` there is no restriction and every registered tool is visible. A per-run `run_context["toolset_override"]` (also a name or list) takes precedence over `config.toolset`.
+
+When a toolset allow-list is active, the runner uses it as the **allow-list** for which tools reach the model. It does **not** also apply the `tool_plugins` namespace filter on that pass. That matters for **flat** tools registered with `plugin_name=""`: they are not in any plugin namespace, so a combined `tool_plugins` + toolset filter could drop them incorrectly. Use a `toolset` instead of relying on `tool_plugins` alone when you use flat names.
+
+### Runtime tool granting
+
+You can widen or narrow a live agent's allow-list between turns (schemas are re-filtered every turn, so no restart is needed):
+
+```python
+runner.grant_tools("tenant.new_tool")       # add explicit tool name(s)
+runner.grant_toolset("attachments")          # union in a defined toolset
+runner.revoke_tools(["tenant.old_tool"])     # remove tool name(s)
+```
+
+Brand-new tools registered on the shared registry at runtime (`registry.register_tool(...)`) become callable once granted — or immediately if the agent has no toolset restriction (`toolset=None`). When the agent is unrestricted, `grant_tools`/`grant_toolset` are no-ops because everything is already visible.
 
 ### Frontend catalog
 
 ```python
-from nexus.tools.toolsets import list_frontend_toolsets
-
-catalog = list_frontend_toolsets(
-    agent_config.toolsets,
+catalog = registry.list_frontend_toolsets(
     tool_descriptions={"memory.write": "Save a fact"},
 )
 # → ToolsetCatalog entries with visibility=frontend only
@@ -174,9 +203,47 @@ catalog = list_frontend_toolsets(
 
 Expose this from your `/tools` or settings API so the UI can show toggleable packs.
 
+## Package discovery
+
+Scan a Python package for standalone `@tool` functions and register them in one call:
+
+```python
+from nexus.tools.registry import ToolRegistry
+
+registry = ToolRegistry().discover_package(
+    "myapp.tools",
+    plugin_name="tenant",  # → tenant.execute_sql, tenant.memory_write, …
+    skip={"helpers", "toolsets"},
+)
+```
+
+| Argument | Effect |
+|----------|--------|
+| `plugin_name="tenant"` | Namespaced registration (`tenant.<tool_name>`) |
+| `plugin_name=None` or `""` | Flat names (same as `register_tool(..., plugin_name="")`) |
+| `skip` | Submodule basenames to skip (e.g. `registry_factory`, `toolsets`) |
+
+Public registry helpers (prefer these over reading private `_tools`):
+
+| Method | Purpose |
+|--------|---------|
+| `has(full_name)` | Whether a tool is registered |
+| `tool_names()` | Sorted list of registered names |
+| `get_tool(full_name)` | Callable + optional plugin instance |
+| `count()` | Number of registered tools |
+| `schemas_for(names)` | LLM schema dicts for a name list |
+| `discover_package(...)` | Import submodules and register `@tool` functions |
+| `define_toolset(...)` | Define a named toolset (validates tools/includes) |
+| `has_toolset(name)` / `get_toolset(name)` | Look up a defined toolset |
+| `list_toolsets()` | All defined toolsets |
+| `list_frontend_toolsets(...)` | Catalog of `visibility="frontend"` packs |
+| `resolve_toolset(name_or_names)` | Expand toolset name(s) → concrete tool name set (`None` → no restriction) |
+
+Because `define_toolset` validates its tools and includes when called, a typo fails at import/build time — there is no separate boot-time validation step to run.
+
 ## One registry, many agents
 
-Build one `ToolRegistry` at app startup. Pass the same instance to every runner. Per-agent differences come from `tool_plugins` and toolsets on each `AgentConfig`.
+Build one `ToolRegistry` at app startup. Define its toolsets, then pass the same instance to every runner. Per-agent differences come from `tool_plugins` and the single `toolset` field on each `AgentConfig`.
 
 ## YAML orchestration plugins
 
@@ -194,4 +261,4 @@ You can also pass a pre-built `ToolRegistry` to `OrchestrationRuntime.from_manif
 - [Getting started (Python)](../getting-started-python.md)
 - [Runtime control](../guides/runtime-control.md) — pause/resume for client tools
 - [Skills](skills.md) — different from custom tools; uses agentskills.io folders
-- [Agent runner](agent-runner.md) — `enabled_toolsets` and `resume()`
+- [Agent runner](agent-runner.md) — `toolset`, runtime grants, and `resume()`

@@ -51,28 +51,6 @@ def resolve_toolset_tools(
     return out
 
 
-def effective_tools(
-    *,
-    base_toolsets: list[str],
-    enabled_toolsets: Optional[list[str]],
-    optional_toolsets: list[str],
-    toolsets: dict[str, Toolset],
-    channel_override: Optional[list[str]] = None,
-) -> set[str]:
-    """Resolve the concrete tool name set for one request."""
-    if channel_override is not None:
-        names = channel_override
-    else:
-        names = list(base_toolsets)
-        for name in enabled_toolsets or []:
-            if name in optional_toolsets or name in toolsets:
-                names.append(name)
-    tools: set[str] = set()
-    for name in names:
-        tools |= resolve_toolset_tools(name, toolsets)
-    return tools
-
-
 def list_frontend_toolsets(
     toolsets: dict[str, Toolset],
     *,

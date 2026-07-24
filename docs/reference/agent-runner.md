@@ -56,9 +56,10 @@ When `should_persist` is `False`, the loop still runs in memory for that request
 | `session_id` | No | from `RunContext` or new UUID | Override chat thread id for this call |
 | `initial_context` | No | `None` | Key/value merged into session metadata once |
 | `stream` | No | `config.stream_output` | If `True`, raises — use `run_stream()` instead |
-| `enabled_toolsets` | No | `None` | Optional toolset packs to enable (see [tools.md](tools.md)) |
 
 Returns `AgentRunResult` with `final_response`, `turns_used`, `status`, `pending_interactions` (when `status="paused"`), etc.
+
+The agent's tool allow-list comes from `AgentConfig.toolset` (resolved against the runner's tool registry), or from a per-run `run_context["toolset_override"]`. See [tools.md](tools.md).
 
 ## AgentRunner.run_stream()
 
@@ -67,7 +68,6 @@ Returns `AgentRunResult` with `final_response`, `turns_used`, `status`, `pending
 | `user_message` | Yes | — | The user's input text |
 | `session_id` | No | from `RunContext` or new UUID | Override chat thread id |
 | `stream` | No | `config.stream_output` | Should be `True` for streaming |
-| `enabled_toolsets` | No | `None` | Optional toolset packs to enable |
 
 Returns `AsyncIterator[AgentStreamEvent]`. Event types include `content`, `tool_call`, `client_tool_call`, `elicitation`, `paused`, `final_response`, etc. See [streaming.md](streaming.md).
 
@@ -89,6 +89,18 @@ result = await runner.resume(
 ```
 
 Raises if the session is missing or has no pending interactions. Full flow: [runtime-control.md](../guides/runtime-control.md#pause-and-resume-client-tools).
+
+## Runtime tool granting
+
+Adjust a live agent's tool allow-list between turns (schemas are re-filtered each turn):
+
+| Method | What it does |
+|--------|--------------|
+| `grant_tools(names)` | Add explicit tool name(s) to the allow-list |
+| `grant_toolset(name_or_names)` | Resolve a defined toolset and union it in |
+| `revoke_tools(names)` | Remove tool name(s) from the allow-list |
+
+These are no-ops when the agent has no toolset restriction (`config.toolset=None`), because every registered tool is already visible. See [tools.md](tools.md#runtime-tool-granting).
 
 ## AgentOrchestrator
 

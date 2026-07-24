@@ -11,7 +11,6 @@ from nexus.config.memory import MemoryConfig
 from nexus.config.rcs import RuntimeContextSummarizerConfig
 from nexus.config.storage import SessionStorageConfig
 from nexus.skills.config import SkillsConfig
-from nexus.tools.toolsets import Toolset
 
 
 class AgentPersonaConfig(BaseModel):
@@ -91,17 +90,13 @@ class AgentConfig(BaseModel):
     tool_plugins: list[str] = Field(
         default_factory=list, description="Namespaces of tools to register"
     )
-    toolsets: dict[str, Toolset] = Field(
-        default_factory=dict,
-        description="Named toolset packs (base + optional frontend packs)",
-    )
-    base_toolsets: list[str] = Field(
-        default_factory=list,
-        description="Always-on toolset names for this agent",
-    )
-    optional_toolsets: list[str] = Field(
-        default_factory=list,
-        description="Toolsets the client may enable per request",
+    toolset: Optional[Union[str, list[str]]] = Field(
+        default=None,
+        description=(
+            "Toolset name (or list of names) defined on the agent's tool "
+            "registry. Resolved to the agent's tool allow-list at run time. "
+            "None means no restriction (all registered tools are visible)."
+        ),
     )
     skills: SkillsConfig = Field(
         default_factory=SkillsConfig,

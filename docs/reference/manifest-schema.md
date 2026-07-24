@@ -47,9 +47,7 @@ Agents accept the same fields as `AgentConfig` plus orchestration persona keys:
 | `persona.prompt_args` | No | `{}` | Extra Jinja variables (flattened at render time; stored on persona) |
 | `turns` | No | `TurnConfig()` defaults | Loop limits |
 | `tool_plugins` | No | `[]` | Allow-list of plugin namespaces |
-| `toolsets` | No | `{}` | Named toolset packs (name → tools / includes / visibility) |
-| `base_toolsets` | No | `[]` | Always-on toolset names for this agent |
-| `optional_toolsets` | No | `[]` | Packs the client may enable per request via `enabled_toolsets` |
+| `toolset` | No | `None` | Toolset name or list of names (packs are defined on the tool registry in code) |
 | `memory` | No | disabled | Cross-session user memory settings |
 | `context_summary` | No | disabled | Rolling conversation summary (`summarize_on`) |
 | `rcs` | No | disabled | Long-context summarization |
@@ -71,24 +69,18 @@ When documenting the agent `skills:` block, these fields control learned skills 
 | `skills.inject_learned` | No | `True` | Inject learned skills into the system prompt |
 | `skills.expose_manage_tools` | No | `False` | Register `skill_manage.*` tools |
 
-### Agent toolsets (YAML sketch)
+### Agent toolset (YAML sketch)
+
+Toolset packs are defined in code on the `ToolRegistry` (`registry.define_toolset(...)`); the manifest only selects which pack(s) an agent uses:
 
 ```yaml
 agents:
   assistant:
-    toolsets:
-      core:
-        description: Always available
-        tools: [memory.write, memory.search]
-      attachments:
-        description: File tools
-        visibility: frontend
-        tools: [files.read]
-    base_toolsets: [core]
-    optional_toolsets: [attachments]
+    toolset: core                 # a single pack name
+    # toolset: [core, attachments]  # or a list of names
 ```
 
-Enable optional packs per request with `enabled_toolsets` on `run()` / `run_stream()` — see [tools.md](tools.md).
+Define the packs when you build the registry, then pass that registry to `OrchestrationRuntime.from_manifest(...)`. See [tools.md](tools.md).
 
 See [agent-config.md](agent-config.md) for nested fields (`turns`, `memory`, `rcs`, `skills`).
 
