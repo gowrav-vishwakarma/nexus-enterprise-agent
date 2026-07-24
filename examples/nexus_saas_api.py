@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import warnings
+from contextlib import asynccontextmanager
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
@@ -32,7 +33,7 @@ except ImportError:
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, SecretStr, Field
+from pydantic import BaseModel, ConfigDict, SecretStr, Field
 
 # ── NEXUS imports (validated against codebase) ────────────────────────────────
 from nexus.config.agent import AgentConfig, AgentPersonaConfig, TurnConfig, AgentGroupConfig
@@ -276,8 +277,7 @@ class ResolvedTenant(BaseModel):
     plan: Plan
     storage_config: SessionStorageConfig
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 # =============================================================================
@@ -464,11 +464,8 @@ class NexusTenantConfigFactory:
 # 5. FASTAPI APP & RESOLVERS
 # =============================================================================
 
-app = FastAPI(title="Nexus SaaS API")
-
-
-@app.on_event("startup")
-async def log_custom_llm_config() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     provider, base_url, _, model = NexusTenantConfigFactory._resolve_custom_llm_env()
     if base_url:
         logger.info(
@@ -477,6 +474,10 @@ async def log_custom_llm_config() -> None:
             base_url,
             model,
         )
+    yield
+
+
+app = FastAPI(title="Nexus SaaS API", lifespan=lifespan)
 
 
 # InMemory DB mock for tenants

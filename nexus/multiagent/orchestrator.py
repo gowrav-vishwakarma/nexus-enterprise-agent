@@ -457,15 +457,14 @@ class AgentOrchestrator:
         total_tokens_out = 0
         total_tokens_saved = 0
 
-        for name, member in self._members.items():
-            if name == supervisor_name:
-                continue
+        def _make_delegate_tool(member_name: str, member_obj: Any):
+            """Build a delegate tool whose signature exposes only ``task_input``.
 
-            async def call_member_tool(
-                task_input: str,
-                member_name: str = name,
-                member_obj: Any = member,
-            ) -> str:
+            ``member_name``/``member_obj`` are captured in the closure (not as
+            default parameter values) so they are not surfaced to the LLM as
+            tool parameters and do not break JSON-schema generation.
+            """
+            async def call_member_tool(task_input: str) -> str:
                 logger.info(
                     "Supervisor calling subtask agent '%s' with input: %s",
                     member_name,
@@ -491,16 +490,22 @@ class AgentOrchestrator:
                 return "Failed to run sub-agent."
 
             call_member_tool._nexus_tool = True
-            call_member_tool._tool_name = f"delegate_to_{name}"
+            call_member_tool._tool_name = f"delegate_to_{member_name}"
             call_member_tool._tool_description = (
-                f"Delegate a sub-task to the specialized helper agent named {name}. "
+                f"Delegate a sub-task to the specialized helper agent named {member_name}. "
                 "Input is the request details."
             )
             call_member_tool._tool_tags = ["multiagent", "delegate"]
             call_member_tool._tool_requires_approval = False
             call_member_tool._tool_timeout_seconds = 60
+            return call_member_tool
 
-            self.tool_registry.register_tool(call_member_tool, plugin_name="supervisor")
+        for name, member in self._members.items():
+            if name == supervisor_name:
+                continue
+            self.tool_registry.register_tool(
+                _make_delegate_tool(name, member), plugin_name="supervisor"
+            )
 
         try:
             logger.info(
@@ -576,15 +581,15 @@ class AgentOrchestrator:
         status = "completed"
         error_msg: Optional[str] = None
 
-        for name, member in self._members.items():
-            if name == supervisor_name:
-                continue
+        def _make_delegate_tool(member_name: str, member_obj: Any):
+            """Build a delegate tool whose signature exposes only ``task_input``.
 
-            async def call_member_tool(
-                task_input: str,
-                member_name: str = name,
-                member_obj: Any = member,
-            ) -> str:
+            See the non-streaming supervisor for rationale: capturing
+            ``member_name``/``member_obj`` in the closure (not as default
+            parameter values) keeps them out of the LLM-visible schema and
+            avoids non-serializable-default JSON-schema warnings.
+            """
+            async def call_member_tool(task_input: str) -> str:
                 if isinstance(member_obj, AgentRunner):
                     sub_res = await member_obj.run(task_input, stream=False)
                     member_results[member_name] = sub_res
@@ -605,14 +610,21 @@ class AgentOrchestrator:
                 return "Failed to run sub-agent."
 
             call_member_tool._nexus_tool = True
-            call_member_tool._tool_name = f"delegate_to_{name}"
+            call_member_tool._tool_name = f"delegate_to_{member_name}"
             call_member_tool._tool_description = (
-                f"Delegate a sub-task to the specialized helper agent named {name}."
+                f"Delegate a sub-task to the specialized helper agent named {member_name}."
             )
             call_member_tool._tool_tags = ["multiagent", "delegate"]
             call_member_tool._tool_requires_approval = False
             call_member_tool._tool_timeout_seconds = 60
-            self.tool_registry.register_tool(call_member_tool, plugin_name="supervisor")
+            return call_member_tool
+
+        for name, member in self._members.items():
+            if name == supervisor_name:
+                continue
+            self.tool_registry.register_tool(
+                _make_delegate_tool(name, member), plugin_name="supervisor"
+            )
 
         try:
             async for event in supervisor.run_stream(user_message, stream=True):

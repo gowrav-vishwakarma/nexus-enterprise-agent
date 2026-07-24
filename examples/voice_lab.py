@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
@@ -90,7 +91,46 @@ SERVERS_PATH = Path(os.environ.get("NEXUS_SERVERS_CONFIG", str(ROOT / "servers.y
 AGENT_NAME = os.environ.get("NEXUS_VOICE_AGENT", "voice_grpc")
 LAB_PORT = int(os.environ.get("VOICE_LAB_PORT", "8787"))
 
-app = FastAPI(title="Nexus Voice Lab", description="Real voice testing UI for the framework")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    # Pipeline + LLM + media adapter logs to console during voice sessions.
+    for name in ("nexus.runner", "nexus.llm", "nexus.realtime", "nexus.server", "examples.voice_lab"):
+        logging.getLogger(name).setLevel(logging.INFO)
+    _load_manifest()
+    refs = _media_server_refs()
+    if _registry and refs:
+        results = await _registry.check_all(refs)
+        bad = [k for k, v in results.items() if not v]
+        if bad:
+            logger.warning(
+                "Media server(s) not healthy: %s — start with: "
+                "uv run python -m nexus.server up -c %s",
+                ", ".join(bad),
+                SERVERS_PATH,
+            )
+        else:
+            logger.info("All media servers healthy: %s", ", ".join(refs))
+
+    global _language_validation
+    cfg = _rt_config or resolve_realtime_agent(AGENT_NAME, _load_manifest(), RunContext())
+    from nexus.realtime.validation import run_startup_language_validation
+
+    issues = await run_startup_language_validation(
+        cfg,
+        servers=_manifest_servers(),
+        server_registry=_registry,
+    )
+    _language_validation = [
+        {"severity": i.severity, "code": i.code, "message": i.message} for i in issues
+    ]
+    yield
+
+
+app = FastAPI(title="Nexus Voice Lab", description="Real voice testing UI for the framework", lifespan=lifespan)
 
 _manifest: OrchestrationManifest | None = None
 _registry: ServerRegistry | None = None
@@ -150,42 +190,6 @@ def _safe_llm_dict() -> dict[str, Any]:
     }
 
 
-@app.on_event("startup")
-async def _startup() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    # Pipeline + LLM + media adapter logs to console during voice sessions.
-    for name in ("nexus.runner", "nexus.llm", "nexus.realtime", "nexus.server", "examples.voice_lab"):
-        logging.getLogger(name).setLevel(logging.INFO)
-    _load_manifest()
-    refs = _media_server_refs()
-    if _registry and refs:
-        results = await _registry.check_all(refs)
-        bad = [k for k, v in results.items() if not v]
-        if bad:
-            logger.warning(
-                "Media server(s) not healthy: %s — start with: "
-                "uv run python -m nexus.server up -c %s",
-                ", ".join(bad),
-                SERVERS_PATH,
-            )
-        else:
-            logger.info("All media servers healthy: %s", ", ".join(refs))
-
-    global _language_validation
-    cfg = _rt_config or resolve_realtime_agent(AGENT_NAME, _load_manifest(), RunContext())
-    from nexus.realtime.validation import run_startup_language_validation
-
-    issues = await run_startup_language_validation(
-        cfg,
-        servers=_manifest_servers(),
-        server_registry=_registry,
-    )
-    _language_validation = [
-        {"severity": i.severity, "code": i.code, "message": i.message} for i in issues
-    ]
 
 
 @app.get("/")

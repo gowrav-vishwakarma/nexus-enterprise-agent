@@ -148,6 +148,10 @@ line-length = 100
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-m 'not live_llm'"
+filterwarnings = [
+    "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning:pydantic\\.main",
+    "ignore:Using `httpx` with `starlette\\.testclient` is deprecated",
+]
 markers = [
     "live_llm: real LLM API calls; opt-in only (pytest -m live_llm)",
     "live_gpu: real GPU model server smoke tests; opt-in only",
