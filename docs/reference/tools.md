@@ -129,29 +129,29 @@ Toolsets are **owned by the `ToolRegistry`**. You define them on the same regist
 ### Defining a toolset
 
 ```python
+from nexus.tools.decorators import tool
 from nexus.tools.registry import ToolRegistry
 
-registry = ToolRegistry()
-# ... register tools first (register_tool / register_plugin / discover_package) ...
+@tool(name="memory_write", description="Save a fact")
+def memory_write(fact: str) -> str:
+    ...
 
-# Define children before parents (includes must already exist).
-registry.define_toolset("memory", ["memory.write", "memory.search"])
-registry.define_toolset(
+registry = ToolRegistry()
+# Pass @tool callables — each is registered with a flat name automatically.
+registry.add_toolset("memory", [memory_write, memory_search])
+registry.add_toolset(
     "chat_core",
-    ["reports.gst"],
     includes=["memory"],
-)
-registry.define_toolset(
-    "attachments",
-    ["files.upload", "files.list"],
-    description="Attach and scan files",
-    visibility="frontend",
 )
 ```
 
-`define_toolset` raises `ValueError` immediately if any tool name is not registered, or if an `includes` entry is not an already-defined toolset. This replaces any separate boot-time validation step — a typo fails at import/build time.
+You can still pass registered tool name strings to `define_toolset` / `add_toolset` when tools were added with `add_tool` or `register_tool` first. Define child toolsets before parents (`includes` must already exist).
 
-### define_toolset arguments
+`add_toolset` / `define_toolset` raises `ValueError` immediately if any tool name is not registered, or if an `includes` entry is not an already-defined toolset.
+
+Use `registry.add_tool(fn)` to register a standalone @tool with a flat name. Use `await registry.execute_tool("memory_write", args, ctx)` to run by flat or legacy namespaced name.
+
+### define_toolset / add_toolset arguments
 
 | Name | Required? | Default | What it does |
 |------|-----------|---------|--------------|

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from nexus.tools.context import RunContext
 from nexus.tools.decorators import tool
 from nexus.tools.registry import ToolRegistry
 
@@ -21,6 +22,30 @@ def sample_tool(x: str) -> str:
 @tool(name="other_tool", description="Other")
 def other_tool(x: str) -> str:
     return x
+
+
+def test_add_toolset_registers_tool_objects():
+    reg = ToolRegistry()
+    reg.add_toolset("pack", [sample_tool, other_tool])
+    assert reg.has("sample_tool")
+    assert reg.has("other_tool")
+    assert reg.resolve_toolset("pack") == {"sample_tool", "other_tool"}
+
+
+def test_add_tool_flat_name():
+    reg = ToolRegistry()
+    name = reg.add_tool(sample_tool)
+    assert name == "sample_tool"
+    assert reg.has("sample_tool")
+
+
+def test_execute_tool_flat_name():
+    import asyncio
+
+    reg = ToolRegistry()
+    reg.add_tool(sample_tool)
+    out = asyncio.run(reg.execute_tool("sample_tool", {"x": "hi"}, RunContext()))
+    assert out == "hi"
 
 
 def test_discover_package_namespaced():

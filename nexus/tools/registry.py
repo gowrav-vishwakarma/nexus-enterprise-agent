@@ -69,6 +69,23 @@ class ToolRegistry:
                 }
                 logger.info("Registered tool: %s", full_name)
 
+    @staticmethod
+    def _is_nexus_tool(obj: Any) -> bool:
+        return callable(obj) and getattr(obj, "_nexus_tool", False)
+
+    def _register_tool_flat(self, func: Callable[..., Any]) -> str:
+        """Register *func* with a flat name and return that registry key."""
+        if not self._is_nexus_tool(func):
+            raise TypeError(
+                f"Expected an @tool-decorated callable, got {type(func).__name__!r}"
+            )
+        self.register_tool(func, plugin_name=None)
+        return getattr(func, "_tool_name", func.__name__)
+
+    def add_tool(self, func: Callable[..., Any]) -> str:
+        """Register a standalone @tool with a flat name (no plugin prefix)."""
+        return self._register_tool_flat(func)
+
     def register_tool(
         self,
         func: Callable[..., Any],
@@ -123,6 +140,42 @@ class ToolRegistry:
     # ------------------------------------------------------------------
     # Toolsets (named bundles owned by this registry)
     # ------------------------------------------------------------------
+    def _coerce_toolset_tool_names(self, tools: Iterable[Any]) -> list[str]:
+        """Turn toolset entries (strings or @tool callables) into registry keys."""
+        names: list[str] = []
+        for item in tools:
+            if isinstance(item, str):
+                names.append(item)
+            elif self._is_nexus_tool(item):
+                names.append(self._register_tool_flat(item))
+            else:
+                raise TypeError(
+                    "Toolset tools must be registered tool name strings or "
+                    f"@tool callables, got {type(item).__name__!r}"
+                )
+        return names
+
+    def add_toolset(
+        self,
+        name: str,
+        tools: Iterable[Any] = (),
+        *,
+        includes: Iterable[str] = (),
+        description: str = "",
+        visibility: str = "hidden",
+        default_enabled: bool = False,
+    ) -> Toolset:
+        """Define a toolset and register any @tool callables in *tools*."""
+        tool_names = self._coerce_toolset_tool_names(tools)
+        return self.define_toolset(
+            name,
+            tool_names,
+            includes=includes,
+            description=description,
+            visibility=visibility,
+            default_enabled=default_enabled,
+        )
+
     def define_toolset(
         self,
         name: str,
@@ -329,6 +382,34 @@ class ToolRegistry:
         """Return ``server`` or ``client`` for a registered tool."""
         meta = self._tool_metadata.get(full_name) or {}
         return meta.get("execution", "server")
+
+    def resolve_tool_name(self, name: str) -> str:
+        """Map bare, flat, or legacy namespaced names to a registry key."""
+        if self.has(name):
+            return name
+        for prefix in ("tenant.", "admin."):
+            if name.startswith(prefix):
+                bare = name.split(".", 1)[1]
+                if self.has(bare):
+                    return bare
+        if "." not in name:
+            for qualified in (f"tenant.{name}", f"admin.{name}"):
+                if self.has(qualified):
+                    return qualified
+        raise ValueError(f"Tool '{name}' not found in registry")
+
+    async def execute_tool(
+        self,
+        name: str,
+        args: dict[str, Any],
+        run_context: RunContext,
+    ) -> Any:
+        """Execute a tool by flat or legacy namespaced *name*."""
+        full_name = self.resolve_tool_name(name)
+        if full_name in self._tools:
+            return await self.execute(full_name, "", args, run_context)
+        plugin, _, tool = full_name.partition(".")
+        return await self.execute(plugin, tool, args, run_context)
 
     async def execute(
         self,
