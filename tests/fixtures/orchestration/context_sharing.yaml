@@ -1,0 +1,30 @@
+version: "1"
+prompts_module: ./basic_prompts.py
+root: research_team
+
+defaults:
+  llm: &default_llm
+    provider: openai
+    model: gpt-4o-mini
+    api_key: mock-key
+
+agents:
+  supervisor:
+    llm: *default_llm
+    persona:
+      role: Supervisor
+      goal: Coordinate
+      prompt: researcher_system
+
+  researcher:
+    llm: *default_llm
+    persona:
+      role: Researcher
+      goal: Research
+      prompt: researcher_system
+
+groups:
+  research_team:
+    pattern: supervisor
+    context_sharing: shared
+    members: [supervisor, researcher]

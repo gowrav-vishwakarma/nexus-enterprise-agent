@@ -65,6 +65,22 @@ pool = ctx.service("db")
 scope = ctx.to_scope()  # SessionScope for storage load/list/delete
 ```
 
+## Nested runs: `derive_child()`
+
+When the orchestrator (or your code) starts a sub-agent, it builds a member context with:
+
+```python
+child = parent.derive_child(
+    session_id="team-sess_researcher",
+    is_subagent=True,
+    include_context=True,  # False when group context_sharing is isolated
+)
+```
+
+**Always copied:** identity fields, `auth`, `channel`, flags, and all entries from `bind_services()` / `with_service()`.
+
+**Copied when `include_context=True`:** shallow copies of `metadata` and `state` (refreshed again at run time when `context_sharing` is `inherit` or `shared`).
+
 ## When you need it
 
 Use an explicit `RunContext` when you have:
@@ -103,6 +119,8 @@ See [runtime-control.md](../guides/runtime-control.md) for supervision and branc
 ## Multi-agent teams
 
 Pass one `RunContext` into `AgentOrchestrator` or `OrchestrationRuntime`. Member runners get derived chat ids: `{group_session_id}_{member_name}` and, by default, `is_subagent=True` (see `AgentGroupConfig.persist_members`).
+
+Members are constructed with `RunContext.derive_child()` so they inherit identity and services from the group context. See [multi-agent.md](multi-agent.md) for `context_sharing`.
 
 Set `session_id` **before** creating the orchestrator/runtime.
 

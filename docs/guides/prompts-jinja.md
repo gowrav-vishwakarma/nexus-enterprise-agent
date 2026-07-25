@@ -61,6 +61,8 @@ At manifest load, the framework stores the **raw** template string on `persona.s
 | `domain`, … | YAML `persona.prompt_args` (also available as top-level keys and as `prompt_args` dict) |
 | `tenant_id`, `user_id`, `session_id`, `request_id` | `RunContext` + session |
 | `metadata` | `RunContext.metadata` |
+| `metadata.nexus_delegation` | Set on sub-agents by the orchestrator (group name, member, optional `delegated_by`); default system template shows a **Delegated task** block |
+| `state` | `RunContext.state` (checkpoint; also `session.state` when loading a saved chat) |
 | `metadata.reply_language`, `metadata.reply_language_name`, `metadata.allowed_languages` | Voice pipeline (see [realtime-agents.md](../reference/realtime-agents.md#voice-metadata-prompts-and-tools)) |
 | `user_memory` | Cross-session facts (when `memory.enabled`) |
 | `summary_text` | Rolling summary of folded turns (when `context_summary` enabled) |

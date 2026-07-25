@@ -85,6 +85,12 @@ Background: {{ persona.backstory }}
 {% endfor %}
 {% endif %}
 
+{% if metadata.nexus_delegation %}
+## Delegated task
+You are working as a sub-agent inside team "{{ metadata.nexus_delegation.group }}"{% if metadata.nexus_delegation.delegated_by %}, delegated by "{{ metadata.nexus_delegation.delegated_by }}"{% endif %}.
+Use the session state above as shared context. Return a focused result for your part of the task only.
+{% endif %}
+
 Today's date: {{ current_date }}"""
 
 # Entity extraction prompt

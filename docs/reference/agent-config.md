@@ -88,6 +88,7 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 | `session_id_prefix` | No | `""` | Prefix for member chat ids |
 | `supervisor` | No | `None` | Lead member name for supervisor pattern |
 | `persist_members` | No | `False` | Persist member chat sessions when `True` |
+| `context_sharing` | No | `inherit` | `isolated`, `inherit`, or `shared` for group metadata/state |
 | `rcs` | No | disabled | Group-level RCS settings |
 | `stream_output` | No | `False` | Default streaming mode |
 

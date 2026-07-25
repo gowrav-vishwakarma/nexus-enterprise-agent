@@ -106,7 +106,7 @@ groups:
 
 ### Pipeline (fixed order)
 
-**What it does:** Members run one after another. Member N+1 receives member N's **`final_response` string** as its input — not the full chat log.
+**What it does:** Members run one after another. Member N+1 receives member N's **`final_response` string** as its input — not the full chat log. With `context_sharing: shared` on the group, **`RunContext.state`** is also merged forward after each step (see [multi-agent.md](../reference/multi-agent.md#context-sharing-context_sharing)).
 
 **When to use it:** Predictable workflows (research → analyze → summarize).
 

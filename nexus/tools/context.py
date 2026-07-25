@@ -71,6 +71,33 @@ class RunContext(BaseModel):
         self._services.update(services)
         return self
 
+    def derive_child(
+        self,
+        *,
+        session_id: Optional[str] = None,
+        is_subagent: bool = True,
+        include_context: bool = True,
+    ) -> "RunContext":
+        """Build a context for a nested agent run (sub-agent or sub-group)."""
+        child = RunContext(
+            tenant_id=self.tenant_id,
+            company_id=self.company_id,
+            user_id=self.user_id,
+            user_name=self.user_name,
+            session_id=session_id,
+            request_id=self.request_id,
+            channel=self.channel,
+            branch_id=self.branch_id,
+            auth=dict(self.auth),
+            is_cron=self.is_cron,
+            is_subagent=is_subagent,
+            persistable=self.persistable,
+            metadata=dict(self.metadata) if include_context else {},
+            state=dict(self.state) if include_context else {},
+        )
+        child.bind_services(**self._services)
+        return child
+
     def to_scope(self) -> "SessionScope":
         """Build a SessionScope from identity fields."""
         from nexus.session.scope import SessionScope

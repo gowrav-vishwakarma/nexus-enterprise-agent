@@ -30,6 +30,7 @@ Groups do **not** have an `llm` field. Each member's `AgentConfig` has its own L
 | `session_id_prefix` | No | `""` | Prefix for member chat ids |
 | `supervisor` | No | `None` | Lead member for `supervisor` pattern (else name heuristic) |
 | `persist_members` | No | `False` | When `False`, members run with `is_subagent` and skip durable chat persistence |
+| `context_sharing` | No | `inherit` | `isolated`, `inherit`, or `shared` (write-back to group after each member) |
 | `max_turns` | No | `20` | Total turns across members (**enforced** by the orchestrator) |
 
 ## Member chat ids
@@ -49,6 +50,24 @@ Python-only example: [run_team_python.py](../../examples/orchestration/run_team_
 ## Pipeline handoff
 
 Member N+1 receives member N's **`final_response` string** as its `user_message` — not the full chat log.
+
+With `context_sharing: shared`, members also share **`RunContext.state`** and **`RunContext.metadata`**: each member run syncs down from the group before it starts and merges back after it finishes, so the next member (and the system prompt via Jinja) can see structured checkpoint data — not only the previous agent's text reply.
+
+## Context sharing (`context_sharing`)
+
+| Mode | Behavior |
+|------|----------|
+| `isolated` | Members get identity + services only; empty `metadata`/`state` |
+| `inherit` (default) | Group `metadata`/`state` copied to each member before it runs; member writes stay local |
+| `shared` | Same as `inherit`, plus member bags merge back into the group after each run (pipeline / supervisor) |
+
+Sync runs at **delegation time**, not only at orchestrator construction, so a supervisor can update group state and specialists see it on the next `delegate_to_*` call.
+
+Members receive a `metadata.nexus_delegation` breadcrumb (group name, member name, optional `delegated_by`). The default system prompt template includes a short **Delegated task** section when that key is present.
+
+**Supervisor state handoff:** the lead agent's tools call `ctx.set_state(...)` on the member `RunContext` (same object the runner uses). Before each delegate, the orchestrator merges the supervisor's live state into the group context and syncs down to the specialist. No extra LLM tool parameters are required.
+
+**Parallel + `shared`:** members receive a down-sync before they run, but write-back is skipped (concurrent races). Use pipeline or supervisor for shared mutable state.
 
 ## Nested groups (YAML)
 
@@ -82,10 +101,10 @@ HTTP example in [SaaS guide](../guides/saas-example.md).
 
 | Kind | Shared by default? |
 |------|-------------------|
-| `tenant_id`, `user_id` | Yes |
-| `metadata` | Yes |
+| `tenant_id`, `user_id`, `company_id`, `auth`, `channel`, services | Yes (via `RunContext.derive_child`) |
+| `metadata`, `state` | Yes when `context_sharing` is `inherit` or `shared` (sync at run time) |
 | Tool registry | Only if you pass the same instance |
-| Chat history | No — separate JSON per member |
+| Chat history | No — separate JSON per member (unless `persist_members: true`) |
 | LLM config | No — per member |
 
 ## Next steps

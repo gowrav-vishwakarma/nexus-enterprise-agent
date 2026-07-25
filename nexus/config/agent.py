@@ -154,6 +154,10 @@ class AgentGroupConfig(BaseModel):
         default=False,
         description="When False, member runs use is_subagent and skip durable chat persistence",
     )
+    context_sharing: Literal["isolated", "inherit", "shared"] = Field(
+        default="inherit",
+        description="How members receive group metadata/state: isolated, inherit, or shared with write-back",
+    )
     rcs: RuntimeContextSummarizerConfig = Field(
         default_factory=RuntimeContextSummarizerConfig,
         description="RCS configuration for group sessions",

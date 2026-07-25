@@ -113,6 +113,7 @@ groups:
     pattern: supervisor                 # supervisor delegates via delegate_to_* tools
     supervisor: supervisor              # optional; default is name heuristic
     persist_members: false              # optional; default false — members skip durable persistence
+    context_sharing: inherit             # optional; isolated | inherit | shared
     session_id_prefix: team_
     members: [supervisor, analysis_pipeline]  # nested group reference
 

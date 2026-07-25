@@ -42,15 +42,14 @@ class AgentOrchestrator:
         self._members: dict[str, Union[AgentRunner, "AgentOrchestrator"]] = {}
 
         for member in self.config.members:
-            m_ctx = RunContext(
-                tenant_id=self.run_context.tenant_id,
-                user_id=self.run_context.user_id,
+            m_ctx = self.run_context.derive_child(
                 session_id=(
                     f"{self.config.session_id_prefix}{self.run_context.session_id}_{member.name}"
                     if self.run_context.session_id
                     else None
                 ),
                 is_subagent=not self.config.persist_members,
+                include_context=self.config.context_sharing != "isolated",
             )
 
             if isinstance(member, AgentConfig):
@@ -191,6 +190,38 @@ class AgentOrchestrator:
 
         return None, "No members available in supervisor group"
 
+    def _member_context(self, member: Union[AgentRunner, "AgentOrchestrator"]) -> RunContext:
+        return member.run_context
+
+    def _sync_down(
+        self,
+        member: Union[AgentRunner, "AgentOrchestrator"],
+        *,
+        delegated_by: Optional[str] = None,
+    ) -> None:
+        """Refresh a member's metadata/state from the group context before it runs."""
+        if self.config.context_sharing == "isolated":
+            return
+        ctx = self._member_context(member)
+        ctx.metadata.update(self.run_context.metadata)
+        ctx.state.update(self.run_context.state)
+        ctx.metadata["nexus_delegation"] = {
+            "group": self.config.name,
+            "member": getattr(member.config, "name", None),
+            "delegated_by": delegated_by,
+            "pattern": self.config.pattern,
+        }
+
+    def _sync_up(self, member: Union[AgentRunner, "AgentOrchestrator"]) -> None:
+        """Merge a member's metadata/state back into the group context."""
+        if self.config.context_sharing != "shared":
+            return
+        ctx = self._member_context(member)
+        member_meta = dict(ctx.metadata)
+        member_meta.pop("nexus_delegation", None)
+        self.run_context.metadata.update(member_meta)
+        self.run_context.state.update(ctx.state)
+
     async def _run_pipeline(
         self,
         user_message: str,
@@ -222,12 +253,14 @@ class AgentOrchestrator:
             logger.info("Pipeline: Executing member '%s'", name)
 
             try:
+                self._sync_down(member)
                 if isinstance(member, AgentRunner):
                     if stream:
                         raise ValueError("Use run_stream() for streaming pipeline execution.")
                     res = await member.run(
                         current_input, stream=False, max_turns=remaining
                     )
+                    self._sync_up(member)
                     member_results[name] = res
                     current_input = res.final_response or ""
                     turns_used += res.turns_used
@@ -241,6 +274,7 @@ class AgentOrchestrator:
                     res = await member.run(
                         current_input, stream=False, max_turns=remaining
                     )
+                    self._sync_up(member)
                     member_results[name] = res
                     current_input = res.final_response or ""
                     turns_used += res.turns_used
@@ -298,11 +332,13 @@ class AgentOrchestrator:
             )
 
             try:
+                self._sync_down(member)
                 if isinstance(member, AgentRunner):
                     async for event in member.run_stream(current_input, stream=True):
                         yield self._tag_member_event(name, event)
                         if event.event_type == "final_response" and event.data:
                             member_results[name] = AgentRunResult(**event.data)
+                            self._sync_up(member)
                             current_input = event.content or ""
                             final_response = event.content
                             turns_used += event.data.get("turns_used", 0)
@@ -315,6 +351,7 @@ class AgentOrchestrator:
                         yield self._tag_member_event(name, event)
                         if event.event_type == "final_response" and event.data:
                             member_results[name] = event.data
+                            self._sync_up(member)
                             current_input = event.content or ""
                             final_response = event.content
                             turns_used += event.data.get("turns_used", 0)
@@ -393,7 +430,15 @@ class AgentOrchestrator:
                 duration_ms=int((time.time() - start_time) * 1000),
             )
 
+        if self.config.context_sharing == "shared":
+            logger.warning(
+                "Group %r: context_sharing=shared does not write back from parallel "
+                "members (concurrent runs); use pipeline or supervisor for shared state",
+                self.config.name,
+            )
+
         async def run_member(name: str, member: Any) -> tuple[str, Any]:
+            self._sync_down(member)
             res = await member.run(user_message, stream=False, max_turns=budget)
             return name, res
 
@@ -443,12 +488,19 @@ class AgentOrchestrator:
         """Streaming parallel: multiplex member event streams concurrently."""
         start_time = time.time()
         names = list(self._members.keys())
+        if self.config.context_sharing == "shared":
+            logger.warning(
+                "Group %r: context_sharing=shared does not write back from parallel "
+                "members (concurrent runs); use pipeline or supervisor for shared state",
+                self.config.name,
+            )
         queue: asyncio.Queue = asyncio.Queue()
         member_results: dict[str, Any] = {}
         _DONE = object()
 
         async def pump(name: str, member: Any) -> None:
             try:
+                self._sync_down(member)
                 async for event in member.run_stream(user_message, stream=True):
                     await queue.put((name, event))
             except Exception as exc:  # pragma: no cover - member failure
@@ -565,6 +617,8 @@ class AgentOrchestrator:
                     member_name,
                     task_input[:100],
                 )
+                self._sync_up(supervisor)
+                self._sync_down(member_obj, delegated_by=supervisor_name)
                 if isinstance(member_obj, AgentRunner):
                     sub_res = await member_obj.run(
                         task_input, stream=False, max_turns=remaining
@@ -575,6 +629,7 @@ class AgentOrchestrator:
                     total_tokens_out += sub_res.total_tokens_out
                     total_tokens_saved += sub_res.total_tokens_saved_by_rcs
                     cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
+                    self._sync_up(member_obj)
                     return sub_res.final_response or "Completed with no output."
                 elif isinstance(member_obj, AgentOrchestrator):
                     sub_res = await member_obj.run(
@@ -586,6 +641,7 @@ class AgentOrchestrator:
                     total_tokens_out += sub_res.total_tokens_out
                     total_tokens_saved += sub_res.total_tokens_saved_by_rcs
                     cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
+                    self._sync_up(member_obj)
                     return sub_res.final_response or "Completed with no output."
                 return "Failed to run sub-agent."
 
@@ -625,9 +681,11 @@ class AgentOrchestrator:
                 "Supervisor: Starting execution with supervisor agent '%s'",
                 supervisor_name,
             )
+            self._sync_down(supervisor)
             supervisor_res = await supervisor.run(
                 user_message, stream=False, max_turns=remaining
             )
+            self._sync_up(supervisor)
             member_results[supervisor_name] = supervisor_res
             turns_used += supervisor_res.turns_used
             total_tokens_in += supervisor_res.total_tokens_in
@@ -707,6 +765,8 @@ class AgentOrchestrator:
                 remaining = budget - turns_used
                 if remaining <= 0:
                     return "Group max_turns budget exhausted."
+                self._sync_up(supervisor)
+                self._sync_down(member_obj, delegated_by=supervisor_name)
                 if isinstance(member_obj, AgentRunner):
                     sub_res = await member_obj.run(
                         task_input, stream=False, max_turns=remaining
@@ -717,6 +777,7 @@ class AgentOrchestrator:
                     total_tokens_out += sub_res.total_tokens_out
                     total_tokens_saved += sub_res.total_tokens_saved_by_rcs
                     cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
+                    self._sync_up(member_obj)
                     return sub_res.final_response or "Completed with no output."
                 elif isinstance(member_obj, AgentOrchestrator):
                     sub_res = await member_obj.run(
@@ -728,6 +789,7 @@ class AgentOrchestrator:
                     total_tokens_out += sub_res.total_tokens_out
                     total_tokens_saved += sub_res.total_tokens_saved_by_rcs
                     cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
+                    self._sync_up(member_obj)
                     return sub_res.final_response or "Completed with no output."
                 return "Failed to run sub-agent."
 
@@ -754,12 +816,14 @@ class AgentOrchestrator:
 
         try:
             remaining = budget - turns_used
+            self._sync_down(supervisor)
             async for event in supervisor.run_stream(
                 user_message, stream=True, max_turns=remaining if remaining > 0 else 1
             ):
                 yield self._tag_member_event(supervisor_name, event)
                 if event.event_type == "final_response" and event.data:
                     member_results[supervisor_name] = AgentRunResult(**event.data)
+                    self._sync_up(supervisor)
                     final_response = event.content
                     turns_used += event.data.get("turns_used", 0)
                     total_tokens_in += event.data.get("total_tokens_in", 0)

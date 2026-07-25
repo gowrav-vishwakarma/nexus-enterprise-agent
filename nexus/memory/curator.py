@@ -283,14 +283,15 @@ class MemoryCurator:
         curator_cfg.memory = MemoryConfig(enabled=False)
 
         sub_session_id = f"{session.session_id}__memcurator"
+        parent_ctx = self.run_context or RunContext()
         sub_runner = AgentRunner(
             config=curator_cfg,
             tool_registry=self.tool_registry,
             storage_config=self.session_manager,
-            run_context=RunContext(
-                tenant_id=getattr(self.run_context, "tenant_id", None),
-                user_id=getattr(self.run_context, "user_id", None),
+            run_context=parent_ctx.derive_child(
                 session_id=sub_session_id,
+                is_subagent=True,
+                include_context=False,
             ),
             event_emitter=self.event_emitter,
         )
