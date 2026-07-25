@@ -204,11 +204,114 @@ async for event in runner.run_stream(
 | Subgraph / specialist | `pattern: supervisor` + `delegate_to_*` |
 | User facts across threads | `cross_session_memory_store` + `user_id` ([memory.md](../reference/memory.md)) |
 
+### Redirecting to another agent (three patterns)
+
+Section 2 above is **one** `AgentRunner` (tier-1 only). It does **not** switch to the billing specialist — that is a different mechanism. Scenario item 5 (“hand off to billing”) maps to one of these:
+
+| Approach | Who decides | When to use |
+|----------|-------------|-------------|
+| **Supervisor + `delegate_to_*`** | The lead LLM calls a delegate tool | Dynamic handoff (“this looks like billing”) |
+| **App/router in Python** | Your code reads `result.state` or `on_turn_end` | Fixed rules (“if `escalated`, run billing runner”) |
+| **Pipeline** | Fixed member order in YAML | Always tier-1 → billing, not conditional |
+
+#### 1. LLM-driven redirect (supervisor team)
+
+With `pattern: supervisor`, Nexus picks a **lead** agent (first member named `supervisor`, else **first member in `members`**). For each other member it registers a tool on the shared registry:
+
+- `supervisor.delegate_to_billing_specialist(task_input: str)` → runs that member’s `AgentRunner` and returns its `final_response` to the lead.
+
+The lead must **see** those tools. If you set `toolset: support` on the lead, delegate tools (plugin `supervisor`) may be hidden. Common fixes:
+
+- Leave `toolset` unset on the lead so it sees all registered tools, **or**
+- Teach the lead in the system prompt: “For invoice disputes, call `delegate_to_billing_specialist` with a short task summary.”
+
+Example prompt line in `tier1_system`:
+
+```text
+When the user needs deep billing lookup (invoices, charges, tax lines), call
+delegate_to_billing_specialist with the customer id and question. Otherwise use support tools yourself.
+```
+
+That is **logic via the model + tools**, not a separate routing engine — same idea as LangGraph conditional edges where the router is the LLM reading state/tool results.
+
+#### 2. Deterministic redirect (your application)
+
+When routing must not depend on the model, branch **outside** the loop:
+
+```python
+async def route_support(user_message: str, session_id: str):
+    manager = tier1_runner.session_manager
+    sess = await manager.load_session(session_id, scope=tier1_runner.run_context.to_scope())
+    state = (sess.state if sess else {}) or {}
+
+    if state.get("route") == "billing" or state.get("escalated"):
+        return await billing_runner.run(user_message, session_id=f"{session_id}_billing")
+
+    result = await tier1_runner.run(user_message, session_id=session_id)
+    if result.state.get("needs_billing"):
+        return await billing_runner.run(
+            user_message,
+            session_id=f"{session_id}_billing",
+            initial_context=dict(result.state),
+        )
+    return result
+```
+
+`on_turn_end` can set flags (`ctx.state["needs_billing"] = True`) or return `TurnDecision(action="stop")` so the app runs a **different** runner on the next line — it does not invoke another agent by itself.
+
+#### 3. Logic-based **tool** choice (still one agent)
+
+Same tier-1 agent, different **tools** exposed per tenant/plan:
+
+```python
+def build_registry(plan: str) -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.add_toolset("support", [fetch_account, mark_escalate])
+    if plan == "pro":
+        registry.add_toolset("support", [issue_refund])  # refund only on pro
+    return registry
+```
+
+Or per request: `runner.grant_toolset("billing")` before `run()`. The LLM still chooses which tool to call; you control the **menu**, not the graph edge.
+
+#### 4. Fixed handoff (pipeline, not conditional)
+
+```yaml
+groups:
+  billing_flow:
+    pattern: pipeline
+    members: [tier1, billing_specialist]
+```
+
+Analyst always runs after tier-1 with tier-1’s final text as input — no “if billing then” branch. See [multi-agent.md](../reference/multi-agent.md).
+
+```mermaid
+flowchart TD
+  user[User message]
+  tier1[tier1 AgentRunner]
+  tools[Support tools]
+  delegate[delegate_to_billing_specialist]
+  billing[billing_specialist run]
+  app[Your route_support]
+
+  user --> tier1
+  tier1 --> tools
+  tier1 --> delegate
+  delegate --> billing
+  billing --> tier1
+
+  user --> app
+  app -->|state.escalated| billing
+  app -->|else| tier1
+```
+
 ---
 
 ## Section 3: YAML manifest (supervisor + billing)
 
-Declarative team: tier-1 supervisor delegates to `billing_specialist`. Tools are still registered in Python on a `ToolRegistry` passed to `OrchestrationRuntime.from_manifest()`.
+Declarative team: a **lead** tier-1 agent delegates to `billing_specialist` via auto-generated `delegate_to_billing_specialist` tools (supervisor pattern). Put the lead **first** in `members`, or name an agent `supervisor` like [research_team.yaml](../../examples/orchestration/research_team.yaml).
+
+Tools are registered in Python on a `ToolRegistry` passed to `OrchestrationRuntime.from_manifest()`. The lead agent should usually **not** use a narrow `toolset` unless that toolset includes delegate tools — see [Redirecting to another agent](#redirecting-to-another-agent-three-patterns) above.
 
 ```yaml
 version: "1"
@@ -229,10 +332,11 @@ storage:
 agents:
   tier1:
     llm: *llm
-    toolset: support
+    # No toolset — lead sees support tools + delegate_to_billing_specialist
+    tool_plugins: []
     persona:
-      role: Tier-1 support
-      goal: Resolve or escalate billing issues
+      role: Tier-1 support lead
+      goal: Resolve or delegate billing issues
       prompt: tier1_system
 
   billing_specialist:
@@ -261,9 +365,10 @@ runtime = OrchestrationRuntime.from_manifest(
     tool_registry=build_support_registry(),
 )
 result = await runtime.run("I was double charged")
+# Internally: tier1 may call supervisor.delegate_to_billing_specialist("customer X double charge...")
 ```
 
-Member chat ids are `{session_id}_{member_name}`; checkpoint `state` is **per member session** unless you copy fields in tools or use shared `RunContext.metadata` for the request only.
+Member chat ids are `{session_id}_{member_name}`; checkpoint `state` is **per member session**. Copy shared fields with `initial_context` or `ctx.set_state` in tools on a shared `RunContext` for the request if both agents need the same `customer_id`.
 
 ---
 
