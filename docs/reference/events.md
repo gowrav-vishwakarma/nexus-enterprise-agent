@@ -56,7 +56,7 @@ emitter.add_sink(WebhookEventSink("https://your-app.com/nexus-events"))
 | Turn | `turn.started`, `turn.completed`, `turn.error` |
 | Tool | `tool_call.started`, `tool_call.completed`, `tool_call.error` |
 | LLM | `llm.call_started`, `llm.call_completed`, `llm.stream.chunk`, `llm.call_error` |
-| RCS | `rcs.tc_summarized`, `rcs.context_built`, `rcs.compactor_triggered` |
+| RCS | `rcs.tc_summarized`, `rcs.context_built`, `rcs.compactor_triggered`, `rcs.compactor_completed`, `rcs.cross_session_tc_reference` |
 | Memory | `memory.entity_extracted` |
 | Context summary | `context.summarized` |
 | Session | `session.created`, `session.loaded`, `session.saved` |
@@ -65,6 +65,17 @@ emitter.add_sink(WebhookEventSink("https://your-app.com/nexus-events"))
 | Human-in-loop | `human_in_loop.requested`, `human_in_loop.response` (reserved — not emitted by runner yet) |
 
 Each `NexusEvent` has `event_id`, `timestamp`, `session_id`, `agent_id`, `turn_index`, and a `data` dict with event-specific fields.
+
+### RCS fields on completion events
+
+`agent.completed` and `turn.completed` carry RCS savings fields:
+
+| Event | Field | Description |
+|-------|-------|-------------|
+| `agent.completed` | `total_tokens_saved_by_rcs` | One-time compression savings across the run |
+| `agent.completed` | `cumulative_tokens_saved_by_rcs` | Recurring input-token savings across all turns |
+| `turn.completed` | `tokens_saved` | One-time savings for this turn |
+| `turn.completed` | `recurring_savings` | Recurring input-token savings for this turn |
 
 ## run_stream vs events
 

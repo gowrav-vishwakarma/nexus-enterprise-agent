@@ -1,6 +1,7 @@
 """Context window builder for the Nexus Agent Framework."""
 
 import copy
+import json
 import logging
 from datetime import datetime
 from typing import Any, Optional
@@ -23,36 +24,59 @@ class ContextWindowBuilder:
     def __init__(self, event_emitter: Optional[Any] = None):
         self.event_emitter = event_emitter
 
+    @staticmethod
+    def _format_tool_signature(tc: ToolCallRecord, include_signature: bool) -> str:
+        """Render ``tool_name(arg=value, ...)`` for a tool call.
+
+        Excludes the injected ``_context_updates`` RCS parameter so the LLM
+        never sees it as part of the tool's own arguments.
+        """
+        if not include_signature:
+            return ""
+        args_str = ", ".join(
+            f"{k}={json.dumps(v)}"
+            for k, v in tc.tool_input.items()
+            if k != "_context_updates"
+        )
+        return f"{tc.tool_name}({args_str})"
+
     def _render_tool_message(self, tc: ToolCallRecord, rcs_enabled: bool, tc_tag_format: str, include_signature: bool) -> Optional[str]:
         """Render a tool result message according to its RCS status.
 
         Returns None if the tool call is dropped.
+
+        Rendering rules:
+        - Dropped (``is_dropped`` or summary == ``"[]"``): omitted entirely.
+        - Summarized: keep the tool signature (``tool_name(args)``) so the LLM
+          knows what was called and with what params, but DROP the ``[TCn]`` tag
+          so the result is not eligible for re-summarization in a later turn.
+          The summary text replaces the raw response.
+        - Unsummarized with RCS on: prefix with ``[TCn]`` tag (and signature when
+          configured) so the LLM can target it via ``_context_updates``.
+        - RCS off: raw response only.
         """
         # Case 3: Dropped
         if tc.is_dropped or tc.summarized_response == "[]":
             return None
 
-        # Case 2: Summarized
+        # Case 2: Summarized — signature kept, [TCn] tag intentionally dropped
         if tc.summarized_response is not None:
-            return f"{tc.tool_name} result: {tc.summarized_response}"
+            signature = self._format_tool_signature(tc, include_signature)
+            if signature:
+                return f"{signature}\n{tc.summarized_response}"
+            return tc.summarized_response
 
         # Case 1: Unsummarized
         if rcs_enabled:
-            # Build TC tag e.g. [TC1]
             tag = tc_tag_format.format(n=tc.tc_index)
-            if include_signature:
-                # Format: [TC1] tool_name(args...)
-                import json
-                args_str = ", ".join(f"{k}={json.dumps(v)}" for k, v in tc.tool_input.items() if k != "_context_updates")
-                prefix = f"{tag} {tc.tool_name}({args_str})\n"
-            else:
-                prefix = f"{tag}\n"
+            signature = self._format_tool_signature(tc, include_signature)
+            prefix = f"{tag} {signature}\n" if signature else f"{tag}\n"
             return f"{prefix}{tc.raw_response}"
-        
+
         # RCS disabled: show raw response
         return tc.raw_response
 
-    def build(
+    async def build(
         self,
         session: AgentSession,
         agent_config: AgentConfig,
@@ -245,25 +269,120 @@ class ContextWindowBuilder:
 
         final_messages = [system_message] + flat_history + current_messages
 
-        # Emit observability event
+        # Emit observability event (awaited so it is not silently lost)
         if self.event_emitter:
             from nexus.events.models import RCSContextBuiltEvent
             tc_tags_count = sum(1 for turn in session.turns for tc in turn.tool_calls if tc.summarized_response is None)
             tc_summarized_count = sum(1 for turn in session.turns for tc in turn.tool_calls if tc.summarized_response is not None)
-            
-            # Import loop-safe inside build
-            import asyncio
-            asyncio.create_task(
-                self.event_emitter.emit(
-                    RCSContextBuiltEvent(
-                        session_id=session.session_id,
-                        agent_id=session.agent_id,
-                        context_tokens=TokenCounter.count_messages(final_messages, agent_config.llm.model),
-                        turns_in_context=len(history_turns),
-                        tc_tags_count=tc_tags_count,
-                        tc_summarized_count=tc_summarized_count,
-                    )
+            await self.event_emitter.emit(
+                RCSContextBuiltEvent(
+                    session_id=session.session_id,
+                    agent_id=session.agent_id,
+                    context_tokens=TokenCounter.count_messages(final_messages, agent_config.llm.model),
+                    turns_in_context=len(history_turns),
+                    tc_tags_count=tc_tags_count,
+                    tc_summarized_count=tc_summarized_count,
                 )
             )
 
         return final_messages
+
+    def count_rcs_savings(
+        self,
+        messages: list[dict[str, Any]],
+        session: AgentSession,
+        agent_config: AgentConfig,
+    ) -> int:
+        """Compute the recurring input-token savings from RCS for the given context.
+
+        For each tool message in ``messages`` that corresponds to a summarized
+        or dropped TC, compute what the message WOULD have been if RCS had not
+        applied (raw rendering with tag + signature + raw_response), and return
+        the total token difference.
+
+        Dropped TCs are absent from ``messages`` entirely; their savings are
+        counted by checking whether other messages from the same turn are
+        present (meaning the turn survived the sliding-window pruning).
+
+        This gives the true recurring savings for the current turn — the
+        input tokens saved by having summaries/drops instead of raw results
+        in context. The runner accumulates this across turns into
+        ``session.cumulative_input_tokens_saved_by_rcs``.
+        """
+        if not agent_config.rcs.enabled:
+            return 0
+
+        model = agent_config.llm.model
+        tc_tag_format = agent_config.rcs.tc_tag_format or "[TC{n}]"
+        include_signature = agent_config.rcs.tc_tag_include_tool_signature
+
+        # Map call_id → ToolCallRecord for quick lookup
+        tc_by_call_id: dict[str, ToolCallRecord] = {}
+        for turn in session.turns:
+            for tc in turn.tool_calls:
+                if tc.call_id:
+                    tc_by_call_id[tc.call_id] = tc
+
+        # Collect tool_call_ids present in the built messages
+        present_call_ids: set[str] = set()
+        # Also collect which turn indices are represented (by user message content)
+        present_user_messages: set[str] = set()
+        for msg in messages:
+            if msg.get("role") == "tool":
+                cid = msg.get("tool_call_id")
+                if cid:
+                    present_call_ids.add(cid)
+            if msg.get("role") == "user":
+                present_user_messages.add(msg.get("content", ""))
+
+        total_savings = 0
+
+        # 1. Summarized TCs that are in context: compute raw-vs-summarized delta
+        for msg in messages:
+            if msg.get("role") != "tool":
+                continue
+            call_id = msg.get("tool_call_id")
+            tc = tc_by_call_id.get(call_id) if call_id else None
+            if tc is None:
+                continue
+            if tc.summarized_response is None or tc.is_dropped:
+                continue
+
+            actual_content = msg.get("content") or ""
+            actual_tokens = TokenCounter.count_string(actual_content, model)
+
+            tag = tc_tag_format.format(n=tc.tc_index)
+            signature = self._format_tool_signature(tc, include_signature)
+            counterfactual_prefix = f"{tag} {signature}\n" if signature else f"{tag}\n"
+            counterfactual_content = f"{counterfactual_prefix}{tc.raw_response}"
+            counterfactual_tokens = TokenCounter.count_string(counterfactual_content, model)
+
+            total_savings += max(0, counterfactual_tokens - actual_tokens)
+
+        # 2. Dropped TCs: absent from messages, but would have been present without RCS.
+        # Count their full raw rendering as savings if their turn is in context.
+        for turn in session.turns:
+            # Check if this turn is in context: its user message or any of its
+            # tool messages are present in the built messages.
+            turn_in_context = False
+            if turn.user_message and turn.user_message in present_user_messages:
+                turn_in_context = True
+            for tc in turn.tool_calls:
+                if tc.call_id and tc.call_id in present_call_ids:
+                    turn_in_context = True
+                    break
+            if not turn_in_context:
+                continue
+
+            for tc in turn.tool_calls:
+                if not tc.is_dropped and tc.summarized_response != "[]":
+                    continue
+                # Dropped TC: full raw rendering is the savings
+                tag = tc_tag_format.format(n=tc.tc_index)
+                signature = self._format_tool_signature(tc, include_signature)
+                counterfactual_prefix = f"{tag} {signature}\n" if signature else f"{tag}\n"
+                counterfactual_content = f"{counterfactual_prefix}{tc.raw_response}"
+                counterfactual_tokens = TokenCounter.count_string(counterfactual_content, model)
+                total_savings += counterfactual_tokens
+
+        return total_savings

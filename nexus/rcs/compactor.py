@@ -125,22 +125,24 @@ class ServerCompactor:
             except Exception as e:
                 logger.error("ServerCompactor: Failed to save summary to storage: %s", e)
 
-            # Count savings
-            saved = max(0, tc.tokens_raw - TokenCounter.count_string(summary))
-            tc.tokens_summarized = TokenCounter.count_string(summary) if not tc.is_dropped else 0
+            # Count savings (single token-count call, consistent with interceptor)
+            summary_tokens = TokenCounter.count_string(summary) if not tc.is_dropped else 0
+            saved = max(0, tc.tokens_raw - summary_tokens)
+            tc.tokens_summarized = summary_tokens
             session.total_tokens_saved_by_rcs += saved
             tokens_saved += saved
             tcs_compacted.append(tc.tc_id)
 
-        # Emit completion event
+        # Emit completion event (distinct from the trigger event)
         if self.event_emitter:
+            from nexus.events.models import RCSCompactorCompletedEvent
             await self.event_emitter.emit(
-                NexusEvent(
-                    event_type=NexusEventType.RCS_COMPACTOR_TRIGGERED,  # Or COMPLETED if exists, otherwise reuse
+                RCSCompactorCompletedEvent(
                     session_id=session.session_id,
                     agent_id=session.agent_id,
                     turn_index=current_turn_index,
-                    data={"tcs_compacted": tcs_compacted, "tokens_saved": tokens_saved}
+                    tcs_compacted=tcs_compacted,
+                    tokens_saved=tokens_saved,
                 )
             )
 

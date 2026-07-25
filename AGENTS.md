@@ -1,6 +1,6 @@
 # Instructions for AI assistants and contributors
 
-When you change Nexus code, update the matching documentation in the same change.
+When you change Nexus code, update the matching documentation in the same change. Even if you ever finds this Agents.md file is out of oder. update this as well with new patterns, file paths etc.
 
 ## Documentation style
 

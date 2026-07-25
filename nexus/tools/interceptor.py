@@ -97,17 +97,26 @@ class ContextUpdateInterceptor:
             except Exception as e:
                 logger.error("Failed to write TC summary to storage: %s", e)
 
-            # 4. Calculate savings
-            tokens_raw = target_tc.tokens_raw
-            # Rough approximation of summary tokens (4 chars per token fallback)
+            # 4. Calculate savings — marginal, not from raw, to avoid
+            # double-counting when the LLM re-summarizes an already-summarized TC.
+            # Baseline: previous summarized tokens if already summarized, else raw.
             from nexus.llm.token_counter import TokenCounter
-            tokens_summarized = TokenCounter.count_string(summary) if not target_tc.is_dropped else 0
-            target_tc.tokens_summarized = tokens_summarized
+            old_tokens = (
+                target_tc.tokens_summarized
+                if target_tc.tokens_summarized is not None
+                else target_tc.tokens_raw
+            )
+            new_tokens = TokenCounter.count_string(summary) if not target_tc.is_dropped else 0
+            target_tc.tokens_summarized = new_tokens
 
-            saved = max(0, tokens_raw - tokens_summarized)
+            saved = max(0, old_tokens - new_tokens)
             session.total_tokens_saved_by_rcs += saved
 
-            applied_updates.append(ContextUpdate(tc_id=tc_id, summary=summary))
+            applied_updates.append(ContextUpdate(
+                tc_id=tc_id,
+                summary=summary,
+                tokens_saved=saved,
+            ))
 
             # 5. Emit event
             if self.event_emitter:
@@ -117,8 +126,8 @@ class ContextUpdateInterceptor:
                         agent_id=session.agent_id,
                         turn_index=current_turn_index,
                         tc_id=tc_id,
-                        tokens_raw=tokens_raw,
-                        tokens_summarized=tokens_summarized,
+                        tokens_raw=target_tc.tokens_raw,
+                        tokens_summarized=new_tokens,
                         tokens_saved=saved,
                     )
                 )

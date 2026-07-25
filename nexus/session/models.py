@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 TurnStatus = Literal[
@@ -22,6 +22,12 @@ class ContextUpdate(BaseModel):
 
     tc_id: str = Field(..., description="Tool call ID, e.g. 'TC1'")
     summary: str = Field(..., description="Compressed summary of the tool result")
+    tokens_saved: int = Field(
+        default=0,
+        description="Tokens saved by this update (tokens_raw - tokens_summarized). "
+        "Populated by the interceptor so callers (e.g. AgentRunner) use the same "
+        "formula as session.total_tokens_saved_by_rcs.",
+    )
 
     def is_empty_sentinel(self) -> bool:
         """Check if this is an empty sentinel (drop from context)."""
@@ -90,7 +96,13 @@ class TurnRecord(BaseModel):
     total_tokens_in: int = Field(default=0, description="Tokens sent to LLM")
     total_tokens_out: int = Field(default=0, description="Tokens received from LLM")
     tokens_saved_this_turn: int = Field(
-        default=0, description="Tokens removed via _context_updates"
+        default=0, description="One-time tokens removed via _context_updates (at summarization moment)"
+    )
+    recurring_savings_this_turn: int = Field(
+        default=0,
+        description="Recurring input-token savings this turn: how many input tokens RCS saved "
+        "by having summarized/dropped TCs in context instead of their raw versions. "
+        "Accumulates into session.cumulative_input_tokens_saved_by_rcs."
     )
     media_metadata: dict[str, Any] = Field(
         default_factory=dict,
@@ -140,8 +152,44 @@ class AgentSession(BaseModel):
     )
     is_active: bool = Field(default=True, description="Whether session is still active")
     total_tokens_saved_by_rcs: int = Field(
-        default=0, description="Cumulative RCS savings"
+        default=0, description="One-time RCS compression savings (tokens_raw - tokens_summarized per TC at summarization moment)"
     )
+    cumulative_input_tokens_saved_by_rcs: int = Field(
+        default=0,
+        description="Recurring input-token savings across all turns. A TC summarized in turn N "
+        "saves input tokens in every subsequent turn that includes it; this counter "
+        "accumulates those recurring savings, giving the true cost impact of RCS."
+    )
+    rcs_enabled: bool = Field(
+        default=False,
+        description="Whether RCS was enabled for this session. Set once at run start "
+        "so the persisted chat JSON records whether RCS was active."
+    )
+
+    @computed_field
+    @property
+    def token_usage(self) -> dict[str, Any]:
+        """Aggregate token-accounting block for this chat.
+
+        Included verbatim in ``model_dump(mode="json")`` so the stored chat JSON
+        blob carries pre-aggregated metrics that external readers (SQL, scripts,
+        BI tools) can read directly without summing per-turn fields. Inside the
+        app this recomputes on load, so it can never drift from the per-turn data.
+
+        - ``total_tokens_in`` / ``total_tokens_out``: actual tokens sent/received,
+          summed from turns (RCS already applied to inputs).
+        - ``total_tokens_saved_by_rcs``: one-time RCS compression savings.
+        - ``cumulative_input_tokens_saved_by_rcs``: recurring input-token savings.
+        - ``rcs_enabled``: whether RCS was enabled for this chat.
+        """
+        return {
+            "total_tokens_in": sum(t.total_tokens_in for t in self.turns),
+            "total_tokens_out": sum(t.total_tokens_out for t in self.turns),
+            "total_tokens_saved_by_rcs": self.total_tokens_saved_by_rcs,
+            "cumulative_input_tokens_saved_by_rcs": self.cumulative_input_tokens_saved_by_rcs,
+            "rcs_enabled": self.rcs_enabled,
+        }
+
 
     @property
     def turn_count(self) -> int:

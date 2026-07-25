@@ -103,14 +103,70 @@ See [context-summary.md](context-summary.md) for the full field table (`summariz
 
 ### RuntimeContextSummarizerConfig (RCS)
 
+RCS keeps long tool outputs from filling the context window. When enabled, every tool schema gets an extra `_context_updates` parameter. The LLM can pass summaries of old tool results through this parameter on its next tool call; the interceptor strips it before the tool runs (transparent to tool authors). Summarized results keep their tool signature but lose their `[TCn]` tag so they are not re-summarized. A `[]` sentinel drops a result entirely.
+
 | Name | Required? | Default | What it does |
 |------|-----------|---------|--------------|
 | `enabled` | No | `False` | Turn on inline tool-result summarization |
-| `tc_tag_format` | No | `"[TC{n}]"` | Tag format for tool call results |
-| `tc_tag_include_tool_signature` | No | `True` | Include tool name in tag |
-| `context_updates_param_name` | No | `"_context_updates"` | Extra param injected into tool schemas |
+| `tc_tag_format` | No | `"[TC{n}]"` | Tag format for unsummarized tool call results |
+| `tc_tag_include_tool_signature` | No | `True` | Include tool name + args in the tag prefix |
+| `context_updates_param_name` | No | `"_context_updates"` | Extra param injected into every tool schema |
+| `context_updates_param_description` | No | default | Description text for the injected param |
 | `empty_summary_sentinel` | No | `"[]"` | Value meaning "drop this result from context" |
-| `fallback_compactor.enabled` | No | `False` | Separate LLM call to summarize old results |
+| `rcs_system_block` | No | default | RCS contract block appended to the system prompt |
+| `fallback_compactor.enabled` | No | `False` | Separate LLM call to summarize old results when context overflows |
+| `fallback_compactor.trigger_token_threshold` | No | `10000` | Token count that triggers the fallback compactor |
+| `fallback_compactor.compact_oldest_n_tcs` | No | `2` | Number of oldest unsummarized TCs to compact per trigger |
+| `fallback_compactor.compactor_llm` | No | agent's LLM | Cheaper model for compaction |
+| `fallback_compactor.max_tokens_per_summary` | No | `100` | Max tokens per compacted summary |
+| `fallback_compactor.prompt_template` | No | default | Custom compaction prompt |
+
+### RCS events
+
+| Event | When |
+|------|------|
+| `rcs.tc_summarized` | A tool result was summarized inline via `_context_updates` |
+| `rcs.context_built` | The context window was built (tagged vs summarized counts) |
+| `rcs.compactor_triggered` | The fallback compactor started |
+| `rcs.compactor_completed` | The fallback compactor finished (TCs compacted + tokens saved) |
+| `rcs.cross_session_tc_reference` | The LLM referenced a TC id that does not belong to this session |
+
+### RCS token accounting
+
+RCS tracks **two** savings metrics:
+
+| Metric | What it measures | Where it lives |
+|--------|-----------------|----------------|
+| `total_tokens_saved_by_rcs` | **One-time** compression savings — `tokens_raw - tokens_summarized` per TC, counted once at the moment the LLM summarizes it via `_context_updates`. | `AgentSession`, `AgentRunResult`, `AgentGroupResult` |
+| `cumulative_input_tokens_saved_by_rcs` | **Recurring** input-token savings — how many input tokens RCS saves *each turn* by having summarized/dropped TCs in context instead of their raw versions. A TC summarized in turn N saves input tokens in every subsequent turn that includes it, so this grows monotonically. | `AgentSession`, `AgentRunResult` (`cumulative_input_tokens_saved_by_rcs`), `AgentGroupResult` (`cumulative_tokens_saved_by_rcs`) |
+
+**Why two metrics?** The one-time metric tells you how much each TC was compressed (e.g. "500-token result → 20-token summary"). The cumulative metric tells you the true cost impact: after N turns, the same summarized TC has saved input tokens N times (once per subsequent turn), so the real savings can be many times larger.
+
+Both use the same `TokenCounter`-based formula, so:
+- `sum(turn.tokens_saved_this_turn) == session.total_tokens_saved_by_rcs` (one-time)
+- `sum(turn.recurring_savings_this_turn) == session.cumulative_input_tokens_saved_by_rcs` (recurring)
+
+Re-summarizing an already-summarized TC counts only marginal savings (previous summary tokens − new summary tokens), preventing double-counting in the one-time metric.
+
+### `token_usage` aggregate on the session
+
+`AgentSession` exposes a computed `token_usage` block that bundles all chat-level token accounting into one place for UI rendering and external analysis:
+
+```json
+"token_usage": {
+  "total_tokens_in": 12345,
+  "total_tokens_out": 678,
+  "total_tokens_saved_by_rcs": 4321,
+  "cumulative_input_tokens_saved_by_rcs": 9876,
+  "rcs_enabled": true
+}
+```
+
+- `total_tokens_in` / `total_tokens_out` — actual tokens sent to / received from the LLM, summed from the per-turn records (`turn.total_tokens_in` / `turn.total_tokens_out`). RCS is already applied to the inputs, so this is the real spend.
+- `total_tokens_saved_by_rcs` / `cumulative_input_tokens_saved_by_rcs` — the two RCS savings metrics above (mirrored from the session counters for a single read).
+- `rcs_enabled` — whether RCS was enabled for this chat (set once at run start).
+
+Because `token_usage` is a pydantic `@computed_field`, it is included verbatim in `model_dump(mode="json")` — so the **stored chat JSON blob carries the pre-aggregated values**. External readers (a SQL query like `chatJson->'token_usage'->>'total_tokens_in'`, a script loading the JSON, or a BI tool) can read the metrics directly without summing per-turn fields or loading the model. Inside the app it recomputes on load, so it can never drift from the per-turn data.
 
 ## Next steps
 

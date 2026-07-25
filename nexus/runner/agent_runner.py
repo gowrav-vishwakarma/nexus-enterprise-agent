@@ -498,14 +498,14 @@ class AgentRunner:
             self._user_memory = await self._load_user_memory()
         return session
 
-    def _build_context_messages(
+    async def _build_context_messages(
         self,
         session: AgentSession,
         *,
         current_user_message: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Build LLM messages with user_memory, summary_text, and token budget."""
-        return self.ctx_builder.build(
+        return await self.ctx_builder.build(
             session=session,
             agent_config=self.config,
             current_user_message=current_user_message,
@@ -524,16 +524,24 @@ class AgentRunner:
         session_turn_index: int,
         *,
         current_user_message: Optional[str] = None,
-    ) -> list[dict[str, Any]]:
-        """Run RCS compactor and context summarizer when thresholds are met; rebuild context."""
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Run RCS compactor and context summarizer when thresholds are met; rebuild context.
+
+        Returns the rebuilt messages and the number of tokens saved by the
+        fallback compactor this call (0 when it didn't run or saved nothing).
+        The inline interceptor savings are applied separately during tool
+        execution and surfaced via ``ContextUpdate.tokens_saved``.
+        """
         model = self.config.llm.model
         current_tokens = TokenCounter.count_messages(messages, model)
         context_window = self.config.llm.context_window_tokens
+        compactor_tokens_saved = 0
 
         if self.config.rcs.fallback_compactor.enabled:
             if await self.compactor.should_trigger(session, current_tokens):
-                await self.compactor.compact(session, session_turn_index)
-                messages = self._build_context_messages(
+                result = await self.compactor.compact(session, session_turn_index)
+                compactor_tokens_saved = result.get("tokens_saved", 0)
+                messages = await self._build_context_messages(
                     session, current_user_message=current_user_message
                 )
                 current_tokens = TokenCounter.count_messages(messages, model)
@@ -542,11 +550,11 @@ class AgentRunner:
             session, current_tokens, context_window
         ):
             await self.context_summarizer.summarize(session, session_turn_index)
-            messages = self._build_context_messages(
+            messages = await self._build_context_messages(
                 session, current_user_message=current_user_message
             )
 
-        return messages
+        return messages, compactor_tokens_saved
 
     async def _call_llm(
         self,
@@ -688,6 +696,11 @@ class AgentRunner:
     ) -> AsyncIterator[AgentStreamEvent]:
         """Shared agent loop. Yields AgentStreamEvents when stream=True."""
         session = await self._get_or_create_session(session_id)
+        # Record whether RCS was enabled for this chat and persist before any
+        # append_turn reload so the flag (read by the token_usage aggregate)
+        # survives in the stored chat JSON.
+        session.rcs_enabled = bool(getattr(self.config.rcs, "enabled", False))
+        await self._maybe_save_session(session)
         self._user_memory = await self._load_user_memory()
         self._setup_skills()
         self._resolve_toolsets()
@@ -727,15 +740,23 @@ class AgentRunner:
 
             while run_turn_index < self.config.turns.max_turns:
                 turn_user_msg = current_user_message if run_turn_index == 0 else None
-                messages = self._build_context_messages(
+                messages = await self._build_context_messages(
                     session, current_user_message=turn_user_msg
                 )
-                messages = await self._maybe_compact_and_summarize(
+                messages, compactor_tokens_saved = await self._maybe_compact_and_summarize(
                     session,
                     messages,
                     session_turn_index,
                     current_user_message=turn_user_msg,
                 )
+
+                # Compute recurring RCS savings: how many input tokens RCS saved
+                # this turn by having summarized/dropped TCs in context instead
+                # of their raw versions. Accumulate into the session counter.
+                recurring_savings_this_turn = self.ctx_builder.count_rcs_savings(
+                    messages, session, self.config
+                )
+                session.cumulative_input_tokens_saved_by_rcs += recurring_savings_this_turn
 
                 await self.event_emitter.emit(
                     TurnStartedEvent(
@@ -794,6 +815,7 @@ class AgentRunner:
                         tool_calls=[],
                         total_tokens_in=llm_response.usage.prompt_tokens,
                         total_tokens_out=llm_response.usage.completion_tokens,
+                        recurring_savings_this_turn=recurring_savings_this_turn,
                         duration_ms=int((time.time() - start_time) * 1000),
                         status="completed",
                     )
@@ -804,7 +826,7 @@ class AgentRunner:
                     break
 
                 turn_tool_records = []
-                tokens_saved_this_turn = 0
+                tokens_saved_this_turn = compactor_tokens_saved
                 all_updates = []
 
                 for tc_req in llm_response.tool_calls:
@@ -817,10 +839,10 @@ class AgentRunner:
                         rcs_config=self.config.rcs,
                     )
                     all_updates.extend([u.model_dump() for u in updates])
-                    tokens_saved_this_turn += sum(
-                        max(0, session.find_tc(u.tc_id).tokens_raw - len(u.summary.split()))
-                        for u in updates if session.find_tc(u.tc_id)
-                    )
+                    # Use the interceptor's per-update tokens_saved (computed with
+                    # TokenCounter, same formula as session.total_tokens_saved_by_rcs)
+                    # so turn.tokens_saved_this_turn ties out to the session counter.
+                    tokens_saved_this_turn += sum(u.tokens_saved for u in updates)
 
                     session.next_tc_index()
                     tc_index = session.tc_counter
@@ -973,6 +995,7 @@ class AgentRunner:
                     total_tokens_in=llm_response.usage.prompt_tokens,
                     total_tokens_out=llm_response.usage.completion_tokens,
                     tokens_saved_this_turn=tokens_saved_this_turn,
+                    recurring_savings_this_turn=recurring_savings_this_turn,
                     duration_ms=int((time.time() - start_time) * 1000),
                     status=turn_status,
                 )
@@ -1003,6 +1026,7 @@ class AgentRunner:
                         tokens_in=llm_response.usage.prompt_tokens,
                         tokens_out=llm_response.usage.completion_tokens,
                         tokens_saved=tokens_saved_this_turn,
+                        recurring_savings=recurring_savings_this_turn,
                         duration_ms=int((time.time() - start_time) * 1000),
                     )
                 )
@@ -1060,6 +1084,7 @@ class AgentRunner:
             total_tokens_in=total_tokens_in,
             total_tokens_out=total_tokens_out,
             total_tokens_saved_by_rcs=session.total_tokens_saved_by_rcs,
+            cumulative_input_tokens_saved_by_rcs=session.cumulative_input_tokens_saved_by_rcs,
             duration_ms=duration_ms,
             status=status,  # type: ignore[arg-type]
             error=error_msg,
@@ -1077,6 +1102,7 @@ class AgentRunner:
                 total_tokens_in=total_tokens_in,
                 total_tokens_out=total_tokens_out,
                 total_tokens_saved_by_rcs=session.total_tokens_saved_by_rcs,
+                cumulative_tokens_saved_by_rcs=session.cumulative_input_tokens_saved_by_rcs,
             )
         )
 

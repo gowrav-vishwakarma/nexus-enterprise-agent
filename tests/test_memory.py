@@ -210,7 +210,7 @@ async def test_inject_into_prompt_gate():
     )
     builder = ContextWindowBuilder()
 
-    msgs_on = builder.build(
+    msgs_on = await builder.build(
         session,
         agent_on,
         current_user_message="hi",
@@ -219,7 +219,7 @@ async def test_inject_into_prompt_gate():
     )
     assert "About this user" in msgs_on[0]["content"]
 
-    msgs_off = builder.build(
+    msgs_off = await builder.build(
         session,
         agent_off,
         current_user_message="hi",

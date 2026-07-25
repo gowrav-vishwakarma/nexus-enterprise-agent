@@ -41,9 +41,9 @@ class VisionContextBuilder(ContextWindowBuilder):
         super().__init__(event_emitter=event_emitter)
         self.pending_content_parts: list[ContentPart] = []
 
-    def build(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    async def build(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         """Build messages, converting the current user message to multimodal form."""
-        messages = super().build(*args, **kwargs)
+        messages = await super().build(*args, **kwargs)
 
         parts = self.pending_content_parts
         if not parts:

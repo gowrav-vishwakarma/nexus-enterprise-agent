@@ -2,6 +2,8 @@
 
 import base64
 
+import pytest
+
 from nexus.config.agent import AgentConfig
 from nexus.config.llm import LLMProviderConfig
 from nexus.realtime import (
@@ -65,11 +67,12 @@ def _agent_config() -> AgentConfig:
     )
 
 
-def test_vision_context_builder_attaches_image():
+@pytest.mark.asyncio
+async def test_vision_context_builder_attaches_image():
     builder = VisionContextBuilder()
     builder.pending_content_parts = [ImageBase64Part.from_bytes(b"img")]
     session = AgentSession(session_id="s1", agent_id="vision")
-    messages = builder.build(
+    messages = await builder.build(
         session=session,
         agent_config=_agent_config(),
         current_user_message="describe this",
@@ -83,10 +86,11 @@ def test_vision_context_builder_attaches_image():
     assert builder.pending_content_parts == []
 
 
-def test_vision_context_builder_text_only_unchanged():
+@pytest.mark.asyncio
+async def test_vision_context_builder_text_only_unchanged():
     builder = VisionContextBuilder()
     session = AgentSession(session_id="s2", agent_id="vision")
-    messages = builder.build(
+    messages = await builder.build(
         session=session,
         agent_config=_agent_config(),
         current_user_message="just text",

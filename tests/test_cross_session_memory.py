@@ -54,7 +54,7 @@ async def test_user_memory_injector_on_plain_system_prompt():
             system_prompt="You are support. Be concise.",
         ),
     )
-    messages = ContextWindowBuilder().build(
+    messages = await ContextWindowBuilder().build(
         session,
         agent,
         current_user_message="hi",
@@ -73,7 +73,7 @@ async def test_cross_session_inject_in_system_prompt():
         llm=llm,
         memory=MemoryConfig(enabled=True),
     )
-    messages = ContextWindowBuilder().build(
+    messages = await ContextWindowBuilder().build(
         session,
         agent,
         current_user_message="hi",

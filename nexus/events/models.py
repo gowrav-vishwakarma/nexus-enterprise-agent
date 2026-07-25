@@ -29,6 +29,7 @@ class NexusEventType(str, Enum):
     RCS_TC_SUMMARIZED = "rcs.tc_summarized"
     RCS_CONTEXT_BUILT = "rcs.context_built"
     RCS_COMPACTOR_TRIGGERED = "rcs.compactor_triggered"
+    RCS_COMPACTOR_COMPLETED = "rcs.compactor_completed"
     RCS_CROSS_SESSION_TC_REFERENCE = "rcs.cross_session_tc_reference"
     
     # Memory events
@@ -100,6 +101,7 @@ class AgentCompletedEvent(NexusEvent):
     total_tokens_in: int = 0
     total_tokens_out: int = 0
     total_tokens_saved_by_rcs: int = 0
+    cumulative_tokens_saved_by_rcs: int = 0
 
 
 class AgentErrorEvent(NexusEvent):
@@ -127,6 +129,7 @@ class TurnCompletedEvent(NexusEvent):
     tokens_in: int = 0
     tokens_out: int = 0
     tokens_saved: int = 0
+    recurring_savings: int = 0
     duration_ms: int = 0
 
 
@@ -172,6 +175,14 @@ class RCSTCSummarizedEvent(NexusEvent):
     tc_id: str
     tokens_raw: int = 0
     tokens_summarized: int = 0
+    tokens_saved: int = 0
+
+
+class RCSCompactorCompletedEvent(NexusEvent):
+    """Emitted when the fallback ServerCompactor finishes compacting TCs."""
+
+    event_type: NexusEventType = NexusEventType.RCS_COMPACTOR_COMPLETED
+    tcs_compacted: list[str] = Field(default_factory=list)
     tokens_saved: int = 0
 
 

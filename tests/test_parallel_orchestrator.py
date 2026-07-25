@@ -95,3 +95,68 @@ async def test_parallel_stream_multiplexes_members():
 
     final = [e for e in events if e.event_type == "final_response"][-1]
     assert "[alpha]" in final.content and "[beta]" in final.content
+
+
+# =============================================================================
+# RCS token-savings aggregation across group members
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_parallel_rcs_token_savings_aggregate():
+    """Group result sums RCS savings from each member."""
+    from nexus.config.rcs import RuntimeContextSummarizerConfig
+    from nexus.runner.result import AgentRunResult
+
+    agent_alpha = AgentConfig(
+        name="alpha",
+        llm=LLMProviderConfig(provider="openai", model="gpt-4o-mini", api_key="sk-test"),
+        persona=AgentPersonaConfig(role="alpha", goal="answer"),
+        rcs=RuntimeContextSummarizerConfig(enabled=True),
+    )
+    agent_beta = AgentConfig(
+        name="beta",
+        llm=LLMProviderConfig(provider="openai", model="gpt-4o-mini", api_key="sk-test"),
+        persona=AgentPersonaConfig(role="beta", goal="answer"),
+        rcs=RuntimeContextSummarizerConfig(enabled=True),
+    )
+    group = AgentGroupConfig(
+        name="rcs-panel",
+        pattern="parallel",
+        members=[agent_alpha, agent_beta],
+        aggregation_strategy="concat",
+    )
+    orch = AgentOrchestrator(
+        config=group,
+        storage_config=SessionManager(),
+        run_context=RunContext(session_id="rcs-panel-1"),
+    )
+
+    # Mock each member runner's run() to return a result with RCS savings
+    alpha_result = AgentRunResult(
+        session_id="alpha-sess", final_response="A done", turns_used=1,
+        total_tokens_in=100, total_tokens_out=20, total_tokens_saved_by_rcs=150,
+        cumulative_input_tokens_saved_by_rcs=450,
+        duration_ms=10, status="completed",
+    )
+    beta_result = AgentRunResult(
+        session_id="beta-sess", final_response="B done", turns_used=1,
+        total_tokens_in=200, total_tokens_out=30, total_tokens_saved_by_rcs=250,
+        cumulative_input_tokens_saved_by_rcs=750,
+        duration_ms=10, status="completed",
+    )
+
+    async def alpha_run(*_a, **_kw):
+        return alpha_result
+
+    async def beta_run(*_a, **_kw):
+        return beta_result
+
+    with patch.object(orch._members["alpha"], "run", alpha_run), \
+         patch.object(orch._members["beta"], "run", beta_run):
+        result = await orch.run("question")
+
+    assert result.status == "completed"
+    assert result.total_tokens_saved_by_rcs == 150 + 250
+    assert result.total_tokens_saved_by_rcs == alpha_result.total_tokens_saved_by_rcs + beta_result.total_tokens_saved_by_rcs
+    assert result.cumulative_tokens_saved_by_rcs == 450 + 750
+    assert result.cumulative_tokens_saved_by_rcs == alpha_result.cumulative_input_tokens_saved_by_rcs + beta_result.cumulative_input_tokens_saved_by_rcs

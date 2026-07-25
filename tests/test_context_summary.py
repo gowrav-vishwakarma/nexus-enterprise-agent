@@ -124,7 +124,7 @@ async def test_summary_text_in_system_prompt_via_builder():
         llm=LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk"),
         context_summary=ContextSummaryConfig(summarize_on=0.8, inject_into_prompt=True),
     )
-    messages = ContextWindowBuilder().build(
+    messages = await ContextWindowBuilder().build(
         session,
         agent,
         current_user_message="Continue",

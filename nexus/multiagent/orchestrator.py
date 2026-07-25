@@ -157,6 +157,7 @@ class AgentOrchestrator:
         total_tokens_in = 0
         total_tokens_out = 0
         total_tokens_saved = 0
+        cumulative_tokens_saved = 0
 
         for name, member in self._members.items():
             logger.info("Pipeline: Executing member '%s'", name)
@@ -172,6 +173,7 @@ class AgentOrchestrator:
                     total_tokens_in += res.total_tokens_in
                     total_tokens_out += res.total_tokens_out
                     total_tokens_saved += res.total_tokens_saved_by_rcs
+                    cumulative_tokens_saved += res.cumulative_input_tokens_saved_by_rcs
                 elif isinstance(member, AgentOrchestrator):
                     if stream:
                         raise ValueError("Use run_stream() for streaming pipeline execution.")
@@ -182,6 +184,7 @@ class AgentOrchestrator:
                     total_tokens_in += res.total_tokens_in
                     total_tokens_out += res.total_tokens_out
                     total_tokens_saved += res.total_tokens_saved_by_rcs
+                    cumulative_tokens_saved += res.cumulative_input_tokens_saved_by_rcs
             except Exception as e:
                 logger.error("Pipeline member '%s' failed: %s", name, e)
                 return AgentGroupResult(
@@ -202,6 +205,7 @@ class AgentOrchestrator:
             total_tokens_in=total_tokens_in,
             total_tokens_out=total_tokens_out,
             total_tokens_saved_by_rcs=total_tokens_saved,
+            cumulative_tokens_saved_by_rcs=cumulative_tokens_saved,
             duration_ms=int((time.time() - start_time) * 1000),
             status="completed",
         )
@@ -217,6 +221,7 @@ class AgentOrchestrator:
         total_tokens_in = 0
         total_tokens_out = 0
         total_tokens_saved = 0
+        cumulative_tokens_saved = 0
         final_response: Optional[str] = None
         status = "completed"
         error_msg: Optional[str] = None
@@ -241,6 +246,7 @@ class AgentOrchestrator:
                             total_tokens_in += event.data.get("total_tokens_in", 0)
                             total_tokens_out += event.data.get("total_tokens_out", 0)
                             total_tokens_saved += event.data.get("total_tokens_saved_by_rcs", 0)
+                            cumulative_tokens_saved += event.data.get("cumulative_tokens_saved_by_rcs", 0)
                 elif isinstance(member, AgentOrchestrator):
                     async for event in member.run_stream(current_input, stream=True):
                         yield self._tag_member_event(name, event)
@@ -252,6 +258,7 @@ class AgentOrchestrator:
                             total_tokens_in += event.data.get("total_tokens_in", 0)
                             total_tokens_out += event.data.get("total_tokens_out", 0)
                             total_tokens_saved += event.data.get("total_tokens_saved_by_rcs", 0)
+                            cumulative_tokens_saved += event.data.get("cumulative_tokens_saved_by_rcs", 0)
             except Exception as e:
                 logger.error("Pipeline member '%s' failed: %s", name, e)
                 status = "failed"
@@ -272,6 +279,7 @@ class AgentOrchestrator:
             total_tokens_in=total_tokens_in,
             total_tokens_out=total_tokens_out,
             total_tokens_saved_by_rcs=total_tokens_saved,
+            cumulative_tokens_saved_by_rcs=cumulative_tokens_saved,
             duration_ms=int((time.time() - start_time) * 1000),
             status=status,
             error=error_msg,
@@ -317,7 +325,7 @@ class AgentOrchestrator:
         )
 
         member_results: dict[str, Any] = {}
-        turns_used = total_tokens_in = total_tokens_out = total_tokens_saved = 0
+        turns_used = total_tokens_in = total_tokens_out = total_tokens_saved = cumulative_tokens_saved = 0
         for item in gathered:
             if isinstance(item, Exception):
                 logger.error("Parallel member failed: %s", item)
@@ -335,6 +343,7 @@ class AgentOrchestrator:
             total_tokens_in += res.total_tokens_in
             total_tokens_out += res.total_tokens_out
             total_tokens_saved += res.total_tokens_saved_by_rcs
+            cumulative_tokens_saved += res.cumulative_input_tokens_saved_by_rcs
 
         return AgentGroupResult(
             session_id=self._root_session_id(),
@@ -345,6 +354,7 @@ class AgentOrchestrator:
             total_tokens_in=total_tokens_in,
             total_tokens_out=total_tokens_out,
             total_tokens_saved_by_rcs=total_tokens_saved,
+            cumulative_tokens_saved_by_rcs=cumulative_tokens_saved,
             duration_ms=int((time.time() - start_time) * 1000),
             status="completed",
         )
@@ -377,7 +387,7 @@ class AgentOrchestrator:
 
         tasks = [asyncio.create_task(pump(n, m)) for n, m in self._members.items()]
         remaining = len(tasks)
-        turns_used = total_tokens_in = total_tokens_out = total_tokens_saved = 0
+        turns_used = total_tokens_in = total_tokens_out = total_tokens_saved = cumulative_tokens_saved = 0
 
         while remaining > 0:
             name, event = await queue.get()
@@ -391,6 +401,7 @@ class AgentOrchestrator:
                 total_tokens_in += event.data.get("total_tokens_in", 0)
                 total_tokens_out += event.data.get("total_tokens_out", 0)
                 total_tokens_saved += event.data.get("total_tokens_saved_by_rcs", 0)
+                cumulative_tokens_saved += event.data.get("cumulative_tokens_saved_by_rcs", 0)
 
         for task in tasks:
             if not task.done():
@@ -405,6 +416,7 @@ class AgentOrchestrator:
             total_tokens_in=total_tokens_in,
             total_tokens_out=total_tokens_out,
             total_tokens_saved_by_rcs=total_tokens_saved,
+            cumulative_tokens_saved_by_rcs=cumulative_tokens_saved,
             duration_ms=int((time.time() - start_time) * 1000),
             status="completed",
         )
@@ -456,6 +468,7 @@ class AgentOrchestrator:
         total_tokens_in = 0
         total_tokens_out = 0
         total_tokens_saved = 0
+        cumulative_tokens_saved = 0
 
         def _make_delegate_tool(member_name: str, member_obj: Any):
             """Build a delegate tool whose signature exposes only ``task_input``.
@@ -473,11 +486,12 @@ class AgentOrchestrator:
                 if isinstance(member_obj, AgentRunner):
                     sub_res = await member_obj.run(task_input, stream=False)
                     member_results[member_name] = sub_res
-                    nonlocal turns_used, total_tokens_in, total_tokens_out, total_tokens_saved
+                    nonlocal turns_used, total_tokens_in, total_tokens_out, total_tokens_saved, cumulative_tokens_saved
                     turns_used += sub_res.turns_used
                     total_tokens_in += sub_res.total_tokens_in
                     total_tokens_out += sub_res.total_tokens_out
                     total_tokens_saved += sub_res.total_tokens_saved_by_rcs
+                    cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
                     return sub_res.final_response or "Completed with no output."
                 elif isinstance(member_obj, AgentOrchestrator):
                     sub_res = await member_obj.run(task_input, stream=False)
@@ -486,6 +500,7 @@ class AgentOrchestrator:
                     total_tokens_in += sub_res.total_tokens_in
                     total_tokens_out += sub_res.total_tokens_out
                     total_tokens_saved += sub_res.total_tokens_saved_by_rcs
+                    cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
                     return sub_res.final_response or "Completed with no output."
                 return "Failed to run sub-agent."
 
@@ -518,6 +533,7 @@ class AgentOrchestrator:
             total_tokens_in += supervisor_res.total_tokens_in
             total_tokens_out += supervisor_res.total_tokens_out
             total_tokens_saved += supervisor_res.total_tokens_saved_by_rcs
+            cumulative_tokens_saved += supervisor_res.cumulative_input_tokens_saved_by_rcs
         except Exception as e:
             logger.error("Supervisor agent failed: %s", e)
             return AgentGroupResult(
@@ -538,6 +554,7 @@ class AgentOrchestrator:
             total_tokens_in=total_tokens_in,
             total_tokens_out=total_tokens_out,
             total_tokens_saved_by_rcs=total_tokens_saved,
+            cumulative_tokens_saved_by_rcs=cumulative_tokens_saved,
             duration_ms=int((time.time() - start_time) * 1000),
             status="completed",
         )
@@ -577,6 +594,7 @@ class AgentOrchestrator:
         total_tokens_in = 0
         total_tokens_out = 0
         total_tokens_saved = 0
+        cumulative_tokens_saved = 0
         final_response: Optional[str] = None
         status = "completed"
         error_msg: Optional[str] = None
@@ -593,11 +611,12 @@ class AgentOrchestrator:
                 if isinstance(member_obj, AgentRunner):
                     sub_res = await member_obj.run(task_input, stream=False)
                     member_results[member_name] = sub_res
-                    nonlocal turns_used, total_tokens_in, total_tokens_out, total_tokens_saved
+                    nonlocal turns_used, total_tokens_in, total_tokens_out, total_tokens_saved, cumulative_tokens_saved
                     turns_used += sub_res.turns_used
                     total_tokens_in += sub_res.total_tokens_in
                     total_tokens_out += sub_res.total_tokens_out
                     total_tokens_saved += sub_res.total_tokens_saved_by_rcs
+                    cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
                     return sub_res.final_response or "Completed with no output."
                 elif isinstance(member_obj, AgentOrchestrator):
                     sub_res = await member_obj.run(task_input, stream=False)
@@ -606,6 +625,7 @@ class AgentOrchestrator:
                     total_tokens_in += sub_res.total_tokens_in
                     total_tokens_out += sub_res.total_tokens_out
                     total_tokens_saved += sub_res.total_tokens_saved_by_rcs
+                    cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
                     return sub_res.final_response or "Completed with no output."
                 return "Failed to run sub-agent."
 
@@ -636,6 +656,7 @@ class AgentOrchestrator:
                     total_tokens_in += event.data.get("total_tokens_in", 0)
                     total_tokens_out += event.data.get("total_tokens_out", 0)
                     total_tokens_saved += event.data.get("total_tokens_saved_by_rcs", 0)
+                    cumulative_tokens_saved += event.data.get("cumulative_tokens_saved_by_rcs", 0)
         except Exception as e:
             logger.error("Supervisor agent failed: %s", e)
             status = "failed"
@@ -655,6 +676,7 @@ class AgentOrchestrator:
             total_tokens_in=total_tokens_in,
             total_tokens_out=total_tokens_out,
             total_tokens_saved_by_rcs=total_tokens_saved,
+            cumulative_tokens_saved_by_rcs=cumulative_tokens_saved,
             duration_ms=int((time.time() - start_time) * 1000),
             status=status,
             error=error_msg,

@@ -11,7 +11,7 @@ from pydantic import SecretStr
 
 from nexus.config import AgentConfig, LLMProviderConfig
 from nexus.config.agent import AgentPersonaConfig, TurnConfig
-from nexus.config.rcs import RuntimeContextSummarizerConfig
+from nexus.config.rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
 from nexus.context.builder import ContextWindowBuilder
 from nexus.runner.agent_runner import AgentRunner
 from nexus.session.manager import SessionManager
@@ -98,7 +98,7 @@ def _summary_matches_intent(summary: str) -> bool:
     )
 
 
-def _assert_rcs_applied(session, agent_config: AgentConfig) -> None:
+async def _assert_rcs_applied(session, agent_config: AgentConfig) -> None:
     """Shared assertions for mocked and live RCS e2e runs."""
     assert len(session.turns) >= 2
 
@@ -119,7 +119,7 @@ def _assert_rcs_applied(session, agent_config: AgentConfig) -> None:
         for tc in turn.tool_calls:
             assert "_context_updates" not in tc.tool_input
 
-    messages = ContextWindowBuilder().build(session, agent_config)
+    messages = await ContextWindowBuilder().build(session, agent_config)
     tool_contents = [m["content"] for m in messages if m.get("role") == "tool"]
     assert any(RCS_SUMMARY.lower() in c.lower() or _summary_matches_intent(c) for c in tool_contents)
     assert not any("PANDAS COOKBOOK" in c for c in tool_contents)
@@ -210,7 +210,7 @@ async def test_rcs_e2e_mocked_llm():
 
     sess = await manager.load_session("rcs-mock-sess")
     assert sess is not None
-    _assert_rcs_applied(sess, agent_config)
+    await _assert_rcs_applied(sess, agent_config)
 
     assert sess.turns[1].context_updates_received
     assert sess.turns[1].context_updates_received[0]["summary"] == RCS_SUMMARY
@@ -245,7 +245,7 @@ async def test_rcs_e2e_live_llm():
     assert sess is not None
 
     try:
-        _assert_rcs_applied(sess, agent_config)
+        await _assert_rcs_applied(sess, agent_config)
     except AssertionError as exc:
         debug = {
             "turns": len(sess.turns),
@@ -267,3 +267,544 @@ async def test_rcs_e2e_live_llm():
             ],
         }
         pytest.fail(f"{exc}\nSession debug: {debug}")
+
+
+# =============================================================================
+# Additional integration tests (mocked LLM)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_rcs_e2e_streaming():
+    """RCS works in streaming mode (run_stream)."""
+    from nexus.llm.response import LLMResponse, LLMStreamChunk, ToolCallRequest, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
+    agent_config = _rcs_agent_config(llm_config)
+    agent_config.stream_output = True
+
+    registry = ToolRegistry()
+    _register_rcs_tools(registry)
+
+    manager = SessionManager()
+    runner = AgentRunner(config=agent_config, tool_registry=registry, storage_config=manager)
+
+    stream_turn_chunks = [
+        [
+            LLMStreamChunk(content="Trying noise lookup."),
+            LLMStreamChunk(
+                tool_calls=[{"index": 0, "id": "c1", "name": "global.noise_lookup", "arguments": '{"query": "quantum entanglement"}'}],
+                finish_reason="tool_calls",
+                usage=TokenUsage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
+            ),
+        ],
+        [
+            LLMStreamChunk(content="Noise useless; searching docs."),
+            LLMStreamChunk(
+                tool_calls=[{"index": 0, "id": "c2", "name": "global.doc_search", "arguments": '{"query": "quantum entanglement", "_context_updates": [{"tc_id": "TC1", "summary": "' + RCS_SUMMARY + '"}]}'}],
+                finish_reason="tool_calls",
+                usage=TokenUsage(prompt_tokens=20, completion_tokens=12, total_tokens=32),
+            ),
+        ],
+        [
+            LLMStreamChunk(content="Found it in section 4.2."),
+            LLMStreamChunk(content="", finish_reason="stop", usage=TokenUsage(prompt_tokens=30, completion_tokens=10, total_tokens=40)),
+        ],
+    ]
+    stream_call_idx = 0
+
+    async def mock_chat_stream(*_a, **_kw):
+        nonlocal stream_call_idx
+        chunks = stream_turn_chunks[stream_call_idx]
+        stream_call_idx += 1
+
+        async def _gen():
+            for chunk in chunks:
+                yield chunk
+
+        return _gen()
+
+    with patch.object(runner.llm_proxy, "chat_stream", mock_chat_stream):
+        events = []
+        async for ev in runner.run_stream(user_message=USER_PROMPT, session_id="rcs-stream-sess"):
+            events.append(ev)
+
+    assert any(e.event_type == "final_response" for e in events)
+    sess = await manager.load_session("rcs-stream-sess")
+    assert sess is not None
+    assert sess.total_tokens_saved_by_rcs > 0
+
+
+@pytest.mark.asyncio
+async def test_rcs_e2e_drop_sentinel():
+    """LLM passes summary='[]' to drop a TC; it must not appear in later tool messages."""
+    from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
+    agent_config = _rcs_agent_config(llm_config)
+    registry = ToolRegistry()
+    _register_rcs_tools(registry)
+    manager = SessionManager()
+    runner = AgentRunner(config=agent_config, tool_registry=registry, storage_config=manager)
+
+    response_t0 = LLMResponse(
+        content="Lookup.",
+        tool_calls=[ToolCallRequest(id="c1", tool_name="global.noise_lookup", tool_input={"query": "q"})],
+        usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t1 = LLMResponse(
+        content="Dropping noise, searching docs.",
+        tool_calls=[ToolCallRequest(id="c2", tool_name="global.doc_search", tool_input={
+            "query": "q",
+            "_context_updates": [{"tc_id": "TC1", "summary": "[]"}],
+        })],
+        usage=TokenUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t2 = LLMResponse(
+        content="Done.",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
+        finish_reason="stop", raw_response={},
+    )
+
+    call_count = 0
+
+    async def mock_chat(*_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        return [response_t0, response_t1, response_t2][call_count - 1]
+
+    with patch.object(runner.llm_proxy, "chat", AsyncMock(side_effect=mock_chat)):
+        await runner.run(user_message=USER_PROMPT, session_id="rcs-drop-sess")
+
+    sess = await manager.load_session("rcs-drop-sess")
+    noise_tc = sess.turns[0].tool_calls[0]
+    assert noise_tc.is_dropped is True
+    assert noise_tc.summarized_response == "[]"
+
+    # Dropped TC must not appear in rebuilt context
+    messages = await ContextWindowBuilder().build(sess, agent_config)
+    tool_contents = [m["content"] for m in messages if m.get("role") == "tool"]
+    assert not any("PANDAS COOKBOOK" in c for c in tool_contents)
+
+
+@pytest.mark.asyncio
+async def test_rcs_e2e_multiple_tc_summarized_in_one_call():
+    """LLM summarizes multiple TCs in a single _context_updates list."""
+    from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
+    agent_config = _rcs_agent_config(llm_config)
+    registry = ToolRegistry()
+    _register_rcs_tools(registry)
+    manager = SessionManager()
+    runner = AgentRunner(config=agent_config, tool_registry=registry, storage_config=manager)
+
+    response_t0 = LLMResponse(
+        content="Two lookups.",
+        tool_calls=[
+            ToolCallRequest(id="c1", tool_name="global.noise_lookup", tool_input={"query": "q1"}),
+            ToolCallRequest(id="c2", tool_name="global.noise_lookup", tool_input={"query": "q2"}),
+        ],
+        usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t1 = LLMResponse(
+        content="Both useless; searching docs.",
+        tool_calls=[ToolCallRequest(id="c3", tool_name="global.doc_search", tool_input={
+            "query": "q",
+            "_context_updates": [
+                {"tc_id": "TC1", "summary": "noise1 not relevant"},
+                {"tc_id": "TC2", "summary": "noise2 not relevant"},
+            ],
+        })],
+        usage=TokenUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t2 = LLMResponse(
+        content="Done.",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
+        finish_reason="stop", raw_response={},
+    )
+
+    call_count = 0
+
+    async def mock_chat(*_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        return [response_t0, response_t1, response_t2][call_count - 1]
+
+    with patch.object(runner.llm_proxy, "chat", AsyncMock(side_effect=mock_chat)):
+        await runner.run(user_message="Search q", session_id="rcs-multi-sess")
+
+    sess = await manager.load_session("rcs-multi-sess")
+    assert sess.turns[1].context_updates_received
+    assert len(sess.turns[1].context_updates_received) == 2
+    tc1 = sess.find_tc("TC1")
+    tc2 = sess.find_tc("TC2")
+    assert tc1.summarized_response == "noise1 not relevant"
+    assert tc2.summarized_response == "noise2 not relevant"
+
+
+@pytest.mark.asyncio
+async def test_rcs_e2e_custom_param_name():
+    """RCS works end-to-end with a custom context_updates_param_name."""
+    from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
+    agent_config = AgentConfig(
+        name="rcs-custom",
+        llm=llm_config,
+        rcs=RuntimeContextSummarizerConfig(enabled=True, context_updates_param_name="_my_updates"),
+        tool_plugins=["global"],
+        turns=TurnConfig(max_turns=5, turn_timeout_seconds=120),
+        persona=AgentPersonaConfig(role="Research assistant", goal="Find docs."),
+    )
+    registry = ToolRegistry()
+    _register_rcs_tools(registry)
+    manager = SessionManager()
+    runner = AgentRunner(config=agent_config, tool_registry=registry, storage_config=manager)
+
+    # Verify schema injection uses the custom name
+    schemas = registry.get_tool_schemas_for_llm(rcs_config=agent_config.rcs)
+    assert "_my_updates" in schemas[0]["parameters"]["properties"]
+
+    response_t0 = LLMResponse(
+        content="Lookup.",
+        tool_calls=[ToolCallRequest(id="c1", tool_name="global.noise_lookup", tool_input={"query": "q"})],
+        usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t1 = LLMResponse(
+        content="Searching docs.",
+        tool_calls=[ToolCallRequest(id="c2", tool_name="global.doc_search", tool_input={
+            "query": "q",
+            "_my_updates": [{"tc_id": "TC1", "summary": "noise not relevant"}],
+        })],
+        usage=TokenUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t2 = LLMResponse(
+        content="Done.",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
+        finish_reason="stop", raw_response={},
+    )
+
+    call_count = 0
+
+    async def mock_chat(*_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        return [response_t0, response_t1, response_t2][call_count - 1]
+
+    with patch.object(runner.llm_proxy, "chat", AsyncMock(side_effect=mock_chat)):
+        await runner.run(user_message="Search q", session_id="rcs-custom-sess")
+
+    sess = await manager.load_session("rcs-custom-sess")
+    assert sess.find_tc("TC1").summarized_response == "noise not relevant"
+    assert sess.total_tokens_saved_by_rcs > 0
+
+
+@pytest.mark.asyncio
+async def test_rcs_invariant_tool_input_never_has_context_updates():
+    """_context_updates never appears in any ToolCallRecord.tool_input after a run."""
+    from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
+    agent_config = _rcs_agent_config(llm_config)
+    registry = ToolRegistry()
+    _register_rcs_tools(registry)
+    manager = SessionManager()
+    runner = AgentRunner(config=agent_config, tool_registry=registry, storage_config=manager)
+
+    response_t0 = LLMResponse(
+        content="Lookup.",
+        tool_calls=[ToolCallRequest(id="c1", tool_name="global.noise_lookup", tool_input={"query": "q"})],
+        usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t1 = LLMResponse(
+        content="Searching docs.",
+        tool_calls=[ToolCallRequest(id="c2", tool_name="global.doc_search", tool_input={
+            "query": "q",
+            "_context_updates": [{"tc_id": "TC1", "summary": "noise not relevant"}],
+        })],
+        usage=TokenUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t2 = LLMResponse(
+        content="Done.",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
+        finish_reason="stop", raw_response={},
+    )
+
+    call_count = 0
+
+    async def mock_chat(*_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        return [response_t0, response_t1, response_t2][call_count - 1]
+
+    with patch.object(runner.llm_proxy, "chat", AsyncMock(side_effect=mock_chat)):
+        await runner.run(user_message="Search q", session_id="rcs-invariant-sess")
+
+    sess = await manager.load_session("rcs-invariant-sess")
+    for turn in sess.turns:
+        for tc in turn.tool_calls:
+            assert "_context_updates" not in tc.tool_input, f"{tc.tc_id} leaked _context_updates into tool_input"
+
+
+@pytest.mark.asyncio
+async def test_rcs_invariant_aggregated_tokens_match_turn_sum():
+    """session.total_tokens_saved_by_rcs == sum(turn.tokens_saved_this_turn)."""
+    from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
+    agent_config = _rcs_agent_config(llm_config)
+    registry = ToolRegistry()
+    _register_rcs_tools(registry)
+    manager = SessionManager()
+    runner = AgentRunner(config=agent_config, tool_registry=registry, storage_config=manager)
+
+    response_t0 = LLMResponse(
+        content="Lookup.",
+        tool_calls=[ToolCallRequest(id="c1", tool_name="global.noise_lookup", tool_input={"query": "q"})],
+        usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t1 = LLMResponse(
+        content="Searching docs.",
+        tool_calls=[ToolCallRequest(id="c2", tool_name="global.doc_search", tool_input={
+            "query": "q",
+            "_context_updates": [{"tc_id": "TC1", "summary": "noise not relevant"}],
+        })],
+        usage=TokenUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t2 = LLMResponse(
+        content="Done.",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
+        finish_reason="stop", raw_response={},
+    )
+
+    call_count = 0
+
+    async def mock_chat(*_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        return [response_t0, response_t1, response_t2][call_count - 1]
+
+    with patch.object(runner.llm_proxy, "chat", AsyncMock(side_effect=mock_chat)):
+        await runner.run(user_message="Search q", session_id="rcs-agg-sess")
+
+    sess = await manager.load_session("rcs-agg-sess")
+    turn_sum = sum(t.tokens_saved_this_turn for t in sess.turns)
+    assert turn_sum == sess.total_tokens_saved_by_rcs
+
+
+@pytest.mark.asyncio
+async def test_rcs_e2e_fallback_compactor_triggered():
+    """Fallback compactor fires when context exceeds trigger_token_threshold."""
+    from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
+    agent_config = AgentConfig(
+        name="rcs-compactor",
+        llm=llm_config,
+        rcs=RuntimeContextSummarizerConfig(
+            enabled=True,
+            fallback_compactor=ServerCompactorConfig(
+                enabled=True,
+                trigger_token_threshold=100,  # very low → forces compaction
+                compact_oldest_n_tcs=1,
+            ),
+        ),
+        tool_plugins=["global"],
+        turns=TurnConfig(max_turns=5, turn_timeout_seconds=120),
+        persona=AgentPersonaConfig(role="Research assistant", goal="Find docs."),
+    )
+    registry = ToolRegistry()
+    _register_rcs_tools(registry)
+    manager = SessionManager()
+    runner = AgentRunner(config=agent_config, tool_registry=registry, storage_config=manager)
+
+    response_t0 = LLMResponse(
+        content="Lookup.",
+        tool_calls=[ToolCallRequest(id="c1", tool_name="global.noise_lookup", tool_input={"query": "q"})],
+        usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t1 = LLMResponse(
+        content="Done.",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
+        finish_reason="stop", raw_response={},
+    )
+
+    call_count = 0
+
+    async def mock_chat(*_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return response_t0
+        # After compactor runs, the next LLM call returns stop
+        return response_t1
+
+    # Mock the compactor's LLM call separately
+    compactor_llm_response = LLMResponse(
+        content="compacted noise lookup result",
+        usage=TokenUsage(prompt_tokens=5, completion_tokens=5, total_tokens=10),
+        finish_reason="stop", raw_response={},
+    )
+
+    with patch.object(runner.llm_proxy, "chat", AsyncMock(side_effect=mock_chat)):
+        await runner.run(user_message="Search q", session_id="rcs-compactor-sess")
+
+    sess = await manager.load_session("rcs-compactor-sess")
+    # The compactor should have summarized TC1
+    tc1 = sess.find_tc("TC1")
+    assert tc1.summarized_response is not None
+    assert sess.total_tokens_saved_by_rcs > 0
+
+
+# =============================================================================
+# Cumulative recurring savings integration tests
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_rcs_cumulative_savings_exceed_one_time():
+    """After a multi-turn run, cumulative recurring savings > one-time savings.
+
+    A TC summarized in turn 1 saves input tokens in turns 2 AND 3 (recurring),
+    so cumulative_input_tokens_saved_by_rcs should be at least 2x the one-time
+    total_tokens_saved_by_rcs.
+    """
+    from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
+    agent_config = _rcs_agent_config(llm_config)
+    registry = ToolRegistry()
+    _register_rcs_tools(registry)
+    manager = SessionManager()
+    runner = AgentRunner(config=agent_config, tool_registry=registry, storage_config=manager)
+
+    response_t0 = LLMResponse(
+        content="Lookup.",
+        tool_calls=[ToolCallRequest(id="c1", tool_name="global.noise_lookup", tool_input={"query": "q"})],
+        usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t1 = LLMResponse(
+        content="Searching docs.",
+        tool_calls=[ToolCallRequest(id="c2", tool_name="global.doc_search", tool_input={
+            "query": "q",
+            "_context_updates": [{"tc_id": "TC1", "summary": "noise not relevant"}],
+        })],
+        usage=TokenUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t2 = LLMResponse(
+        content="Found it. Summarizing.",
+        tool_calls=[ToolCallRequest(id="c3", tool_name="global.summarize_findings", tool_input={
+            "text": "found section 4.2",
+            "_context_updates": [{"tc_id": "TC2", "summary": "found section 4.2"}],
+        })],
+        usage=TokenUsage(prompt_tokens=25, completion_tokens=10, total_tokens=35),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t3 = LLMResponse(
+        content="Done.",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
+        finish_reason="stop", raw_response={},
+    )
+
+    call_count = 0
+
+    async def mock_chat(*_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        return [response_t0, response_t1, response_t2, response_t3][call_count - 1]
+
+    with patch.object(runner.llm_proxy, "chat", AsyncMock(side_effect=mock_chat)):
+        result = await runner.run(user_message="Search q", session_id="rcs-cumulative-sess")
+
+    sess = await manager.load_session("rcs-cumulative-sess")
+    # One-time savings: TC1 summarized in turn 1, TC2 summarized in turn 2
+    assert sess.total_tokens_saved_by_rcs > 0
+    # Cumulative recurring savings should be strictly greater than one-time
+    # because the summarized TC1 saves input tokens in turns 2 and 3 too.
+    assert sess.cumulative_input_tokens_saved_by_rcs > sess.total_tokens_saved_by_rcs
+    # The result should carry the cumulative metric
+    assert result.cumulative_input_tokens_saved_by_rcs == sess.cumulative_input_tokens_saved_by_rcs
+
+    # token_usage aggregate is present in the serialized chat JSON and ties out
+    # to the per-turn fields + session RCS counters (source of truth for UI /
+    # external analysis).
+    dumped = sess.model_dump(mode="json")
+    usage = dumped["token_usage"]
+    assert usage["total_tokens_in"] == sum(t.total_tokens_in for t in sess.turns)
+    assert usage["total_tokens_out"] == sum(t.total_tokens_out for t in sess.turns)
+    assert usage["total_tokens_saved_by_rcs"] == sess.total_tokens_saved_by_rcs
+    assert usage["cumulative_input_tokens_saved_by_rcs"] == sess.cumulative_input_tokens_saved_by_rcs
+    assert usage["rcs_enabled"] is True
+    assert sess.token_usage == usage
+
+
+@pytest.mark.asyncio
+async def test_rcs_recurring_savings_monotonic():
+    """cumulative_input_tokens_saved_by_rcs is monotonically non-decreasing across turns."""
+    from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
+    agent_config = _rcs_agent_config(llm_config)
+    registry = ToolRegistry()
+    _register_rcs_tools(registry)
+    manager = SessionManager()
+    runner = AgentRunner(config=agent_config, tool_registry=registry, storage_config=manager)
+
+    response_t0 = LLMResponse(
+        content="Lookup.",
+        tool_calls=[ToolCallRequest(id="c1", tool_name="global.noise_lookup", tool_input={"query": "q"})],
+        usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t1 = LLMResponse(
+        content="Searching docs.",
+        tool_calls=[ToolCallRequest(id="c2", tool_name="global.doc_search", tool_input={
+            "query": "q",
+            "_context_updates": [{"tc_id": "TC1", "summary": "noise not relevant"}],
+        })],
+        usage=TokenUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
+        finish_reason="tool_calls", raw_response={},
+    )
+    response_t2 = LLMResponse(
+        content="Done.",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=15, completion_tokens=5, total_tokens=20),
+        finish_reason="stop", raw_response={},
+    )
+
+    call_count = 0
+
+    async def mock_chat(*_a, **_kw):
+        nonlocal call_count
+        call_count += 1
+        return [response_t0, response_t1, response_t2][call_count - 1]
+
+    with patch.object(runner.llm_proxy, "chat", AsyncMock(side_effect=mock_chat)):
+        await runner.run(user_message="Search q", session_id="rcs-monotonic-sess")
+
+    sess = await manager.load_session("rcs-monotonic-sess")
+    # Verify monotonic: each turn's recurring_savings_this_turn >= 0
+    running_total = 0
+    for turn in sess.turns:
+        assert turn.recurring_savings_this_turn >= 0
+        running_total += turn.recurring_savings_this_turn
+    assert running_total == sess.cumulative_input_tokens_saved_by_rcs
