@@ -111,6 +111,8 @@ groups:
 
   research_team:
     pattern: supervisor                 # supervisor delegates via delegate_to_* tools
+    supervisor: supervisor              # optional; default is name heuristic
+    persist_members: false              # optional; default false — members skip durable persistence
     session_id_prefix: team_
     members: [supervisor, analysis_pipeline]  # nested group reference
 

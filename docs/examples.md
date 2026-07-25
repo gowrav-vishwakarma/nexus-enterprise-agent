@@ -16,9 +16,11 @@ Not sure which example fits your use case? See the [pipelines guide](guides/pipe
 | [examples/orchestration/research_team.yaml](../examples/orchestration/research_team.yaml) | Supervisor + nested pipeline team; agents select toolsets |
 | [examples/orchestration/research_team_prompts.py](../examples/orchestration/research_team_prompts.py) | PROMPTS dict, Jinja templates |
 | [examples/orchestration/run_team.py](../examples/orchestration/run_team.py) | CLI to load manifest, build a ToolRegistry with add_toolset(), and run |
+| [examples/orchestration/run_team_python.py](../examples/orchestration/run_team_python.py) | Same research team built in Python (`AgentGroupConfig` + `AgentOrchestrator`) |
 
 ```bash
 uv run python examples/orchestration/run_team.py "Your question here"
+uv run python examples/orchestration/run_team_python.py "Your question here"
 ```
 
 Annotated references (not runnable as-is):

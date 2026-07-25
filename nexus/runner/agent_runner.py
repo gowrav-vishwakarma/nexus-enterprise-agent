@@ -175,6 +175,7 @@ class AgentRunner:
         self._skill_store = None
         self._skill_scope_resolver = None
         self._allowed_tools: Optional[set[str]] = None
+        self._runtime_granted_tools: set[str] = set()
         if self.config.skills.enabled:
             self.skills_registry = SkillsRegistry(self.config.skills)
 
@@ -418,19 +419,24 @@ class AgentRunner:
         override = self.run_context.get("toolset_override")
         toolset = override if override is not None else self.config.toolset
         self._allowed_tools = self.tool_registry.resolve_toolset(toolset)
+        if self._allowed_tools is not None and self._runtime_granted_tools:
+            self._allowed_tools |= self._runtime_granted_tools
 
     def grant_tools(self, names: Union[str, list[str]]) -> None:
         """Add explicit tool names to this agent's allow-list at runtime.
 
         Takes effect on the next turn (schemas are re-filtered each turn). When
         the agent has no toolset restriction (``_allowed_tools is None``) every
-        registered tool is already visible, so this is a no-op.
+        registered tool is already visible, so this is a no-op for the allow-list
+        (grants are still remembered for when a toolset restriction applies).
         """
-        if self._allowed_tools is None:
-            return
         if isinstance(names, str):
             names = [names]
-        self._allowed_tools |= set(names)
+        granted = set(names)
+        self._runtime_granted_tools |= granted
+        if self._allowed_tools is None:
+            return
+        self._allowed_tools |= granted
 
     def grant_toolset(self, name_or_names: Union[str, list[str]]) -> None:
         """Resolve a toolset (or names) via the registry and union it in.
@@ -781,6 +787,7 @@ class AgentRunner:
         user_message: str,
         session_id: Optional[str] = None,
         initial_context: Optional[dict[str, Any]] = None,
+        max_turns: Optional[int] = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         """Shared agent loop. Yields AgentStreamEvents when stream=True."""
         session = await self._get_or_create_session(session_id)
@@ -823,11 +830,14 @@ class AgentRunner:
         total_tokens_in = 0
         total_tokens_out = 0
         final_resp: Optional[str] = None
+        turn_limit = self.config.turns.max_turns
+        if max_turns is not None:
+            turn_limit = min(turn_limit, max_turns)
 
         try:
             current_user_message = user_message
 
-            while run_turn_index < self.config.turns.max_turns:
+            while run_turn_index < turn_limit:
                 turn_user_msg = current_user_message if run_turn_index == 0 else None
                 messages = await self._build_context_messages(
                     session, current_user_message=turn_user_msg
@@ -1196,7 +1206,7 @@ class AgentRunner:
                 session_turn_index += 1
                 run_turn_index += 1
 
-            if run_turn_index >= self.config.turns.max_turns:
+            if run_turn_index >= turn_limit:
                 status = "max_turns_reached"
 
         except Exception as e:
@@ -1287,6 +1297,7 @@ class AgentRunner:
         session_id: Optional[str] = None,
         initial_context: Optional[dict[str, Any]] = None,
         stream: Optional[bool] = None,
+        max_turns: Optional[int] = None,
     ) -> AgentRunResult:
         """Run the agent loop and return the complete result (non-streaming mode)."""
         if self._resolve_stream(stream):
@@ -1301,6 +1312,7 @@ class AgentRunner:
             user_message=user_message,
             session_id=session_id,
             initial_context=initial_context,
+            max_turns=max_turns,
         ):
             pass
 
@@ -1313,6 +1325,7 @@ class AgentRunner:
         session_id: Optional[str] = None,
         initial_context: Optional[dict[str, Any]] = None,
         stream: Optional[bool] = None,
+        max_turns: Optional[int] = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         """Run the agent loop in streaming mode, yielding incremental events."""
         if not self._resolve_stream(stream):
@@ -1327,6 +1340,7 @@ class AgentRunner:
             user_message=user_message,
             session_id=session_id,
             initial_context=initial_context,
+            max_turns=max_turns,
         ):
             yield event
 

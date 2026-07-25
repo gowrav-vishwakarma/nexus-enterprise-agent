@@ -146,6 +146,14 @@ class AgentGroupConfig(BaseModel):
     session_id_prefix: str = Field(
         default="", description="Prefix for member session IDs"
     )
+    supervisor: Optional[str] = Field(
+        default=None,
+        description="Member name that leads supervisor-pattern groups (default: name heuristic)",
+    )
+    persist_members: bool = Field(
+        default=False,
+        description="When False, member runs use is_subagent and skip durable chat persistence",
+    )
     rcs: RuntimeContextSummarizerConfig = Field(
         default_factory=RuntimeContextSummarizerConfig,
         description="RCS configuration for group sessions",

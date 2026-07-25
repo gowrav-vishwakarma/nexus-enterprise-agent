@@ -28,7 +28,9 @@ Groups do **not** have an `llm` field. Each member's `AgentConfig` has its own L
 | `pattern` | No | `supervisor` | Orchestration pattern |
 | `members` | No | `[]` | Agents or nested groups |
 | `session_id_prefix` | No | `""` | Prefix for member chat ids |
-| `max_turns` | No | `20` | Total turns across members |
+| `supervisor` | No | `None` | Lead member for `supervisor` pattern (else name heuristic) |
+| `persist_members` | No | `False` | When `False`, members run with `is_subagent` and skip durable chat persistence |
+| `max_turns` | No | `20` | Total turns across members (**enforced** by the orchestrator) |
 
 ## Member chat ids
 
@@ -37,6 +39,12 @@ At orchestrator init: `{session_id_prefix}{group_session_id}_{member.name}`
 Example: `team_group-1_researcher`, `team_group-1_analyst`.
 
 Set `RunContext.session_id` **before** creating `AgentOrchestrator` or `OrchestrationRuntime`.
+
+Member runners get `RunContext.is_subagent=True` by default (`persist_members=False`), so their chat history is not written to storage. Set `persist_members: true` on the group to keep separate member session files.
+
+Supervisor groups auto-register `supervisor.delegate_to_{member}` tools and **auto-grant** them to the lead agent even when the lead uses a narrow `toolset`. Optional YAML: `supervisor: lead_agent_name`.
+
+Python-only example: [run_team_python.py](../../examples/orchestration/run_team_python.py).
 
 ## Pipeline handoff
 

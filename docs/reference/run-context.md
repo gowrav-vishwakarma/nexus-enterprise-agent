@@ -102,7 +102,7 @@ See [runtime-control.md](../guides/runtime-control.md) for supervision and branc
 
 ## Multi-agent teams
 
-Pass one `RunContext` into `AgentOrchestrator` or `OrchestrationRuntime`. Member runners get derived chat ids: `{group_session_id}_{member_name}`.
+Pass one `RunContext` into `AgentOrchestrator` or `OrchestrationRuntime`. Member runners get derived chat ids: `{group_session_id}_{member_name}` and, by default, `is_subagent=True` (see `AgentGroupConfig.persist_members`).
 
 Set `session_id` **before** creating the orchestrator/runtime.
 

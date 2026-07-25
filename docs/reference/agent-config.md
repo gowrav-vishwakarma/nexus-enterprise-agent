@@ -83,9 +83,11 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 | `description` | No | `None` | Optional description |
 | `pattern` | No | `supervisor` | `supervisor`, `pipeline`, `parallel`, `swarm` |
 | `members` | No | `[]` | List of `AgentConfig` or nested `AgentGroupConfig` |
-| `max_turns` | No | `20` | Total turns across members |
+| `max_turns` | No | `20` | Total turns across members (enforced by orchestrator) |
 | `aggregation_strategy` | No | `supervisor` | How to combine results |
 | `session_id_prefix` | No | `""` | Prefix for member chat ids |
+| `supervisor` | No | `None` | Lead member name for supervisor pattern |
+| `persist_members` | No | `False` | Persist member chat sessions when `True` |
 | `rcs` | No | disabled | Group-level RCS settings |
 | `stream_output` | No | `False` | Default streaming mode |
 

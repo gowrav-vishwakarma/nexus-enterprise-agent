@@ -50,6 +50,7 @@ class AgentOrchestrator:
                     if self.run_context.session_id
                     else None
                 ),
+                is_subagent=not self.config.persist_members,
             )
 
             if isinstance(member, AgentConfig):
@@ -76,6 +77,7 @@ class AgentOrchestrator:
         user_message: str,
         session_id: Optional[str] = None,
         stream: Optional[bool] = None,
+        max_turns: Optional[int] = None,
     ) -> AgentGroupResult:
         """Execute the multi-agent group pattern recursively (non-streaming)."""
         if self._resolve_stream(stream):
@@ -88,14 +90,22 @@ class AgentOrchestrator:
         if session_id:
             self.run_context.session_id = session_id
 
+        budget = self._effective_turn_budget(max_turns)
+
         if self.config.pattern == "pipeline":
-            return await self._run_pipeline(user_message, start_time, stream=False)
+            return await self._run_pipeline(
+                user_message, start_time, stream=False, turn_budget=budget
+            )
         elif self.config.pattern == "supervisor":
-            return await self._run_supervisor(user_message, start_time, stream=False)
+            return await self._run_supervisor(
+                user_message, start_time, stream=False, turn_budget=budget
+            )
         elif self.config.pattern == "parallel":
-            return await self._run_parallel(user_message, start_time)
+            return await self._run_parallel(user_message, start_time, turn_budget=budget)
         else:
-            return await self._run_pipeline(user_message, start_time, stream=False)
+            return await self._run_pipeline(
+                user_message, start_time, stream=False, turn_budget=budget
+            )
 
     async def run_stream(
         self,
@@ -143,12 +153,51 @@ class AgentOrchestrator:
         """Root chat session id shared across all group members."""
         return self.run_context.session_id or ""
 
+    def _effective_turn_budget(self, max_turns: Optional[int]) -> int:
+        if max_turns is None:
+            return self.config.max_turns
+        return min(self.config.max_turns, max_turns)
+
+    def _select_supervisor(self) -> tuple[Optional[str], Optional[str]]:
+        """Return (supervisor_member_name, error_message)."""
+        if self.config.supervisor:
+            name = self.config.supervisor
+            if name not in self._members:
+                return None, f"Supervisor {name!r} is not a group member"
+            logger.info(
+                "Supervisor group %r using explicit supervisor %r",
+                self.config.name,
+                name,
+            )
+            return name, None
+
+        for name in self._members.keys():
+            if name == "supervisor" or "supervisor" in name.lower():
+                logger.info(
+                    "Supervisor group %r using heuristic supervisor %r",
+                    self.config.name,
+                    name,
+                )
+                return name, None
+
+        if self._members:
+            name = list(self._members.keys())[0]
+            logger.info(
+                "Supervisor group %r falling back to first member %r",
+                self.config.name,
+                name,
+            )
+            return name, None
+
+        return None, "No members available in supervisor group"
+
     async def _run_pipeline(
         self,
         user_message: str,
         start_time: float,
         *,
         stream: bool,
+        turn_budget: Optional[int] = None,
     ) -> AgentGroupResult:
         """Pipeline pattern: output of member N becomes input to member N+1."""
         current_input = user_message
@@ -158,15 +207,27 @@ class AgentOrchestrator:
         total_tokens_out = 0
         total_tokens_saved = 0
         cumulative_tokens_saved = 0
+        budget = turn_budget if turn_budget is not None else self.config.max_turns
 
         for name, member in self._members.items():
+            remaining = budget - turns_used
+            if remaining <= 0:
+                logger.warning(
+                    "Group %r hit max_turns=%d; stopping pipeline",
+                    self.config.name,
+                    budget,
+                )
+                break
+
             logger.info("Pipeline: Executing member '%s'", name)
 
             try:
                 if isinstance(member, AgentRunner):
                     if stream:
                         raise ValueError("Use run_stream() for streaming pipeline execution.")
-                    res = await member.run(current_input, stream=False)
+                    res = await member.run(
+                        current_input, stream=False, max_turns=remaining
+                    )
                     member_results[name] = res
                     current_input = res.final_response or ""
                     turns_used += res.turns_used
@@ -177,7 +238,9 @@ class AgentOrchestrator:
                 elif isinstance(member, AgentOrchestrator):
                     if stream:
                         raise ValueError("Use run_stream() for streaming pipeline execution.")
-                    res = await member.run(current_input, stream=False)
+                    res = await member.run(
+                        current_input, stream=False, max_turns=remaining
+                    )
                     member_results[name] = res
                     current_input = res.final_response or ""
                     turns_used += res.turns_used
@@ -311,12 +374,27 @@ class AgentOrchestrator:
         self,
         user_message: str,
         start_time: float,
+        turn_budget: Optional[int] = None,
     ) -> AgentGroupResult:
         """Parallel pattern: run all members concurrently on the same input."""
         names = list(self._members.keys())
+        budget = turn_budget if turn_budget is not None else self.config.max_turns
+        if budget < 1:
+            logger.warning(
+                "Group %r has no turn budget left (max_turns=%d)",
+                self.config.name,
+                budget,
+            )
+            return AgentGroupResult(
+                session_id=self._root_session_id(),
+                group_name=self.config.name,
+                status="failed",
+                error="Group max_turns budget exhausted",
+                duration_ms=int((time.time() - start_time) * 1000),
+            )
 
         async def run_member(name: str, member: Any) -> tuple[str, Any]:
-            res = await member.run(user_message, stream=False)
+            res = await member.run(user_message, stream=False, max_turns=budget)
             return name, res
 
         gathered = await asyncio.gather(
@@ -433,23 +511,17 @@ class AgentOrchestrator:
         start_time: float,
         *,
         stream: bool,
+        turn_budget: Optional[int] = None,
     ) -> AgentGroupResult:
         """Supervisor pattern: designated agent delegates subtasks via member tools."""
-        supervisor_name = None
-        for name in self._members.keys():
-            if name == "supervisor" or "supervisor" in name.lower():
-                supervisor_name = name
-                break
+        supervisor_name, select_error = self._select_supervisor()
 
-        if not supervisor_name and self._members:
-            supervisor_name = list(self._members.keys())[0]
-
-        if not supervisor_name:
+        if select_error or not supervisor_name:
             return AgentGroupResult(
                 session_id=self._root_session_id(),
                 group_name=self.config.name,
                 status="failed",
-                error="No members available in supervisor group",
+                error=select_error or "No supervisor available",
                 duration_ms=int((time.time() - start_time) * 1000),
             )
 
@@ -469,6 +541,7 @@ class AgentOrchestrator:
         total_tokens_out = 0
         total_tokens_saved = 0
         cumulative_tokens_saved = 0
+        budget = turn_budget if turn_budget is not None else self.config.max_turns
 
         def _make_delegate_tool(member_name: str, member_obj: Any):
             """Build a delegate tool whose signature exposes only ``task_input``.
@@ -478,15 +551,25 @@ class AgentOrchestrator:
             tool parameters and do not break JSON-schema generation.
             """
             async def call_member_tool(task_input: str) -> str:
+                nonlocal turns_used, total_tokens_in, total_tokens_out, total_tokens_saved, cumulative_tokens_saved
+                remaining = budget - turns_used
+                if remaining <= 0:
+                    logger.warning(
+                        "Group %r hit max_turns=%d during delegation",
+                        self.config.name,
+                        budget,
+                    )
+                    return "Group max_turns budget exhausted."
                 logger.info(
                     "Supervisor calling subtask agent '%s' with input: %s",
                     member_name,
                     task_input[:100],
                 )
                 if isinstance(member_obj, AgentRunner):
-                    sub_res = await member_obj.run(task_input, stream=False)
+                    sub_res = await member_obj.run(
+                        task_input, stream=False, max_turns=remaining
+                    )
                     member_results[member_name] = sub_res
-                    nonlocal turns_used, total_tokens_in, total_tokens_out, total_tokens_saved, cumulative_tokens_saved
                     turns_used += sub_res.turns_used
                     total_tokens_in += sub_res.total_tokens_in
                     total_tokens_out += sub_res.total_tokens_out
@@ -494,7 +577,9 @@ class AgentOrchestrator:
                     cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
                     return sub_res.final_response or "Completed with no output."
                 elif isinstance(member_obj, AgentOrchestrator):
-                    sub_res = await member_obj.run(task_input, stream=False)
+                    sub_res = await member_obj.run(
+                        task_input, stream=False, max_turns=remaining
+                    )
                     member_results[member_name] = sub_res
                     turns_used += sub_res.turns_used
                     total_tokens_in += sub_res.total_tokens_in
@@ -515,19 +600,34 @@ class AgentOrchestrator:
             call_member_tool._tool_timeout_seconds = 60
             return call_member_tool
 
+        delegate_full_names: list[str] = []
         for name, member in self._members.items():
             if name == supervisor_name:
                 continue
             self.tool_registry.register_tool(
                 _make_delegate_tool(name, member), plugin_name="supervisor"
             )
+            delegate_full_names.append(f"supervisor.delegate_to_{name}")
+
+        supervisor.grant_tools(delegate_full_names)
 
         try:
+            remaining = budget - turns_used
+            if remaining <= 0:
+                return AgentGroupResult(
+                    session_id=self._root_session_id(),
+                    group_name=self.config.name,
+                    status="failed",
+                    error="Group max_turns budget exhausted",
+                    duration_ms=int((time.time() - start_time) * 1000),
+                )
             logger.info(
                 "Supervisor: Starting execution with supervisor agent '%s'",
                 supervisor_name,
             )
-            supervisor_res = await supervisor.run(user_message, stream=False)
+            supervisor_res = await supervisor.run(
+                user_message, stream=False, max_turns=remaining
+            )
             member_results[supervisor_name] = supervisor_res
             turns_used += supervisor_res.turns_used
             total_tokens_in += supervisor_res.total_tokens_in
@@ -564,18 +664,13 @@ class AgentOrchestrator:
     ) -> AsyncIterator[AgentStreamEvent]:
         """Streaming supervisor: stream supervisor agent events; sub-agents run blocking."""
         start_time = time.time()
-        supervisor_name = None
-        for name in self._members.keys():
-            if name == "supervisor" or "supervisor" in name.lower():
-                supervisor_name = name
-                break
-        if not supervisor_name and self._members:
-            supervisor_name = list(self._members.keys())[0]
+        supervisor_name, select_error = self._select_supervisor()
+        budget = self.config.max_turns
 
-        if not supervisor_name:
+        if select_error or not supervisor_name:
             yield AgentStreamEvent(
                 event_type="error",
-                content="No members available in supervisor group",
+                content=select_error or "No supervisor available",
                 data={"group": self.config.name, "status": "failed"},
             )
             return
@@ -608,10 +703,15 @@ class AgentOrchestrator:
             avoids non-serializable-default JSON-schema warnings.
             """
             async def call_member_tool(task_input: str) -> str:
+                nonlocal turns_used, total_tokens_in, total_tokens_out, total_tokens_saved, cumulative_tokens_saved
+                remaining = budget - turns_used
+                if remaining <= 0:
+                    return "Group max_turns budget exhausted."
                 if isinstance(member_obj, AgentRunner):
-                    sub_res = await member_obj.run(task_input, stream=False)
+                    sub_res = await member_obj.run(
+                        task_input, stream=False, max_turns=remaining
+                    )
                     member_results[member_name] = sub_res
-                    nonlocal turns_used, total_tokens_in, total_tokens_out, total_tokens_saved, cumulative_tokens_saved
                     turns_used += sub_res.turns_used
                     total_tokens_in += sub_res.total_tokens_in
                     total_tokens_out += sub_res.total_tokens_out
@@ -619,7 +719,9 @@ class AgentOrchestrator:
                     cumulative_tokens_saved += sub_res.cumulative_input_tokens_saved_by_rcs
                     return sub_res.final_response or "Completed with no output."
                 elif isinstance(member_obj, AgentOrchestrator):
-                    sub_res = await member_obj.run(task_input, stream=False)
+                    sub_res = await member_obj.run(
+                        task_input, stream=False, max_turns=remaining
+                    )
                     member_results[member_name] = sub_res
                     turns_used += sub_res.turns_used
                     total_tokens_in += sub_res.total_tokens_in
@@ -639,15 +741,22 @@ class AgentOrchestrator:
             call_member_tool._tool_timeout_seconds = 60
             return call_member_tool
 
+        delegate_full_names: list[str] = []
         for name, member in self._members.items():
             if name == supervisor_name:
                 continue
             self.tool_registry.register_tool(
                 _make_delegate_tool(name, member), plugin_name="supervisor"
             )
+            delegate_full_names.append(f"supervisor.delegate_to_{name}")
+
+        supervisor.grant_tools(delegate_full_names)
 
         try:
-            async for event in supervisor.run_stream(user_message, stream=True):
+            remaining = budget - turns_used
+            async for event in supervisor.run_stream(
+                user_message, stream=True, max_turns=remaining if remaining > 0 else 1
+            ):
                 yield self._tag_member_event(supervisor_name, event)
                 if event.event_type == "final_response" and event.data:
                     member_results[supervisor_name] = AgentRunResult(**event.data)

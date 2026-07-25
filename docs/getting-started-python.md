@@ -170,6 +170,8 @@ orchestrator = AgentOrchestrator(
 result = await orchestrator.run("Analyze Q4 revenue")
 ```
 
+Runnable script: [examples/orchestration/run_team_python.py](../../examples/orchestration/run_team_python.py).
+
 Details: [reference/multi-agent.md](reference/multi-agent.md).
 
 Or use YAML orchestration instead: [getting-started.md](getting-started.md).

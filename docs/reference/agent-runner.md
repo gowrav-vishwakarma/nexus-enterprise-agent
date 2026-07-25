@@ -57,6 +57,7 @@ When `should_persist` is `False`, the loop still runs in memory for that request
 | `session_id` | No | from `RunContext` or new UUID | Override chat thread id for this call |
 | `initial_context` | No | `None` | Key/value merged into session metadata and checkpoint `state` once at run start |
 | `stream` | No | `config.stream_output` | If `True`, raises — use `run_stream()` instead |
+| `max_turns` | No | `None` | Optional cap for this run (min with `config.turns.max_turns`) |
 
 Returns `AgentRunResult` with `final_response`, `turns_used`, `status`, `state`, `pending_interactions` (when `status="paused"`), etc.
 
@@ -70,6 +71,7 @@ The agent's tool allow-list comes from `AgentConfig.toolset` (resolved against t
 | `session_id` | No | from `RunContext` or new UUID | Override chat thread id |
 | `initial_context` | No | `None` | Same as `run()` — seeds metadata and checkpoint state |
 | `stream` | No | `config.stream_output` | Should be `True` for streaming |
+| `max_turns` | No | `None` | Optional cap for this run (min with `config.turns.max_turns`) |
 
 Returns `AsyncIterator[AgentStreamEvent]`. Event types include `content`, `tool_call`, `client_tool_call`, `elicitation`, `paused`, `final_response`, etc. See [streaming.md](streaming.md).
 

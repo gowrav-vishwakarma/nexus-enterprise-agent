@@ -220,10 +220,7 @@ With `pattern: supervisor`, Nexus picks a **lead** agent (first member named `su
 
 - `supervisor.delegate_to_billing_specialist(task_input: str)` → runs that member’s `AgentRunner` and returns its `final_response` to the lead.
 
-The lead must **see** those tools. If you set `toolset: support` on the lead, delegate tools (plugin `supervisor`) may be hidden. Common fixes:
-
-- Leave `toolset` unset on the lead so it sees all registered tools, **or**
-- Teach the lead in the system prompt: “For invoice disputes, call `delegate_to_billing_specialist` with a short task summary.”
+The lead must **see** those tools. The orchestrator **auto-grants** `supervisor.delegate_to_*` to the lead even when the lead uses a narrow `toolset`. You can still leave `toolset` unset on the lead to expose every registered tool, or set `supervisor:` explicitly on the group.
 
 Example prompt line in `tier1_system`:
 
@@ -311,7 +308,7 @@ flowchart TD
 
 Declarative team: a **lead** tier-1 agent delegates to `billing_specialist` via auto-generated `delegate_to_billing_specialist` tools (supervisor pattern). Put the lead **first** in `members`, or name an agent `supervisor` like [research_team.yaml](../../examples/orchestration/research_team.yaml).
 
-Tools are registered in Python on a `ToolRegistry` passed to `OrchestrationRuntime.from_manifest()`. The lead agent should usually **not** use a narrow `toolset` unless that toolset includes delegate tools — see [Redirecting to another agent](#redirecting-to-another-agent-three-patterns) above.
+Tools are registered in Python on a `ToolRegistry` passed to `OrchestrationRuntime.from_manifest()`. The lead may use a narrow `toolset`; delegate tools are still auto-granted at run time.
 
 ```yaml
 version: "1"
