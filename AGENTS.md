@@ -4,6 +4,8 @@ When you change Nexus code, update the matching documentation in the same change
 
 Before making any new feature or code, make sure that we do not have anything like that first. no DRY un less that gives more profit.
 
+Always keeps things siple. keep things modular and easy to understand but no unnecessary complexity and DO Avoid Over Engineering. 
+
 ## Documentation style
 
 Follow [docs/style-guide.md](docs/style-guide.md). Write for beginners. Define terms on first use.
