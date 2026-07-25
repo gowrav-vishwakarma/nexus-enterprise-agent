@@ -52,6 +52,7 @@ def build_prompt_context(
         "session_id": run_context.session_id,
         "request_id": run_context.request_id,
         "metadata": dict(run_context.metadata),
+        "state": dict(run_context.state),
     }
     context.update(prompt_args)
     return context

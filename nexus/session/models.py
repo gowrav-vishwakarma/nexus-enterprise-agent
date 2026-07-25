@@ -138,6 +138,10 @@ class AgentSession(BaseModel):
         default_factory=list,
         description="Client tools / elicitations waiting for resume",
     )
+    state: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Durable app state for this chat thread (checkpoint). Survives across runs.",
+    )
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     turns: list[TurnRecord] = Field(default_factory=list)

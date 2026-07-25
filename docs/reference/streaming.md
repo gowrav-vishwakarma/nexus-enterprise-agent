@@ -36,6 +36,8 @@ async for event in runner.run_stream("Hello", stream=True):
 
 Returns `AsyncIterator[AgentStreamEvent]`.
 
+`run_stream()` accepts the same `initial_context=` argument as `run()` to seed checkpoint `state` and session metadata.
+
 ### Stream event types
 
 | `event_type` | When it fires |

@@ -78,6 +78,13 @@ Background: {{ persona.backstory }}
 {{ summary_text }}
 {% endif %}
 
+{% if state %}
+## Session state
+{% for key, value in state.items() %}
+- {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+
 Today's date: {{ current_date }}"""
 
 # Entity extraction prompt

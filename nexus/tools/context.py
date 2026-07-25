@@ -34,6 +34,10 @@ class RunContext(BaseModel):
     is_subagent: bool = False
     persistable: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+    state: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Durable checkpoint state for this chat thread (synced to session when persisting).",
+    )
 
     _services: dict[str, Any] = PrivateAttr(default_factory=dict)
 
@@ -44,6 +48,14 @@ class RunContext(BaseModel):
     def set(self, key: str, value: Any) -> None:
         """Write a value into metadata."""
         self.metadata[key] = value
+
+    def get_state(self, key: str, default: Any = None) -> Any:
+        """Read a value from durable session state."""
+        return self.state.get(key, default)
+
+    def set_state(self, key: str, value: Any) -> None:
+        """Write a value into durable session state."""
+        self.state[key] = value
 
     def service(self, key: str, default: Any = None) -> Any:
         """Look up a registered service (DB pool, client, …)."""

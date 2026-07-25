@@ -13,10 +13,7 @@
 
 Nexus is built for **SaaS-native dynamic assembly**: different tenants get different configs, tools, and storage **per request**. Inside a run, the default loop is **LLM-driven** (the model picks the next tool or reply based on context).
 
-Nexus does **not** ship LangGraph-style features today:
-
-- No conditional edges in YAML (`if tool X returns Y → go to agent Z`)
-- No automatic human approval gate on tool calls (`requires_approval` is metadata only today)
+Nexus does **not** ship LangGraph-style **declarative conditional edges in YAML**. You **can** take control in Python: checkpoint `state`, `on_turn_end`, client-tool pause/resume, and supervisor teams are supported today.
 
 Nexus **does** support mid-loop pause for **client tools** and elicitations via `AgentRunner.resume()` (see [Pause and resume](#pause-and-resume-client-tools)).
 
@@ -94,11 +91,24 @@ Jinja prompt templates can read `tenant_id`, `metadata`, and memory at render ti
 
 ## Layer 2: State that survives across turns
 
-Use this when tools need shared state within one chat thread.
+Use this when tools need shared state within one chat thread **and on the next HTTP request** for the same `session_id`.
+
+### Checkpoint state (`RunContext.state`)
+
+Durable fields live in `RunContext.state`. Tools use `ctx.set_state()` / `ctx.get_state()`. The runner hydrates state from `AgentSession.state` at run start, syncs back after each turn when `should_persist` is true, and returns the final dict on `AgentRunResult.state`. Prompt templates can read `state` in Jinja.
+
+```python
+@tool(name="escalate")
+def escalate(ctx: RunContext) -> str:
+    ctx.set_state("escalated", True)
+    return "STATUS: escalate"
+```
+
+Configure SQLite, PostgreSQL, or Redis storage so checkpoint state survives process restarts. See [storage.md](../reference/storage.md).
 
 ### initial_context
 
-Merge key/value pairs into `session.metadata` once at run start:
+Seed metadata and checkpoint state once at run start (works on `run()` and `run_stream()`):
 
 ```python
 result = await runner.run(
@@ -108,9 +118,11 @@ result = await runner.run(
 )
 ```
 
+`initial_context` still updates `session.metadata` as before.
+
 ### RunContext.metadata (read and write)
 
-Tools can mutate the metadata bag for later tools in the same run:
+Per-request only — not checkpointed. Use for data that must not be saved (voice transients, one-call flags):
 
 ```python
 from nexus.tools.context import RunContext
@@ -129,7 +141,11 @@ def confirm_booking(ctx: RunContext) -> str:
     return f"Confirmed {slot}"
 ```
 
-The LLM still chooses when to call each tool, but **your Python code** owns the state.
+The LLM still chooses when to call each tool. **`metadata` is for the same request**; use **`state`** when the next message must see the value.
+
+### Turn-end hook (`on_turn_end`)
+
+For deterministic branching (LangGraph-style conditional edges), pass `on_turn_end` to `AgentRunner`. Return `TurnDecision(action="stop")` or `TurnDecision(action="inject", message="...")`. See [agent-runner.md](../reference/agent-runner.md) and [porting-from-langgraph.md](porting-from-langgraph.md).
 
 ### RCS context updates
 
@@ -290,7 +306,11 @@ See [tools.md](../reference/tools.md) and [streaming.md](../reference/streaming.
 
 ## Layer 6: External human-in-the-loop (HITL)
 
-Built-in pause-after-N-turns is **not enforced** yet (`human_in_loop_after_turns` in config). For operator approval that is **not** a client tool:
+**Built-in:** Set `turns.human_in_loop_after_turns` on `AgentConfig` to pause after N completed turns. The run returns `status="paused"` with a `human_in_loop` pending interaction; call `resume()` with the operator's text.
+
+**Client tools:** `@tool(execution="client")` + `resume()` when the browser must run the tool.
+
+**External operator (no pause API):** For approval that is not a client tool:
 
 1. Run until `final_response` or your supervision breaks the stream.
 2. Chat history is already saved (if storage is configured and `should_persist`).
@@ -311,14 +331,17 @@ Prefer Layer 5 (`execution="client"` + `resume()`) when the UI itself must execu
 
 ## LangGraph mapping (mental model)
 
+For a full worked port (support agent with escalation, HITL, and a billing specialist), see [porting-from-langgraph.md](porting-from-langgraph.md).
+
 | LangGraph idea | Nexus equivalent today |
 |----------------|------------------------|
-| Graph state | `RunContext.metadata` + `session.metadata` + turn history |
-| Conditional edge after node | LLM routing, or **your** `run_stream` / wrapper |
-| Human interrupt node | Client tools + `resume()`, or external HITL: stop, persist, new message |
+| Graph state | Chat history + `RunContext.state` / `AgentSession.state` |
+| Conditional edge after node | LLM routing, `on_turn_end` hook, or `run_stream` supervision |
+| Human interrupt node | Client tools + `resume()`, `human_in_loop_after_turns`, or external HITL |
+| Checkpointer | Storage adapter + `session_id` |
 | Fixed sequence | `pattern: pipeline` |
 | Dynamic delegation | `pattern: supervisor` + `delegate_to_*` |
-| Observe every step | `run_stream()` + `NexusEventEmitter` |
+| Observe every step | `run_stream()` + `NexusEventEmitter` (observe only) |
 
 ---
 
@@ -326,7 +349,6 @@ Prefer Layer 5 (`execution="client"` + `resume()`) when the UI itself must execu
 
 | Field | Documented in | Status |
 |-------|---------------|--------|
-| `human_in_loop_after_turns` | [agent-config.md](../reference/agent-config.md) | Config only — no pause in runner |
 | `stop_on_result_type` | [agent-config.md](../reference/agent-config.md) | Not checked in runner loop |
 | `stop_sequences` | [agent-config.md](../reference/agent-config.md) | Not checked in runner loop |
 | `requires_approval` on `@tool` | [tools.md](../reference/tools.md) | Metadata only — no gate |

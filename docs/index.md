@@ -69,6 +69,7 @@ flowchart TD
 | gRPC media servers | [guides/model-servers.md](guides/model-servers.md) |
 | Media server config reference | [reference/server.md](reference/server.md) |
 | Runtime control | [guides/runtime-control.md](guides/runtime-control.md) |
+| Porting from LangGraph | [guides/porting-from-langgraph.md](guides/porting-from-langgraph.md) |
 | Multi-agent teams | [reference/multi-agent.md](reference/multi-agent.md) |
 | Voice, vision, channels | [reference/realtime-agents.md](reference/realtime-agents.md) |
 | Streaming | [reference/streaming.md](reference/streaming.md) |

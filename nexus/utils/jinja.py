@@ -30,6 +30,11 @@ def build_system_prompt_render_vars(
     session_id = getattr(run_context, "session_id", None) if run_context else None
     request_id = getattr(run_context, "request_id", None) if run_context else None
     metadata = dict(getattr(run_context, "metadata", None) or {}) if run_context else {}
+    state: dict[str, Any] = {}
+    if run_context is not None and getattr(run_context, "state", None):
+        state = dict(run_context.state)
+    elif session is not None and getattr(session, "state", None):
+        state = dict(session.state)
 
     if session is not None:
         tenant_id = tenant_id or getattr(session, "tenant_id", None)
@@ -47,6 +52,7 @@ def build_system_prompt_render_vars(
         "session_id": session_id,
         "request_id": request_id,
         "metadata": metadata,
+        "state": state,
         "user_memory": user_memory,
         "summary_text": summary_text,
         "current_date": current_date,

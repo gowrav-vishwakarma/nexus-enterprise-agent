@@ -54,7 +54,7 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 | `stop_on_empty_tool_calls` | No | `True` | Stop when LLM returns no tool calls |
 | `stop_sequences` | No | `[]` | Text sequences that stop the agent (**planned — not enforced in runner yet**) |
 | `stop_on_result_type` | No | `True` | Stop when structured result is obtained (**planned — not enforced in runner yet**) |
-| `human_in_loop_after_turns` | No | `None` | Pause for human input after N turns (**planned — not enforced in runner yet**; use external HITL — see [runtime-control.md](../guides/runtime-control.md)) |
+| `human_in_loop_after_turns` | No | `None` | Pause after N completed turns using the same `pending_interactions` / `resume()` path as client tools (`tool_name="human_in_loop"`) |
 | `turn_timeout_seconds` | No | `300` | Per-turn timeout in seconds |
 
 ## LLMProviderConfig

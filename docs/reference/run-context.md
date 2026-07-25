@@ -28,7 +28,8 @@
 | `is_cron` | No | `False` | Marks a scheduled job; turns off persistence via `should_persist` |
 | `is_subagent` | No | `False` | Marks a nested agent run; turns off persistence via `should_persist` |
 | `persistable` | No | `True` | Explicit off-switch for saving chat history and durable side effects |
-| `metadata` | No | `{}` | Arbitrary bag; tools read via `ctx.get("key")` |
+| `metadata` | No | `{}` | Arbitrary bag; tools read via `ctx.get("key")` (per request; not checkpointed) |
+| `state` | No | `{}` | Durable checkpoint state for this chat thread; synced to `AgentSession.state` when persisting |
 
 Both `AgentRunner` and `AgentOrchestrator` default to an empty `RunContext()` if you omit it.
 
@@ -94,6 +95,8 @@ def reserve_slot(ctx: RunContext, slot_id: str) -> str:
     ctx.set("reserved_slot", slot_id)
     return f"Reserved {slot_id}"
 ```
+
+Use **`ctx.set_state()` / `ctx.get_state()`** when a value must survive the next message on the same `session_id`. Use **`ctx.set()` / `ctx.get()`** for per-request data only. See [agent-runner.md](agent-runner.md).
 
 See [runtime-control.md](../guides/runtime-control.md) for supervision and branching patterns.
 

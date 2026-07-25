@@ -8,7 +8,7 @@
 - **SessionScope** — Tenant / company / user filter for load, list, delete, and append.
 - **Codec** — Converts an `AgentSession` to/from the JSON shape stored on disk or in a database.
 - **Tenant-scoped** — Files organized by customer and user under a data root folder.
-- **Session JSON** — The saved record for one chat thread (turns, tool calls, memory).
+- **Session JSON** — The saved record for one chat thread (turns, tool calls, checkpoint `state`, metadata).
 
 ## Where to configure
 
@@ -130,6 +130,7 @@ Set `tenant_scoped: false` on adapter config for legacy flat paths.
 | `title`, `pinned` | Sidebar title and pin flag |
 | `attachment_ids` | Session-scoped staged attachment ids |
 | `pending_interactions` | Client tools / elicitations waiting for `resume()` |
+| `state` | Durable app checkpoint (survives the next request on the same chat thread) |
 | timestamps, `metadata` | Created/updated times and arbitrary bag |
 
 ### ToolCallRecord extras

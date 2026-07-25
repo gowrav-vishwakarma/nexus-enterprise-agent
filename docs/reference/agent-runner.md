@@ -22,6 +22,7 @@
 | `run_context` | No | empty `RunContext()` | Customer, user, chat id for this call |
 | `event_emitter` | No | new `NexusEventEmitter` | Observability event hook |
 | `cross_session_memory_store` | No | `None` | Store for facts across chat threads |
+| `on_turn_end` | No | `None` | Async hook after each persisted turn; may return `TurnDecision` to stop or inject a message |
 
 Storage resolution order: `storage_config` on runner → `config.storage` → in-memory.
 
@@ -54,10 +55,10 @@ When `should_persist` is `False`, the loop still runs in memory for that request
 |------|-----------|---------|--------------|
 | `user_message` | Yes | — | The user's input text |
 | `session_id` | No | from `RunContext` or new UUID | Override chat thread id for this call |
-| `initial_context` | No | `None` | Key/value merged into session metadata once |
+| `initial_context` | No | `None` | Key/value merged into session metadata and checkpoint `state` once at run start |
 | `stream` | No | `config.stream_output` | If `True`, raises — use `run_stream()` instead |
 
-Returns `AgentRunResult` with `final_response`, `turns_used`, `status`, `pending_interactions` (when `status="paused"`), etc.
+Returns `AgentRunResult` with `final_response`, `turns_used`, `status`, `state`, `pending_interactions` (when `status="paused"`), etc.
 
 The agent's tool allow-list comes from `AgentConfig.toolset` (resolved against the runner's tool registry), or from a per-run `run_context["toolset_override"]`. When `toolset` is `None`, every registered tool is visible and the legacy `tool_plugins` namespace filter still applies. Do not combine a non-empty `tool_plugins` with a toolset that contains flat (non-namespaced) tools, or the plugin filter may drop the flat tools. See [tools.md](tools.md).
 
@@ -67,9 +68,14 @@ The agent's tool allow-list comes from `AgentConfig.toolset` (resolved against t
 |------|-----------|---------|--------------|
 | `user_message` | Yes | — | The user's input text |
 | `session_id` | No | from `RunContext` or new UUID | Override chat thread id |
+| `initial_context` | No | `None` | Same as `run()` — seeds metadata and checkpoint state |
 | `stream` | No | `config.stream_output` | Should be `True` for streaming |
 
 Returns `AsyncIterator[AgentStreamEvent]`. Event types include `content`, `tool_call`, `client_tool_call`, `elicitation`, `paused`, `final_response`, etc. See [streaming.md](streaming.md).
+
+## Turn-end hook (`on_turn_end`)
+
+Optional async callback on `AgentRunner(on_turn_end=...)`. After each completed turn (and state sync), Nexus calls your hook with a `TurnContext`. Return `None` or `TurnDecision(action="continue")` for default behaviour, `TurnDecision(action="stop")` to end the run with `status="interrupted"`, or `TurnDecision(action="inject", message="...")` to start the next loop iteration with that user message. Hook errors are logged and treated as continue. This is the deterministic alternative to LangGraph conditional edges — see [porting-from-langgraph.md](../guides/porting-from-langgraph.md).
 
 ## AgentRunner.resume()
 
@@ -79,7 +85,7 @@ Continue after a client tool or elicitation paused the loop:
 |------|-----------|---------|--------------|
 | `session_id` | Yes | — | Chat thread that has `pending_interactions` |
 | `results` | Yes | — | List of `{"tc_id"\|"call_id": ..., "content": "..."}` |
-| `stream` | No | `False` | Passed through to the continued `run()` |
+| `stream` | No | `False` | When `True`, continues via an internal streaming loop and returns the final `AgentRunResult` |
 
 ```python
 result = await runner.resume(

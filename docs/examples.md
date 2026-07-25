@@ -75,8 +75,17 @@ uv run python examples/realtime_ivr_server.py "I want to pay my bill"
 | Path | What you will learn |
 |------|---------------------|
 | [assets/complete-agent.annotated.py](assets/complete-agent.annotated.py) | Every AgentConfig and AgentRunner parameter |
+| [guides/porting-from-langgraph.md](guides/porting-from-langgraph.md) | Port a stateful LangGraph support agent to Nexus (side-by-side) |
 
 Walkthrough: [getting-started-python.md](getting-started-python.md).
+
+## Porting from other frameworks
+
+| Path | What you will learn |
+|------|---------------------|
+| [guides/porting-from-langgraph.md](guides/porting-from-langgraph.md) | Stateful agents: checkpoint state, HITL, supervisor team vs LangGraph StateGraph |
+
+LangGraph is not installed in this repo; the guide uses illustrative LangGraph snippets and runnable Nexus code.
 
 ## Test fixtures (orchestration)
 

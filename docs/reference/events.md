@@ -82,6 +82,7 @@ Each `NexusEvent` has `event_id`, `timestamp`, `session_id`, `agent_id`, `turn_i
 | Mechanism | Best for | Can pause the run? |
 |-----------|----------|-------------------|
 | `run_stream()` | Token streaming, SSE APIs, break on `tool_result` | Yes — stop the async iterator |
+| `on_turn_end` on `AgentRunner` | Deterministic stop/inject after a turn | Yes — returns `TurnDecision` |
 | `NexusEventEmitter` | Logging, webhooks, OTel, audit trail | No — observe only |
 
 For supervision that **stops** the agent when a tool returns a signal, prefer `run_stream()`. See [runtime-control.md § Supervise with run_stream](../guides/runtime-control.md).

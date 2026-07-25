@@ -4,6 +4,7 @@ import inspect
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Optional, Union
 
@@ -36,6 +37,7 @@ from nexus.memory.cross_session_store import (
     resolve_cross_session_namespace,
 )
 from nexus.rcs.compactor import ServerCompactor
+from nexus.runner.hooks import TurnContext, TurnDecision
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, PendingInteraction, ToolCallRecord, TurnRecord
@@ -109,6 +111,9 @@ class AgentRunner:
         run_context: Optional[RunContext] = None,
         event_emitter: Optional[NexusEventEmitter] = None,
         cross_session_memory_store: Optional[CrossSessionMemoryStore] = None,
+        on_turn_end: Optional[
+            Callable[[TurnContext], Awaitable[Optional[TurnDecision]]]
+        ] = None,
     ):
         self.config = config
         self.tool_registry = tool_registry
@@ -126,6 +131,7 @@ class AgentRunner:
 
         self.run_context = run_context or RunContext()
         self.cross_session_memory_store = cross_session_memory_store
+        self.on_turn_end = on_turn_end
         self._user_memory: dict[str, str] = {}
 
         self.event_emitter = event_emitter or NexusEventEmitter()
@@ -214,6 +220,88 @@ class AgentRunner:
         if not self.run_context.should_persist:
             return
         await self.session_manager.save_session(session)
+
+    def _json_safe_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Return a JSON-serializable copy of state; skip bad values."""
+        safe: dict[str, Any] = {}
+        for key, value in state.items():
+            try:
+                json.dumps(value)
+                safe[key] = value
+            except (TypeError, ValueError):
+                logger.warning("AgentRunner: skipping non-serializable state key %r", key)
+        return safe
+
+    def _hydrate_state_from_session(
+        self,
+        session: AgentSession,
+        initial_context: Optional[dict[str, Any]],
+    ) -> None:
+        """Load checkpoint state: session base, initial_context overlay, pre-set ctx wins."""
+        base = dict(session.state or {})
+        if initial_context:
+            base.update(initial_context)
+        pre_set = dict(self.run_context.state)
+        merged = {**base, **pre_set}
+        self.run_context.state = merged
+        session.state = dict(merged)
+
+    async def _persist_turn_with_state(
+        self, session: AgentSession, turn: TurnRecord
+    ) -> AgentSession:
+        """Sync durable state to session, save, append turn, re-apply state snapshot."""
+        snapshot = self._json_safe_state(dict(self.run_context.state))
+        session.state = snapshot
+        self.run_context.state = dict(snapshot)
+        await self._maybe_save_session(session)
+        session = await self._persist_turn(session, turn)
+        session.state = dict(snapshot)
+        self.run_context.state = dict(snapshot)
+        return session
+
+    async def _invoke_turn_end_hook(
+        self,
+        session: AgentSession,
+        session_turn_index: int,
+        run_turn_index: int,
+        tool_results: list[dict[str, Any]],
+        final_response: Optional[str],
+    ) -> Optional[TurnDecision]:
+        if not self.on_turn_end:
+            return None
+        ctx = TurnContext(
+            session=session,
+            turn_index=session_turn_index,
+            run_turn_index=run_turn_index,
+            tool_results=tool_results,
+            state=self.run_context.state,
+            final_response=final_response,
+        )
+        try:
+            return await self.on_turn_end(ctx)
+        except Exception as exc:
+            logger.warning("AgentRunner: on_turn_end hook failed: %s", exc)
+            return None
+
+    def _maybe_pause_for_human_in_loop(
+        self, session: AgentSession, run_turn_index: int
+    ) -> bool:
+        """Return True if the run should pause for configured human-in-the-loop."""
+        limit = self.config.turns.human_in_loop_after_turns
+        if limit is None:
+            return False
+        if run_turn_index + 1 < limit:
+            return False
+        session.pending_interactions.append(
+            PendingInteraction(
+                tc_id="HITL",
+                call_id="",
+                tool_name="human_in_loop",
+                args={},
+                kind="elicitation",
+            )
+        )
+        return True
 
     def _effective_tool_plugins(self) -> list[str]:
         """Return tool plugin allow-list, auto-including skills/memory when enabled."""
@@ -706,6 +794,7 @@ class AgentRunner:
         self._resolve_toolsets()
         await self._inject_learned_skills(user_message)
 
+        self._hydrate_state_from_session(session, initial_context)
         if initial_context:
             session.metadata.update(initial_context)
             await self._maybe_save_session(session)
@@ -819,8 +908,41 @@ class AgentRunner:
                         duration_ms=int((time.time() - start_time) * 1000),
                         status="completed",
                     )
-                    session = await self._persist_turn(session, final_turn)
+                    session = await self._persist_turn_with_state(session, final_turn)
                     session = await self._maybe_curate_after_turn(session, session_turn_index)
+
+                    decision = await self._invoke_turn_end_hook(
+                        session,
+                        session_turn_index,
+                        run_turn_index,
+                        [],
+                        final_resp,
+                    )
+                    if decision and decision.action == "stop":
+                        status = "interrupted"
+                        break
+                    if decision and decision.action == "inject" and decision.message:
+                        current_user_message = decision.message
+                        session_turn_index += 1
+                        run_turn_index += 1
+                        continue
+
+                    if self._maybe_pause_for_human_in_loop(session, run_turn_index):
+                        status = "paused"
+                        await self._maybe_save_session(session)
+                        if stream:
+                            yield AgentStreamEvent(
+                                event_type="paused",
+                                data={
+                                    "session_id": session.session_id,
+                                    "pending_interactions": [
+                                        p.model_dump(mode="json")
+                                        for p in session.pending_interactions
+                                    ],
+                                },
+                            )
+                        break
+
                     session_turn_index += 1
                     run_turn_index += 1
                     break
@@ -1000,7 +1122,7 @@ class AgentRunner:
                     status=turn_status,
                 )
 
-                session = await self._persist_turn(session, turn_record)
+                session = await self._persist_turn_with_state(session, turn_record)
                 if status == "paused":
                     await self._maybe_save_session(session)
                     if stream:
@@ -1017,6 +1139,14 @@ class AgentRunner:
                     break
                 session = await self._maybe_curate_after_turn(session, session_turn_index)
 
+                tool_result_summaries = [
+                    {"tool_name": tc.tool_name, "content": tc.raw_response}
+                    for tc in turn_tool_records
+                ]
+                turn_final = None
+                if not llm_response.tool_calls:
+                    turn_final = llm_response.content
+
                 await self.event_emitter.emit(
                     TurnCompletedEvent(
                         session_id=session.session_id,
@@ -1030,6 +1160,38 @@ class AgentRunner:
                         duration_ms=int((time.time() - start_time) * 1000),
                     )
                 )
+
+                decision = await self._invoke_turn_end_hook(
+                    session,
+                    session_turn_index,
+                    run_turn_index,
+                    tool_result_summaries,
+                    turn_final,
+                )
+                if decision and decision.action == "stop":
+                    status = "interrupted"
+                    break
+                if decision and decision.action == "inject" and decision.message:
+                    current_user_message = decision.message
+                    session_turn_index += 1
+                    run_turn_index += 1
+                    continue
+
+                if self._maybe_pause_for_human_in_loop(session, run_turn_index):
+                    status = "paused"
+                    await self._maybe_save_session(session)
+                    if stream:
+                        yield AgentStreamEvent(
+                            event_type="paused",
+                            data={
+                                "session_id": session.session_id,
+                                "pending_interactions": [
+                                    p.model_dump(mode="json")
+                                    for p in session.pending_interactions
+                                ],
+                            },
+                        )
+                    break
 
                 session_turn_index += 1
                 run_turn_index += 1
@@ -1077,6 +1239,11 @@ class AgentRunner:
                 if msg.get("role") == "assistant" and msg.get("content"):
                     final_resp = msg["content"]
 
+        snapshot = self._json_safe_state(dict(self.run_context.state))
+        session.state = snapshot
+        self.run_context.state = dict(snapshot)
+        await self._maybe_save_session(session)
+
         run_result = AgentRunResult(
             session_id=session.session_id,
             final_response=final_resp,
@@ -1091,6 +1258,7 @@ class AgentRunner:
             pending_interactions=[
                 p.model_dump(mode="json") for p in session.pending_interactions
             ],
+            state=dict(snapshot),
         )
         state.result = run_result
 
@@ -1143,6 +1311,7 @@ class AgentRunner:
         self,
         user_message: str,
         session_id: Optional[str] = None,
+        initial_context: Optional[dict[str, Any]] = None,
         stream: Optional[bool] = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         """Run the agent loop in streaming mode, yielding incremental events."""
@@ -1157,7 +1326,7 @@ class AgentRunner:
             state=state,
             user_message=user_message,
             session_id=session_id,
-            initial_context=None,
+            initial_context=initial_context,
         ):
             yield event
 
@@ -1196,9 +1365,21 @@ class AgentRunner:
         session.pending_interactions = []
         await self._maybe_save_session(session)
 
-        # Continue the loop with an empty user message (tool results already in session)
+        if self._resolve_stream(stream):
+            loop_state = _LoopState()
+            async for _ in self._run_loop(
+                stream=True,
+                state=loop_state,
+                user_message="",
+                session_id=session_id,
+                initial_context=None,
+            ):
+                pass
+            assert loop_state.result is not None
+            return loop_state.result
+
         return await self.run(
             user_message="",
             session_id=session_id,
-            stream=False if stream is None else stream,
+            stream=False,
         )

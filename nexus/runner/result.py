@@ -27,6 +27,10 @@ class AgentRunResult(BaseModel):
         default_factory=list,
         description="Client tools / elicitations waiting for resume (when status=paused)",
     )
+    state: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Durable checkpoint state at end of run",
+    )
 
 
 class AgentStreamEvent(BaseModel):

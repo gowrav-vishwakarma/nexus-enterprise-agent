@@ -46,6 +46,7 @@ from nexus.config import (
     DEFAULT_CONTEXT_SUMMARY_PROMPT,
 )
 from nexus.runner.agent_runner import AgentRunner
+from nexus.runner.hooks import TurnContext, TurnDecision
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
 from nexus.tools.context import RunContext
 from nexus.tools.decorators import tool, tool_plugin
@@ -91,6 +92,8 @@ __all__ = [
     "AgentRunner",
     "AgentRunResult",
     "AgentStreamEvent",
+    "TurnContext",
+    "TurnDecision",
     # Tools
     "RunContext",
     "tool",

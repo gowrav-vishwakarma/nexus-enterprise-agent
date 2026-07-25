@@ -143,6 +143,7 @@ async def main() -> None:
         ),
         event_emitter=None,                                 # optional, default: new NexusEventEmitter
         cross_session_memory_store=SQLiteCrossSessionMemoryStore(),  # optional; needed if memory.enabled
+        on_turn_end=None,                                   # optional; TurnDecision hook after each turn
     )
 
     # run() — blocking execution; returns AgentRunResult.
