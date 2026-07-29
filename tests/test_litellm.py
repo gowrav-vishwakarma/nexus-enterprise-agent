@@ -100,7 +100,8 @@ def test_proxy_azure_uses_litellm_proxy_prefix():
     assert kw["model"] == "litellm_proxy/my-deployment"
 
 
-def test_proxy_disables_reasoning_by_default():
+def test_proxy_leaves_reasoning_alone_by_default():
+    """A proxy model keeps its own reasoning setting so reasoning_content can stream."""
     config = LLMProviderConfig(
         provider="litellm",
         model="ollama/qwen3:4b",
@@ -109,18 +110,34 @@ def test_proxy_disables_reasoning_by_default():
     )
     adapter = LiteLLMAdapter(config)
     kw = adapter._base_kwargs(None, None, None, None)
-    assert kw["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
+    assert "extra_body" not in kw
     assert kw["model"] == "litellm_proxy/ollama/qwen3:4b"
     assert "custom_llm_provider" not in kw
 
 
-def test_manifest_extra_body_overrides_reasoning_default():
-    """default_params.extra_body from the manifest wins over the auto-default."""
+@pytest.mark.parametrize("enabled", [True, False])
+def test_enable_thinking_config_injects_chat_template_kwargs(enabled):
+    """enable_thinking forces reasoning on or off — voice sets False for latency."""
     config = LLMProviderConfig(
         provider="litellm",
         model="ollama/qwen3:4b",
         api_key="sk-test",
         base_url="http://localhost:4000",
+        enable_thinking=enabled,
+    )
+    adapter = LiteLLMAdapter(config)
+    kw = adapter._base_kwargs(None, None, None, None)
+    assert kw["extra_body"]["chat_template_kwargs"]["enable_thinking"] is enabled
+
+
+def test_manifest_extra_body_overrides_enable_thinking():
+    """default_params.extra_body from the manifest wins over enable_thinking."""
+    config = LLMProviderConfig(
+        provider="litellm",
+        model="ollama/qwen3:4b",
+        api_key="sk-test",
+        base_url="http://localhost:4000",
+        enable_thinking=False,
         default_params={"extra_body": {"chat_template_kwargs": {"enable_thinking": True}}},
     )
     adapter = LiteLLMAdapter(config)
@@ -256,9 +273,17 @@ def test_tool_calls_openai_serialization():
 
 # ── Streaming ─────────────────────────────────────────────────────────────────
 
-def _stream_chunk(content=None, finish_reason=None):
+def _stream_chunk(content=None, finish_reason=None, reasoning_content=None, reasoning=None):
+    # Every delta attribute the adapter reads is set explicitly — an unset MagicMock
+    # attribute auto-creates a truthy child mock and would look like real reasoning.
+    delta = MagicMock(
+        content=content,
+        tool_calls=None,
+        reasoning_content=reasoning_content,
+        reasoning=reasoning,
+    )
     chunk = MagicMock()
-    chunk.choices = [MagicMock(delta=MagicMock(content=content, tool_calls=None), finish_reason=finish_reason)]
+    chunk.choices = [MagicMock(delta=delta, finish_reason=finish_reason)]
     chunk.usage = None
     return chunk
 
@@ -292,6 +317,27 @@ async def test_chat_stream_yields_content_and_finish():
     chunks = [c async for c in adapter.chat_stream(messages=[{"role": "user", "content": "hi"}])]
     assert [c.content for c in chunks if c.content] == ["Namaste"]
     assert chunks[-1].finish_reason == "stop"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["reasoning_content", "reasoning"])
+async def test_chat_stream_captures_reasoning_under_either_field(field):
+    """LiteLLM standardises on reasoning_content; some proxies send plain reasoning."""
+    config = LLMProviderConfig(
+        provider="litellm", model="ollama/qwen3:4b", api_key="k",
+        base_url="http://localhost:4000",
+    )
+    adapter = LiteLLMAdapter(config)
+    adapter._litellm = MagicMock()
+    adapter._litellm.acompletion = _fake_acompletion([
+        _stream_chunk(**{field: "Let me think. "}),
+        _stream_chunk(content="Namaste"),
+        _stream_chunk(finish_reason="stop"),
+    ])
+
+    chunks = [c async for c in adapter.chat_stream(messages=[{"role": "user", "content": "hi"}])]
+    assert [c.reasoning for c in chunks if c.reasoning] == ["Let me think. "]
+    assert [c.content for c in chunks if c.content] == ["Namaste"]
 
 
 @pytest.mark.asyncio

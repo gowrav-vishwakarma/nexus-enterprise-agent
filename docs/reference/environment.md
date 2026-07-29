@@ -55,8 +55,8 @@ Layout under `NEXUS_DATA_ROOT`:
 When `NEXUS_LLM_BASE_URL` is set, the SaaS example routes all tenants through that endpoint.
 
 **Reasoning models (Qwen3, gpt-oss):** Voice agents disable thinking at the source via
-`default_params.extra_body.chat_template_kwargs.enable_thinking: false` in
-`voice_grpc.yaml`. Nexus also applies this default for any self-hosted `base_url`.
+`enable_thinking: false` on the LLM config in `voice_grpc.yaml`. Chat agents leave it
+unset and receive reasoning as separate `reasoning` stream events.
 See [llm-litellm.md](../guides/llm-litellm.md#reasoning-models-extra_body-and-headers).
 
 ## Realtime / voice — Voice Lab (gRPC)

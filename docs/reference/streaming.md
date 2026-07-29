@@ -43,6 +43,7 @@ Returns `AsyncIterator[AgentStreamEvent]`.
 | `event_type` | When it fires |
 |--------------|---------------|
 | `content` | LLM text chunk |
+| `reasoning` | Reasoning ("thinking") chunk, if the model produces any |
 | `tool_call` | Model requested a **server** tool |
 | `tool_result` | Server tool finished; check `event.content` |
 | `client_tool_call` | Model requested a client tool (`execution="client"`); run will pause |
@@ -51,6 +52,42 @@ Returns `AsyncIterator[AgentStreamEvent]`.
 | `final_response` | Run done; full `AgentRunResult` in `event.data` |
 | `error` | Run failed |
 | `event` | Internal lifecycle signal |
+
+Events are emitted **as they arrive** from the provider, in the order they occurred.
+A turn that ends in a tool call still streams whatever text the model wrote first, so
+you can render narration, tool calls and the final answer as one ordered timeline.
+
+### Reasoning ("thinking")
+
+Reasoning-capable models (Qwen3, DeepSeek-R1, Claude extended thinking, Gemini
+thinking, gpt-oss) emit their private train of thought separately from the answer.
+LiteLLM normalises this to `reasoning_content`, and Nexus forwards each piece as a
+`reasoning` event. Reasoning never appears in `content`:
+
+```python
+async for event in runner.run_stream("Hello", stream=True):
+    if event.event_type == "reasoning":
+        render_thinking(event.content)   # collapse this in your UI
+    elif event.event_type == "content":
+        render_answer(event.content)
+```
+
+The full text is saved on the turn as `TurnRecord.reasoning`, so a stored chat can be
+replayed with its thinking intact. It is deliberately **not** stored inside
+`TurnRecord.llm_messages`, because those dicts are replayed verbatim into the next
+provider request and an unknown key would be rejected. Nexus never sends reasoning
+back to the model.
+
+Two things to check if you see no `reasoning` events:
+
+- **The model must be asked to think.** Use `LLMProviderConfig.enable_thinking=True`,
+  or the provider's own switch (`reasoning_effort`, `thinking`) via `default_params`.
+  Set `enable_thinking=False` for voice, where a leading thinking block delays the
+  first spoken word. See [agent-config.md](agent-config.md#reasoning-thinking).
+- **The server must parse it.** A self-hosted vLLM or SGLang deployment only fills
+  `reasoning_content` when started with a matching `--reasoning-parser` (for example
+  `--reasoning-parser qwen3`). Without it the model's `<think>` block stays inside
+  `content` and arrives as ordinary text.
 
 ### Pause / resume (summary)
 

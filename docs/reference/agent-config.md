@@ -71,9 +71,22 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 | `max_retries` | No | `3` | Retry count on failure |
 | `retry_delay` | No | `1.0` | Seconds between retries |
 | `extra_headers` | No | `{}` | Extra HTTP headers |
-| `default_params` | No | `{}` | Extra params sent to the provider (`max_tokens`, `temperature`, `extra_body`, …). Use `extra_body.chat_template_kwargs.enable_thinking: false` for voice with Qwen3. |
+| `default_params` | No | `{}` | Extra params sent to the provider (`max_tokens`, `temperature`, `extra_body`, `reasoning_effort`, `thinking`, …). Anything the model rejects is dropped rather than failing the call. |
+| `enable_thinking` | No | `None` | Force a self-hosted model's reasoning on (`True`) or off (`False`). `None` leaves the deployment's own setting alone. |
 
 `base_url` overrides the endpoint; it does **not** choose the adapter. Set `provider` explicitly.
+
+### Reasoning ("thinking")
+
+`enable_thinking` sets `extra_body.chat_template_kwargs.enable_thinking` for models that
+read it (Qwen3 and friends behind vLLM, SGLang or a LiteLLM proxy). Anything you put in
+`default_params.extra_body` wins over it.
+
+Set `enable_thinking=False` for **voice**: a reasoning model otherwise writes a whole
+thinking block before the first speakable word, which wrecks time-to-first-audio.
+
+Leave it at `None` (or `True`) for chat, and reasoning arrives as `reasoning` stream
+events, separate from the answer. See [streaming.md](streaming.md#reasoning-thinking).
 
 ## AgentGroupConfig
 

@@ -48,16 +48,19 @@ Any key under `default_params` is passed straight through to the provider on eve
 call. This is how you tune reasoning ("thinking") models and pass engine-specific
 switches or HTTP headers — no code changes needed.
 
-**Thinking is disabled at the source by default.** Reasoning models like Qwen3
-otherwise spend the first few seconds (and much of the token budget) emitting a
-`<think>…</think>` block before any speakable text, which wrecks voice latency. For
-OpenAI-compatible proxies Nexus automatically sets
-`extra_body.chat_template_kwargs.enable_thinking = false`. As a final safety net,
-the cascaded voice pipeline also strips any `<think>…</think>` that still leaks
-through, so reasoning is never spoken.
+**Thinking follows your model's own setting by default.** Nexus does not turn it on
+or off behind your back. When a model does think, Nexus streams it as `reasoning`
+events, separate from the answer — see [streaming.md](../reference/streaming.md#reasoning-thinking).
 
-To make it explicit, override it, or add engine-specific switches, set them yourself
-— anything you provide wins over the auto-default:
+**Turn it off for voice.** Reasoning models like Qwen3 otherwise spend the first few
+seconds (and much of the token budget) emitting a `<think>…</think>` block before any
+speakable text, which wrecks voice latency. Set `enable_thinking: false` on the voice
+agent's LLM config, and Nexus sets `extra_body.chat_template_kwargs.enable_thinking`
+for you. As a final safety net, the cascaded voice pipeline also strips any
+`<think>…</think>` that still leaks into the text, so reasoning is never spoken.
+
+Anything you set in `default_params.extra_body` wins over `enable_thinking`, so you
+can always spell the switch out yourself or add engine-specific ones:
 
 ```yaml
 defaults:
@@ -66,20 +69,25 @@ defaults:
     model: ${ENV:VOICE_LLM_MODEL|ollama/qwen3:4b}
     base_url: ${ENV:LITELLM_BASE_URL|http://localhost:4000}
     api_key: ${ENV:LITELLM_API_KEY|}
+    enable_thinking: false         # voice: no <think> block before the first word
     default_params:
       max_tokens: 400
       temperature: 0.4
       extra_body:
-        chat_template_kwargs:
-          enable_thinking: false   # vLLM / SGLang / Qwen chat template
+        # chat_template_kwargs:
+        #   enable_thinking: false # same switch, spelled out — wins over the above
         # think: false             # Ollama-native switch (if your proxy forwards it)
         # reasoning_effort: low    # gpt-oss / reasoning-effort models
     extra_headers:
       x-my-route: voice            # forwarded on every request
 ```
 
-To **re-enable** reasoning for a smart (non-voice) agent, set
-`enable_thinking: true` in that agent's own `default_params.extra_body`.
+For a smart (non-voice) agent, leave `enable_thinking` unset to keep the model's own
+behaviour, or set it to `true` to ask for reasoning explicitly.
+
+A self-hosted vLLM or SGLang deployment only reports reasoning separately when it was
+started with a matching `--reasoning-parser` (e.g. `--reasoning-parser qwen3`). Without
+that flag the `<think>` block stays inside the normal content and arrives as plain text.
 
 Note on routing: **every provider goes through one `LiteLLMAdapter`**. Set
 `VOICE_LLM_MODEL` (or `NEXUS_LLM_MODEL`) to the **exact model name registered on

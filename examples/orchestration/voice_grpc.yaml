@@ -66,10 +66,12 @@ defaults:
     model: ${ENV:VOICE_LLM_MODEL|ollama/qwen3:4b}
     base_url: ${ENV:LITELLM_BASE_URL|http://localhost:4000}
     api_key: ${ENV:LITELLM_API_KEY|}
-    # Per-request LLM args are passed straight through to the provider. Use this
-    # to disable reasoning at the source (lowest latency) for thinking models like
-    # Qwen3 — Nexus also defaults enable_thinking=False for proxies, but setting it
-    # here makes it explicit and lets you add proxy/engine-specific switches.
+    # Voice must not think out loud: a thinking model like Qwen3 would emit a whole
+    # <think> block before the first speakable word. enable_thinking turns it off at
+    # the source; extra_body below spells out the same switch and wins over it.
+    enable_thinking: false
+    # Per-request LLM args are passed straight through to the provider — use this for
+    # proxy/engine-specific switches.
     default_params:
       max_tokens: ${ENV:VOICE_LLM_MAX_TOKENS|400}
       temperature: ${ENV:VOICE_LLM_TEMPERATURE|0.4}

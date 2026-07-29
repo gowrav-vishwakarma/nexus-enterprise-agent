@@ -40,6 +40,12 @@ class LLMProviderConfig(BaseModel):
     retry_delay: float = 1.0
     extra_headers: dict[str, str] = {}
     default_params: dict[str, object] = {}
+    enable_thinking: Optional[bool] = Field(
+        default=None,
+        description="Force a self-hosted model's reasoning on (True) or off (False) via "
+        "chat_template_kwargs. None leaves the deployment's own setting alone. Set False "
+        "for voice, where a leading <think> block wrecks time-to-first-audio.",
+    )
 
     def get_api_key(self) -> str:
         """Return the raw API key string."""

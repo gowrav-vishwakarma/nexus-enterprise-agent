@@ -208,7 +208,8 @@ async def test_agent_runner_streaming_parity():
     content_events = [e for e in events if e.event_type == "content"]
     assert any(e.content == "It is " for e in content_events)
     assert any(e.content == "sunny." for e in content_events)
-    assert not any(e.content == "Let me look that up." for e in content_events)
+    # Narration on a tool turn is real assistant output and is streamed live too.
+    assert any(e.content == "Let me look that up." for e in content_events)
 
     tool_call_events = [e for e in events if e.event_type == "tool_call"]
     assert len(tool_call_events) == 1
@@ -221,12 +222,12 @@ async def test_agent_runner_streaming_parity():
 
 
 @pytest.mark.asyncio
-async def test_agent_runner_stream_multi_turn_tools_not_buffered():
-    """Tool turns stream tool_call/tool_result per turn; only final text is streamed as content.
+async def test_agent_runner_stream_multi_turn_deltas_are_live():
+    """Every delta reaches the client as it arrives, in occurrence order.
 
-    Three turns: web_search → lookup_db → final answer.
-    Intermediate assistant text on tool turns must not appear as content events.
-    Tool events must appear before final content chunks, not batched at the end.
+    Three turns: web_search → lookup_db → final answer. Each turn's narration is
+    streamed before that turn's tool_call, so a UI can render text, tool chips and
+    the final answer as one ordered timeline.
     """
     from nexus.llm.response import LLMStreamChunk, TokenUsage
 
@@ -249,7 +250,7 @@ async def test_agent_runner_stream_multi_turn_tools_not_buffered():
     )
 
     stream_turn_chunks = [
-        # Turn 0: tool call — text must NOT leak to client as content
+        # Turn 0: narration then a tool call — both reach the client
         [
             LLMStreamChunk(content="Searching weather..."),
             LLMStreamChunk(
@@ -265,7 +266,7 @@ async def test_agent_runner_stream_multi_turn_tools_not_buffered():
                 usage=TokenUsage(prompt_tokens=10, completion_tokens=8, total_tokens=18),
             ),
         ],
-        # Turn 1: second tool call — same rule
+        # Turn 1: second narration + tool call — same rule
         [
             LLMStreamChunk(content="Now checking database..."),
             LLMStreamChunk(
@@ -335,31 +336,33 @@ async def test_agent_runner_stream_multi_turn_tools_not_buffered():
     assert tool_result_events[1].data["turn_index"] == 1
     assert "DB row from forecasts" in tool_result_events[1].content
 
-    # Intermediate assistant text on tool turns must never appear as streamed content
-    leaked_tool_turn_text = {"Searching weather...", "Now checking database..."}
-    assert not any(e.content in leaked_tool_turn_text for e in content_events)
+    # Every delta is streamed, each tagged with the turn it came from
+    assert [(e.data.get("turn_index"), e.content) for e in content_events] == [
+        (0, "Searching weather..."),
+        (1, "Now checking database..."),
+        (2, "Weather is "),
+        (2, "sunny and DB says clear."),
+    ]
 
-    # Final-turn text only, tagged with turn_index 2
-    assert [e.content for e in content_events] == ["Weather is ", "sunny and DB says clear."]
-    assert all(e.data.get("turn_index") == 2 for e in content_events)
-
-    # Tool events must precede final content — tools are not held back like text
-    first_content_idx = next(i for i, e in enumerate(events) if e.event_type == "content")
-    last_tool_idx = max(
-        i for i, e in enumerate(events) if e.event_type in ("tool_call", "tool_result")
-    )
-    assert last_tool_idx < first_content_idx
-
-    # Per-turn ordering: tool_call then tool_result before next turn's tool_call
+    # Nothing is held back: each turn's narration arrives before that turn's tool_call
     timeline = [
         (e.event_type, e.data.get("turn_index") if e.data else None, e.content)
         for e in events
         if e.event_type in ("tool_call", "tool_result", "content")
     ]
-    assert timeline.index(("tool_call", 0, None)) < timeline.index(("tool_result", 0, "Search result for weather"))
-    assert timeline.index(("tool_result", 0, "Search result for weather")) < timeline.index(("tool_call", 1, None))
-    assert timeline.index(("tool_call", 1, None)) < timeline.index(("tool_result", 1, "DB row from forecasts"))
-    assert timeline.index(("tool_result", 1, "DB row from forecasts")) < timeline.index(("content", 2, "Weather is "))
+    order = [
+        ("content", 0, "Searching weather..."),
+        ("tool_call", 0, None),
+        ("tool_result", 0, "Search result for weather"),
+        ("content", 1, "Now checking database..."),
+        ("tool_call", 1, None),
+        ("tool_result", 1, "DB row from forecasts"),
+        ("content", 2, "Weather is "),
+        ("content", 2, "sunny and DB says clear."),
+    ]
+    assert [timeline.index(step) for step in order] == sorted(
+        timeline.index(step) for step in order
+    )
 
     sess = await manager.load_session("multi-tool-stream")
     assert sess is not None
@@ -367,6 +370,67 @@ async def test_agent_runner_stream_multi_turn_tools_not_buffered():
     assert len(sess.turns[0].tool_calls) == 1
     assert len(sess.turns[1].tool_calls) == 1
     assert len(sess.turns[2].tool_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_runner_stream_reasoning_events_and_persistence():
+    """Reasoning deltas stream as their own event type and persist on the turn."""
+    from nexus.llm.response import LLMStreamChunk, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key")
+    agent_config = AgentConfig(name="test-agent", llm=llm_config)
+
+    manager = SessionManager()
+    runner = AgentRunner(
+        config=agent_config,
+        tool_registry=ToolRegistry(),
+        storage_config=manager,
+    )
+
+    chunks = [
+        LLMStreamChunk(reasoning="The user wants "),
+        LLMStreamChunk(reasoning="the weather."),
+        LLMStreamChunk(content="It is "),
+        LLMStreamChunk(
+            content="sunny.",
+            finish_reason="stop",
+            usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        ),
+    ]
+
+    async def mock_chat_stream(*_args, **_kwargs):
+        async def _gen():
+            for chunk in chunks:
+                yield chunk
+
+        return _gen()
+
+    events: list[AgentStreamEvent] = []
+    with patch.object(runner.llm_proxy, "chat_stream", mock_chat_stream):
+        async for event in runner.run_stream(
+            user_message="What is the weather?",
+            session_id="reasoning-sess",
+            stream=True,
+        ):
+            events.append(event)
+
+    # Reasoning is a separate channel — it never leaks into content
+    reasoning_events = [e for e in events if e.event_type == "reasoning"]
+    content_events = [e for e in events if e.event_type == "content"]
+    assert [e.content for e in reasoning_events] == ["The user wants ", "the weather."]
+    assert [e.content for e in content_events] == ["It is ", "sunny."]
+
+    # Reasoning arrives before the answer it explains
+    assert events.index(reasoning_events[-1]) < events.index(content_events[0])
+
+    final = next(e for e in events if e.event_type == "final_response")
+    assert AgentRunResult(**final.data).final_response == "It is sunny."
+
+    sess = await manager.load_session("reasoning-sess")
+    assert sess is not None
+    assert sess.turns[0].reasoning == "The user wants the weather."
+    # Stored outside llm_messages, which are replayed verbatim into the provider
+    assert all("reasoning" not in m for m in sess.turns[0].llm_messages)
 
 
 @pytest.mark.asyncio

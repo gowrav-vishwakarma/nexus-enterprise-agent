@@ -29,6 +29,8 @@ defaults:
     # timeout: 60                      # optional, default: 60 seconds
     # max_retries: 3                     # optional, default: 3
     # context_window_tokens: 128000      # optional, default: 128000
+    # enable_thinking: false             # optional, default: none — force a self-hosted
+                                         # model's reasoning on/off; set false for voice
 
   # defaults.agent — merged into every agent
   agent:

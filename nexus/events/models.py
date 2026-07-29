@@ -222,6 +222,7 @@ class LLMStreamChunkEvent(NexusEvent):
     model: str
     turn_index: int
     content_delta: Optional[str] = None
+    reasoning_delta: Optional[str] = None
     has_tool_call_delta: bool = False
 
 

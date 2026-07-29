@@ -696,18 +696,54 @@ class AgentRunner:
             if inspect.iscoroutine(raw_stream):
                 raw_stream = await raw_stream
             content_parts: list[str] = []
-            content_buffer: list[str] = []
+            reasoning_parts: list[str] = []
             tool_calls_acc: dict[int, dict[str, Any]] = {}
             usage = TokenUsage()
             finish_reason = "stop"
 
+            # Deltas are forwarded as they arrive so the caller can render them
+            # live. Text that precedes a tool call is real assistant output (it is
+            # persisted in the turn record either way), so it is streamed too.
             async for chunk in raw_stream:
+                if chunk.reasoning:
+                    reasoning_parts.append(chunk.reasoning)
+                    await self.event_emitter.emit(
+                        LLMStreamChunkEvent(
+                            session_id=session.session_id,
+                            agent_id=self.config.name,
+                            turn_index=turn_index,
+                            provider=self.config.llm.provider,
+                            model=self.config.llm.model,
+                            reasoning_delta=chunk.reasoning,
+                            has_tool_call_delta=False,
+                        )
+                    )
+                    yield AgentStreamEvent(
+                        event_type="reasoning",
+                        content=chunk.reasoning,
+                        data={"agent_id": self.config.name, "turn_index": turn_index},
+                    )
+
                 if chunk.content:
                     content_parts.append(chunk.content)
-                    content_buffer.append(chunk.content)
+                    await self.event_emitter.emit(
+                        LLMStreamChunkEvent(
+                            session_id=session.session_id,
+                            agent_id=self.config.name,
+                            turn_index=turn_index,
+                            provider=self.config.llm.provider,
+                            model=self.config.llm.model,
+                            content_delta=chunk.content,
+                            has_tool_call_delta=False,
+                        )
+                    )
+                    yield AgentStreamEvent(
+                        event_type="content",
+                        content=chunk.content,
+                        data={"agent_id": self.config.name, "turn_index": turn_index},
+                    )
 
                 if chunk.tool_calls:
-                    content_buffer.clear()
                     for tc_delta in chunk.tool_calls:
                         _merge_tool_call_delta(tool_calls_acc, tc_delta)
                     await self.event_emitter.emit(
@@ -728,6 +764,7 @@ class AgentRunner:
 
             llm_response = LLMResponse(
                 content="".join(content_parts) if content_parts else None,
+                reasoning="".join(reasoning_parts) if reasoning_parts else None,
                 tool_calls=_tool_calls_from_accumulated(tool_calls_acc),
                 usage=usage,
                 finish_reason=finish_reason,
@@ -746,25 +783,6 @@ class AgentRunner:
                     duration_ms=int((time.time() - llm_start) * 1000),
                 )
             )
-
-            if not llm_response.tool_calls:
-                for delta in content_buffer:
-                    await self.event_emitter.emit(
-                        LLMStreamChunkEvent(
-                            session_id=session.session_id,
-                            agent_id=self.config.name,
-                            turn_index=turn_index,
-                            provider=self.config.llm.provider,
-                            model=self.config.llm.model,
-                            content_delta=delta,
-                            has_tool_call_delta=False,
-                        )
-                    )
-                    yield AgentStreamEvent(
-                        event_type="content",
-                        content=delta,
-                        data={"agent_id": self.config.name, "turn_index": turn_index},
-                    )
 
             yield llm_response
 
@@ -911,6 +929,7 @@ class AgentRunner:
                         turn_index=session_turn_index,
                         user_message=current_user_message if run_turn_index == 0 else None,
                         llm_messages=[{"role": "assistant", "content": llm_response.content}],
+                        reasoning=llm_response.reasoning,
                         tool_calls=[],
                         total_tokens_in=llm_response.usage.prompt_tokens,
                         total_tokens_out=llm_response.usage.completion_tokens,
@@ -1122,6 +1141,7 @@ class AgentRunner:
                     turn_index=session_turn_index,
                     user_message=current_user_message if run_turn_index == 0 else None,
                     llm_messages=llm_messages_to_save,
+                    reasoning=llm_response.reasoning,
                     tool_calls=turn_tool_records,
                     context_updates_received=all_updates,
                     total_tokens_in=llm_response.usage.prompt_tokens,

@@ -100,6 +100,11 @@ class LiteLLMAdapter(LLMAdapter):
         self._litellm.suppress_debug_info = True
         self._litellm.set_verbose = False
 
+        # Reasoning switches (``thinking``, ``reasoning_effort``, ``extra_body``) are
+        # set per-deployment in default_params but are not accepted by every model.
+        # Let LiteLLM drop unsupported params instead of failing the whole request.
+        self._litellm.drop_params = True
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @property
@@ -163,25 +168,40 @@ class LiteLLMAdapter(LLMAdapter):
         for k, v in self.config.default_params.items():
             kw.setdefault(k, v)
 
-        self._apply_voice_defaults(kw)
+        self._apply_thinking_switch(kw)
         return kw
 
-    def _apply_voice_defaults(self, kw: dict[str, Any]) -> None:
-        """Disable reasoning at the source for self-hosted proxies.
+    def _apply_thinking_switch(self, kw: dict[str, Any]) -> None:
+        """Turn a self-hosted model's reasoning on or off when explicitly configured.
 
-        Reasoning models (e.g. Qwen3) otherwise emit a ``<think>…</think>`` block
-        before any speakable text — killing voice latency. We default
-        ``chat_template_kwargs.enable_thinking = False`` for non-OpenAI proxies;
-        anything set in the manifest's ``default_params.extra_body`` wins.
+        Only acts when ``config.enable_thinking`` is set. Left at ``None`` (the
+        default) the model's own setting applies, so reasoning-capable deployments
+        stream ``reasoning_content`` normally.
+
+        Voice pipelines should set ``enable_thinking=False``: a ``<think>…</think>``
+        block before any speakable text wrecks time-to-first-audio. Anything already
+        in ``default_params.extra_body`` wins.
         """
-        base_url = self.config.base_url or ""
-        if not base_url or "api.openai.com" in base_url:
+        if self.config.enable_thinking is None:
             return
         extra = dict(kw.get("extra_body") or {})
         template_kwargs = dict(extra.get("chat_template_kwargs") or {})
-        template_kwargs.setdefault("enable_thinking", False)
+        template_kwargs.setdefault("enable_thinking", self.config.enable_thinking)
         extra["chat_template_kwargs"] = template_kwargs
         kw["extra_body"] = extra
+
+    @staticmethod
+    def _read_reasoning(obj: Any) -> Optional[str]:
+        """Read reasoning text off a LiteLLM delta or message.
+
+        LiteLLM standardises reasoning as ``reasoning_content``, but some
+        OpenAI-compatible proxies use the shorter ``reasoning``, so check both.
+        """
+        for attr in ("reasoning_content", "reasoning"):
+            value = getattr(obj, attr, None)
+            if value:
+                return str(value)
+        return None
 
     @staticmethod
     def _parse_tool_calls(raw_tool_calls: Any) -> list[ToolCallRequest]:
@@ -225,6 +245,7 @@ class LiteLLMAdapter(LLMAdapter):
     def _parse_response(self, response: Any) -> LLMResponse:
         """Convert a full LiteLLM ModelResponse → Nexus LLMResponse."""
         content: Optional[str] = None
+        reasoning: Optional[str] = None
         tool_calls: list[ToolCallRequest] = []
         finish_reason = "stop"
 
@@ -233,10 +254,12 @@ class LiteLLMAdapter(LLMAdapter):
             finish_reason = choice.finish_reason or "stop"
             msg = choice.message
             content = getattr(msg, "content", None)
+            reasoning = self._read_reasoning(msg)
             tool_calls = self._parse_tool_calls(getattr(msg, "tool_calls", None))
 
         return LLMResponse(
             content=content,
+            reasoning=reasoning,
             tool_calls=tool_calls,
             usage=self._parse_usage(getattr(response, "usage", None)),
             finish_reason=finish_reason,
@@ -287,6 +310,7 @@ class LiteLLMAdapter(LLMAdapter):
             stream = await self._litellm.acompletion(**kw)
             async for chunk in stream:
                 content_delta: Optional[str] = None
+                reasoning_delta: Optional[str] = None
                 tc_deltas: list[dict[str, Any]] = []
                 finish_reason: Optional[str] = None
                 usage: Optional[TokenUsage] = None
@@ -296,6 +320,7 @@ class LiteLLMAdapter(LLMAdapter):
                     delta = choice.delta
                     finish_reason = choice.finish_reason
                     content_delta = getattr(delta, "content", None)
+                    reasoning_delta = self._read_reasoning(delta)
 
                     raw_tcs = getattr(delta, "tool_calls", None)
                     if raw_tcs:
@@ -317,6 +342,7 @@ class LiteLLMAdapter(LLMAdapter):
 
                 yield LLMStreamChunk(
                     content=content_delta,
+                    reasoning=reasoning_delta,
                     tool_calls=tc_deltas,
                     finish_reason=finish_reason,
                     usage=usage,

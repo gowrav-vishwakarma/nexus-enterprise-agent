@@ -86,6 +86,12 @@ class TurnRecord(BaseModel):
     llm_messages: list[dict] = Field(
         default_factory=list, description="Raw LLM message dicts"
     )
+    reasoning: Optional[str] = Field(
+        None,
+        description="Reasoning/thinking text the model produced this turn. Kept "
+        "outside llm_messages because those dicts are replayed verbatim into the "
+        "provider request, which would reject an unknown key.",
+    )
     tool_calls: list[ToolCallRecord] = Field(
         default_factory=list, description="Tool calls in this turn"
     )

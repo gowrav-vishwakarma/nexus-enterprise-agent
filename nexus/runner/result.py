@@ -38,6 +38,7 @@ class AgentStreamEvent(BaseModel):
 
     event_type: Literal[
         "content",
+        "reasoning",
         "tool_call",
         "tool_result",
         "client_tool_call",

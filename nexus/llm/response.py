@@ -25,6 +25,11 @@ class LLMResponse(BaseModel):
     """Complete response from an LLM call."""
 
     content: Optional[str] = Field(None, description="Text content of the response")
+    reasoning: Optional[str] = Field(
+        None,
+        description="Reasoning/thinking text, if the model produced any. Never sent "
+        "back to the provider — display and storage only.",
+    )
     tool_calls: list[ToolCallRequest] = Field(default_factory=list, description="Tool calls requested")
     usage: TokenUsage = Field(default_factory=TokenUsage, description="Token usage statistics")
     finish_reason: str = Field(default="stop", description="LLM finish reason")
@@ -35,6 +40,7 @@ class LLMStreamChunk(BaseModel):
     """A streaming chunk from an LLM response."""
 
     content: Optional[str] = Field(None, description="Incremental text content chunk")
+    reasoning: Optional[str] = Field(None, description="Incremental reasoning/thinking chunk")
     tool_calls: list[dict[str, Any]] = Field(default_factory=list, description="Incremental tool call chunks")
     usage: Optional[TokenUsage] = Field(None, description="Usage statistics (typically returned in the final chunk)")
     finish_reason: Optional[str] = Field(None, description="LLM finish reason if complete")
