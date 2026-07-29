@@ -434,6 +434,63 @@ async def test_agent_runner_stream_reasoning_events_and_persistence():
 
 
 @pytest.mark.asyncio
+async def test_agent_runner_xml_tool_call_in_content_promotes_and_executes():
+    """XML tool calls in assistant content are promoted and executed like native tool_calls."""
+    from nexus.llm.response import LLMResponse, TokenUsage
+
+    @tool(name="execute_sql")
+    def execute_sql(sql: str) -> str:
+        return f"rows:1 sql_len={len(sql)}"
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key")
+    agent_config = AgentConfig(name="test-agent", llm=llm_config)
+
+    registry = ToolRegistry()
+    registry.register_tool(execute_sql)
+    manager = SessionManager()
+    runner = AgentRunner(
+        config=agent_config,
+        tool_registry=registry,
+        storage_config=manager,
+    )
+
+    xml_content = (
+        "Checking balances:\n"
+        "<tool_call><function=execute_sql>"
+        "<parameter=sql>SELECT 1</parameter></function></tool_call>"
+    )
+    response_turn_0 = LLMResponse(
+        content=xml_content,
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+        finish_reason="stop",
+        raw_response={},
+    )
+    response_turn_1 = LLMResponse(
+        content="Done.",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=30, completion_tokens=5, total_tokens=35),
+        finish_reason="stop",
+        raw_response={},
+    )
+
+    mock_chat = AsyncMock()
+    mock_chat.side_effect = [response_turn_0, response_turn_1]
+
+    with patch.object(runner.llm_proxy, "chat", mock_chat):
+        result = await runner.run(user_message="Show balances", session_id="xml-sess")
+
+    assert result.turns_used == 2
+    sess = await manager.load_session("xml-sess")
+    assert sess is not None
+    assert len(sess.turns[0].tool_calls) == 1
+    assert sess.turns[0].tool_calls[0].tool_name == "execute_sql"
+    assistant_msg = sess.turns[0].llm_messages[0]
+    assert "<tool_call>" not in str(assistant_msg.get("content") or "")
+    assert assistant_msg.get("tool_calls")
+
+
+@pytest.mark.asyncio
 async def test_agent_runner_stream_mode_guard():
     """run() rejects streaming mode; run_stream() rejects non-streaming mode."""
     llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key")

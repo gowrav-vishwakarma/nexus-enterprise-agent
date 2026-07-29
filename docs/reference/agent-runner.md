@@ -110,6 +110,14 @@ Adjust a live agent's tool allow-list between turns (schemas are re-filtered eac
 
 These are no-ops when the agent has no toolset restriction (`config.toolset=None`), because every registered tool is already visible. See [tools.md](tools.md#runtime-tool-granting).
 
+## Content-side tool-call recovery
+
+Some OpenAI-compatible models (for example Qwen behind a LiteLLM proxy) emit Hermes/Nemotron-style `<tool_call>` XML in **text content** or **reasoning** instead of native `tool_calls`. After each LLM response, `AgentRunner` runs `promote_content_tool_calls()` ([`nexus/llm/content_tool_calls.py`](../../nexus/llm/content_tool_calls.py)): if native `tool_calls` are empty, XML is parsed, tools execute normally, and XML is stripped from saved assistant content.
+
+Assistant turns persisted to the session are normalized with `build_assistant_llm_message()` so replay never sends an assistant message with neither `content` nor `tool_calls` (which causes provider 400 errors). `ContextWindowBuilder` applies the same repair when rebuilding history from older poisoned sessions.
+
+LiteLLM’s `modify_params` message sanitization is **Anthropic-only** today; do not rely on it for `openai/*` proxy routes.
+
 ## AgentOrchestrator
 
 Same constructor args as `AgentRunner`, but `config` is `AgentGroupConfig`.

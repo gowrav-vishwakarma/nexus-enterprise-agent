@@ -13,6 +13,7 @@ from nexus.context.summary_injector import SummaryPromptInjector
 from nexus.session.models import AgentSession, ToolCallRecord, TurnRecord
 from nexus.tools.context import RunContext
 from nexus.utils.jinja import render_system_prompt
+from nexus.llm.content_tool_calls import EMPTY_ASSISTANT_PLACEHOLDER, sanitize_assistant_llm_message
 from nexus.llm.token_counter import TokenCounter
 
 logger = logging.getLogger(__name__)
@@ -197,9 +198,14 @@ class ContextWindowBuilder:
                         filtered_calls.append(tc_call)
                     
                     msg_copy["tool_calls"] = filtered_calls
-                    # If assistant message has empty tool_calls and no content, we can still yield a dummy content or omit it
                     if not msg_copy["tool_calls"] and not msg_copy.get("content"):
-                        msg_copy["content"] = "Executed background processing."
+                        msg_copy.pop("tool_calls", None)
+                        msg_copy["content"] = EMPTY_ASSISTANT_PLACEHOLDER
+
+                if msg_copy.get("role") == "assistant":
+                    msg_copy = sanitize_assistant_llm_message(
+                        msg_copy, placeholder=EMPTY_ASSISTANT_PLACEHOLDER
+                    )
 
                 turn_messages.append(msg_copy)
 

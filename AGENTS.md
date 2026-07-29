@@ -18,6 +18,7 @@ When checking behaviour, read the docs first, then the code; if they disagree, u
 | `nexus/orchestration/schema.py` or `nexus/orchestration/resolver.py` | `docs/reference/manifest-schema.md`, `docs/assets/complete-manifest.annotated.yaml` |
 | `nexus/config/*.py` (fields, defaults, descriptions) | Matching file under `docs/reference/` |
 | `OrchestrationRuntime` or `AgentRunner` signatures | `docs/reference/agent-runner.md`, `docs/assets/complete-run.annotated.py`, `docs/assets/complete-agent.annotated.py` |
+| `nexus/llm/content_tool_calls.py` or assistant history sanitization in `agent_runner` / `context/builder` | `docs/reference/agent-runner.md` (Content-side tool-call recovery) |
 | `.env.example` | `docs/reference/environment.md` |
 | `examples/orchestration/*` | `docs/getting-started.md`, `docs/examples.md` |
 | `examples/nexus_saas_api.py` | `docs/guides/saas-example.md` |

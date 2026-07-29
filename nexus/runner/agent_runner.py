@@ -28,8 +28,8 @@ from nexus.events.models import (
     LLMStreamChunkEvent,
 )
 from nexus.llm.proxy import LLMProxy
+from nexus.llm.content_tool_calls import build_assistant_llm_message, promote_content_tool_calls
 from nexus.llm.response import LLMResponse, TokenUsage, ToolCallRequest
-from nexus.llm.tool_format import tool_calls_to_openai_messages
 from nexus.llm.token_counter import TokenCounter
 from nexus.memory.curator import MemoryCurator
 from nexus.memory.cross_session_store import (
@@ -84,8 +84,10 @@ def _tool_calls_from_accumulated(accumulated: dict[int, dict[str, Any]]) -> list
     tool_calls: list[ToolCallRequest] = []
     for idx in sorted(accumulated.keys()):
         tc = accumulated[idx]
-        if not tc.get("id") or not tc.get("name"):
+        if not tc.get("name"):
             continue
+        if not tc.get("id"):
+            tc["id"] = f"call_stream_{idx}"
         try:
             tool_input = json.loads(tc["arguments"]) if tc["arguments"] else {}
         except json.JSONDecodeError:
@@ -920,6 +922,7 @@ class AgentRunner:
                         llm_response = item
 
                 assert llm_response is not None
+                llm_response = promote_content_tool_calls(llm_response)
                 total_tokens_in += llm_response.usage.prompt_tokens
                 total_tokens_out += llm_response.usage.completion_tokens
 
@@ -928,7 +931,12 @@ class AgentRunner:
                     final_turn = TurnRecord(
                         turn_index=session_turn_index,
                         user_message=current_user_message if run_turn_index == 0 else None,
-                        llm_messages=[{"role": "assistant", "content": llm_response.content}],
+                        llm_messages=[
+                            build_assistant_llm_message(
+                                content=llm_response.content,
+                                tool_calls=llm_response.tool_calls,
+                            )
+                        ],
                         reasoning=llm_response.reasoning,
                         tool_calls=[],
                         total_tokens_in=llm_response.usage.prompt_tokens,
@@ -1125,15 +1133,10 @@ class AgentRunner:
                     turn_tool_records.append(tc_record)
 
                 llm_messages_to_save = [
-                    {
-                        "role": "assistant",
-                        "content": llm_response.content,
-                        "tool_calls": (
-                            tool_calls_to_openai_messages(llm_response.tool_calls)
-                            if llm_response.tool_calls
-                            else None
-                        ),
-                    }
+                    build_assistant_llm_message(
+                        content=llm_response.content,
+                        tool_calls=llm_response.tool_calls,
+                    )
                 ]
 
                 turn_status = "paused" if status == "paused" else "completed"
