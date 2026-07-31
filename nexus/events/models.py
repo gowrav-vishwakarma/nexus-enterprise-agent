@@ -163,9 +163,12 @@ class RCSContextBuiltEvent(NexusEvent):
     
     event_type: NexusEventType = NexusEventType.RCS_CONTEXT_BUILT
     context_tokens: int = 0
+    untrimmed_tokens: int = 0
     turns_in_context: int = 0
     tc_tags_count: int = 0
     tc_summarized_count: int = 0
+    tools_degraded_count: int = 0
+    turns_dropped: int = 0
 
 
 class RCSTCSummarizedEvent(NexusEvent):

@@ -18,12 +18,22 @@ from nexus.llm.token_counter import TokenCounter
 
 logger = logging.getLogger(__name__)
 
+FALLBACK_USER_MESSAGE = "Continue."
+
+OVERSIZED_TOOL_RESULT_NOTICE = (
+    "Result not included: it was {tokens} tokens, which does not fit the remaining "
+    "context budget. Re-run this tool with a narrower scope (shorter date range, "
+    "fewer rows or columns, filters, or pagination), or use a tool that returns "
+    "aggregates instead of raw records."
+)
+
 
 class ContextWindowBuilder:
     """Builds and manages the message sequence for the LLM context window."""
 
     def __init__(self, event_emitter: Optional[Any] = None):
         self.event_emitter = event_emitter
+        self.last_untrimmed_tokens: int = 0
 
     @staticmethod
     def _format_tool_signature(tc: ToolCallRecord, include_signature: bool) -> str:
@@ -86,7 +96,107 @@ class ContextWindowBuilder:
             out[-1] = {**prev, "content": joined or prev["content"]}
         return out
 
-    def _render_tool_message(self, tc: ToolCallRecord, rcs_enabled: bool, tc_tag_format: str, include_signature: bool) -> str:
+    @staticmethod
+    def _overflow_notice(tokens: int) -> str:
+        return OVERSIZED_TOOL_RESULT_NOTICE.format(tokens=tokens)
+
+    @staticmethod
+    def _has_bare_user_message(messages: list[dict[str, Any]]) -> bool:
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                return True
+        return False
+
+    @staticmethod
+    def _ensure_user_query(
+        messages: list[dict[str, Any]], anchor: Optional[str]
+    ) -> list[dict[str, Any]]:
+        """Insert a user message when trimming removed every bare user turn."""
+        if ContextWindowBuilder._has_bare_user_message(messages):
+            return messages
+
+        text = (anchor or "").strip() or FALLBACK_USER_MESSAGE
+        user_msg = {"role": "user", "content": text}
+        if messages and messages[0].get("role") == "system":
+            return [messages[0], user_msg, *messages[1:]]
+        return [user_msg, *messages]
+
+    def _degrade_oldest_tool(
+        self,
+        turns: list[TurnRecord],
+        degraded_tc_ids: set[str],
+    ) -> bool:
+        """Mark the oldest unsummarized tool call for overflow-notice rendering."""
+        for turn in turns:
+            for tc in turn.tool_calls:
+                if tc.tc_id in degraded_tc_ids:
+                    continue
+                if self._summary_text(tc):
+                    continue
+                degraded_tc_ids.add(tc.tc_id)
+                return True
+        return False
+
+    def _turn_to_messages(
+        self,
+        turn: TurnRecord,
+        *,
+        rcs_enabled: bool,
+        tc_tag_format: str,
+        include_signature: bool,
+        degraded_tc_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        turn_messages: list[dict[str, Any]] = []
+
+        if turn.user_message:
+            turn_messages.append({"role": "user", "content": turn.user_message})
+
+        for msg in turn.llm_messages:
+            msg_copy = copy.deepcopy(msg)
+            if msg_copy.get("role") == "assistant":
+                msg_copy = sanitize_assistant_llm_message(
+                    msg_copy, placeholder=EMPTY_ASSISTANT_PLACEHOLDER
+                )
+            turn_messages.append(msg_copy)
+
+        for tc in turn.tool_calls:
+            content = self._render_tool_message(
+                tc=tc,
+                rcs_enabled=rcs_enabled,
+                tc_tag_format=tc_tag_format,
+                include_signature=include_signature,
+                degraded=tc.tc_id in degraded_tc_ids,
+            )
+
+            tool_call_id = f"call_{tc.tc_id}"
+            for msg in turn.llm_messages:
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    tc_idx = turn.tool_calls.index(tc)
+                    if tc_idx < len(msg["tool_calls"]):
+                        tool_call_id = msg["tool_calls"][tc_idx].get("id", tool_call_id)
+
+            turn_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": content,
+                }
+            )
+
+        return turn_messages
+
+    def _render_tool_message(
+        self,
+        tc: ToolCallRecord,
+        rcs_enabled: bool,
+        tc_tag_format: str,
+        include_signature: bool,
+        *,
+        degraded: bool = False,
+    ) -> str:
         """Render a tool result message according to its RCS status.
 
         A tool call always yields a tool message: RCS replaces the result body
@@ -105,6 +215,16 @@ class ContextWindowBuilder:
         summarized*, so the full raw response is rendered with its tag. That
         keeps sessions written by older versions readable.
         """
+        if degraded:
+            tokens = tc.tokens_raw or TokenCounter.count_string(tc.raw_response)
+            notice = self._overflow_notice(tokens)
+            if rcs_enabled:
+                tag = tc_tag_format.format(n=tc.tc_index)
+                signature = self._format_tool_signature(tc, include_signature)
+                prefix = f"{tag} {signature}\n" if signature else f"{tag}\n"
+                return f"{prefix}{notice}"
+            return notice
+
         summary = self._summary_text(tc)
 
         # Summarized — signature kept, [TCn] tag intentionally dropped
@@ -191,93 +311,71 @@ class ContextWindowBuilder:
 
         system_message = {"role": "system", "content": system_content}
 
-        # 2. Build History Messages
-        # We need to map turns into a flat list of user, assistant, and tool messages,
-        # applying the RCS rendering rules.
-        history_turns: list[list[dict[str, Any]]] = []
+        # 2. Sliding-window budgeting over session turns.
+        # Order when over budget: degrade oldest raw tool bodies, then drop whole turns.
+        turns_in_window = list(session.turns)
+        degraded_tc_ids: set[str] = set()
+        turns_dropped = 0
+        model = agent_config.llm.model
 
-        for turn in session.turns:
-            turn_messages = []
-            
-            # Add user message if present
-            if turn.user_message:
-                turn_messages.append({"role": "user", "content": turn.user_message})
+        anchor_user_message = current_user_message or next(
+            (t.user_message for t in reversed(session.turns) if t.user_message),
+            None,
+        )
 
-            # Process LLM messages. Every tool call renders a tool message below,
-            # so assistant tool_calls are always answered and need no filtering.
-            for msg in turn.llm_messages:
-                msg_copy = copy.deepcopy(msg)
-
-                if msg_copy.get("role") == "assistant":
-                    msg_copy = sanitize_assistant_llm_message(
-                        msg_copy, placeholder=EMPTY_ASSISTANT_PLACEHOLDER
-                    )
-
-                turn_messages.append(msg_copy)
-
-            # Process Tool results (the 'tool' role messages)
-            # We construct these from the ToolCallRecords of the turn
-            for tc in turn.tool_calls:
-                content = self._render_tool_message(
-                    tc=tc,
-                    rcs_enabled=rcs_enabled,
-                    tc_tag_format=tc_tag_format,
-                    include_signature=include_signature,
-                )
-
-                # Find the matching tool_call_id from turn's assistant messages
-                # To align with LLM tool call requirements
-                tool_call_id = f"call_{tc.tc_id}"
-                for msg in turn.llm_messages:
-                    if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                        # Sequence match
-                        tc_idx = turn.tool_calls.index(tc)
-                        if tc_idx < len(msg["tool_calls"]):
-                            tool_call_id = msg["tool_calls"][tc_idx].get("id", tool_call_id)
-
-                turn_messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": content,
-                })
-
-            history_turns.append(turn_messages)
-
-        # 3. Add current turn user message
-        current_messages = []
+        current_messages: list[dict[str, Any]] = []
         if current_user_message:
             current_messages.append({"role": "user", "content": current_user_message})
 
-        # 4. Sliding Window Budgeting
-        # We start with the full history and prune oldest turns until it fits inside token_budget.
-        # System prompt + current user message are ALWAYS kept.
-        
-        while history_turns:
-            # Flatten history turns
-            flat_history = []
-            for t_msgs in history_turns:
-                flat_history.extend(t_msgs)
+        self.last_untrimmed_tokens = 0
+
+        while True:
+            flat_history: list[dict[str, Any]] = []
+            for turn in turns_in_window:
+                flat_history.extend(
+                    self._turn_to_messages(
+                        turn,
+                        rcs_enabled=rcs_enabled,
+                        tc_tag_format=tc_tag_format,
+                        include_signature=include_signature,
+                        degraded_tc_ids=degraded_tc_ids,
+                    )
+                )
 
             full_messages = [system_message] + flat_history + current_messages
-            
-            # Count tokens
-            model = agent_config.llm.model
             total_tokens = TokenCounter.count_messages(full_messages, model)
-            
+
+            if self.last_untrimmed_tokens == 0:
+                self.last_untrimmed_tokens = total_tokens
+
             if total_tokens <= token_budget:
                 break
-            
-            # Over budget: drop the oldest turn
-            logger.info("Context window over budget (%d > %d). Dropping oldest turn.", total_tokens, token_budget)
-            history_turns.pop(0)
 
-        # Final flat messages construction
-        flat_history = []
-        for t_msgs in history_turns:
-            flat_history.extend(t_msgs)
+            if self._degrade_oldest_tool(turns_in_window, degraded_tc_ids):
+                continue
+
+            if turns_in_window:
+                turns_in_window.pop(0)
+                turns_dropped += 1
+                continue
+
+            break
+
+        if degraded_tc_ids or turns_dropped:
+            logger.warning(
+                "Context window over budget (%d > %d): degraded %d tool result(s), "
+                "dropped %d turn(s).",
+                self.last_untrimmed_tokens,
+                token_budget,
+                len(degraded_tc_ids),
+                turns_dropped,
+            )
 
         final_messages = self._coalesce_consecutive_assistants(
-            [system_message] + flat_history + current_messages
+            self._ensure_user_query(
+                [system_message] + flat_history + current_messages,
+                anchor_user_message,
+            )
         )
 
         # Emit observability event (awaited so it is not silently lost)
@@ -291,9 +389,12 @@ class ContextWindowBuilder:
                     session_id=session.session_id,
                     agent_id=session.agent_id,
                     context_tokens=TokenCounter.count_messages(final_messages, agent_config.llm.model),
-                    turns_in_context=len(history_turns),
+                    untrimmed_tokens=self.last_untrimmed_tokens,
+                    turns_in_context=len(turns_in_window),
                     tc_tags_count=tc_tags_count,
                     tc_summarized_count=tc_summarized_count,
+                    tools_degraded_count=len(degraded_tc_ids),
+                    turns_dropped=turns_dropped,
                 )
             )
 

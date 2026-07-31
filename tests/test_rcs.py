@@ -4,9 +4,10 @@ import pytest
 
 from nexus.config import AgentConfig, LLMProviderConfig, DEFAULT_RCS_SYSTEM_BLOCK
 from nexus.config.rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
-from nexus.context.builder import ContextWindowBuilder
+from nexus.context.builder import ContextWindowBuilder, FALLBACK_USER_MESSAGE
 from nexus.context.rcs_injector import RCSSystemPromptInjector
 from nexus.llm.content_tool_calls import EMPTY_ASSISTANT_PLACEHOLDER
+from nexus.llm.token_counter import TokenCounter
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, ToolCallRecord, TurnRecord, ContextUpdate
 from nexus.tools.interceptor import ContextUpdateInterceptor
@@ -762,3 +763,284 @@ def test_token_usage_defaults_when_empty():
         "cumulative_input_tokens_saved_by_rcs": 0,
         "rcs_enabled": False,
     }
+
+
+# =============================================================================
+# Context pressure: degradation + guaranteed user query
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_builder_degrades_oversized_tool_and_preserves_user_query():
+    """Over budget on a fresh chat: degrade the tool body, keep the user question."""
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    agent_config = AgentConfig(
+        name="test-agent",
+        llm=llm_config,
+        rcs=RuntimeContextSummarizerConfig(enabled=True),
+    )
+    builder = ContextWindowBuilder()
+    session = AgentSession(session_id="s", agent_id="test-agent")
+    huge = "x" * 50_000
+    tc = ToolCallRecord(
+        tc_id="TC1",
+        tc_index=1,
+        tool_name="get_dashboard",
+        tool_input={"range": "all"},
+        raw_response=huge,
+        tokens_raw=50_000,
+        call_id="call-1",
+    )
+    session.turns.append(
+        TurnRecord(
+            turn_index=0,
+            user_message="Give me the dashboard summary",
+            llm_messages=[
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "get_dashboard", "arguments": "{}"},
+                        }
+                    ],
+                }
+            ],
+            tool_calls=[tc],
+        )
+    )
+
+    messages = await builder.build(
+        session,
+        agent_config,
+        current_user_message=None,
+        token_budget=6700,
+    )
+
+    assert tc.raw_response == huge
+    assert builder.last_untrimmed_tokens > 6700
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert messages[1]["content"] == "Give me the dashboard summary"
+
+    tool_msgs = [m for m in messages if m["role"] == "tool"]
+    assert len(tool_msgs) == 1
+    assert "Result not included:" in tool_msgs[0]["content"]
+    assert "[TC1] get_dashboard" in tool_msgs[0]["content"]
+    assert tool_msgs[0]["tool_call_id"] == "call-1"
+    assert huge not in tool_msgs[0]["content"]
+    assert TokenCounter.count_messages(messages, "gpt-4o") <= 6700
+
+
+@pytest.mark.asyncio
+async def test_builder_degraded_render_does_not_mutate_stored_raw_response():
+    """Degradation is render-time only; a later build with a summary uses it."""
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    agent_config = AgentConfig(
+        name="a",
+        llm=llm_config,
+        rcs=RuntimeContextSummarizerConfig(enabled=True),
+    )
+    builder = ContextWindowBuilder()
+    session = AgentSession(session_id="s", agent_id="a")
+    tc = ToolCallRecord(
+        tc_id="TC1",
+        tc_index=1,
+        tool_name="t",
+        tool_input={},
+        raw_response="HUGE" * 10_000,
+        tokens_raw=40_000,
+        call_id="call-1",
+    )
+    session.turns.append(
+        TurnRecord(
+            turn_index=0,
+            user_message="go",
+            llm_messages=[{"role": "assistant", "content": "running"}],
+            tool_calls=[tc],
+        )
+    )
+
+    await builder.build(session, agent_config, current_user_message=None, token_budget=6700)
+    assert tc.summarized_response is None
+    assert tc.raw_response.startswith("HUGE")
+
+    tc.summarized_response = "compact summary"
+    messages = await builder.build(
+        session, agent_config, current_user_message=None, token_budget=100_000
+    )
+    tool_msgs = [m for m in messages if m["role"] == "tool"]
+    assert tool_msgs[0]["content"] == "t()\ncompact summary"
+    assert "Result not included:" not in tool_msgs[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_builder_inserts_fallback_user_when_no_anchor():
+    """Tool-only history with no anchor gets FALLBACK_USER_MESSAGE after system."""
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    agent_config = AgentConfig(
+        name="a",
+        llm=llm_config,
+        rcs=RuntimeContextSummarizerConfig(enabled=True),
+    )
+    builder = ContextWindowBuilder()
+    session = AgentSession(session_id="s", agent_id="a")
+    tc = ToolCallRecord(
+        tc_id="TC1",
+        tc_index=1,
+        tool_name="t",
+        raw_response="ok",
+        call_id="call-1",
+    )
+    session.turns.append(
+        TurnRecord(
+            turn_index=0,
+            user_message=None,
+            llm_messages=[
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "t", "arguments": "{}"},
+                        }
+                    ],
+                }
+            ],
+            tool_calls=[tc],
+        )
+    )
+
+    messages = await builder.build(session, agent_config, current_user_message=None)
+    assert messages[0]["role"] == "system"
+    assert messages[1] == {"role": "user", "content": FALLBACK_USER_MESSAGE}
+    user_msgs = [m for m in messages if m["role"] == "user"]
+    assert len(user_msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_builder_does_not_duplicate_user_when_turn_survives():
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    agent_config = AgentConfig(
+        name="a",
+        llm=llm_config,
+        rcs=RuntimeContextSummarizerConfig(enabled=True),
+    )
+    builder = ContextWindowBuilder()
+    session = AgentSession(session_id="s", agent_id="a")
+    session.turns.append(
+        TurnRecord(
+            turn_index=0,
+            user_message="original question",
+            llm_messages=[{"role": "assistant", "content": "answer"}],
+        )
+    )
+
+    messages = await builder.build(
+        session, agent_config, current_user_message=None, token_budget=100_000
+    )
+    user_msgs = [m for m in messages if m["role"] == "user"]
+    assert len(user_msgs) == 1
+    assert user_msgs[0]["content"] == "original question"
+
+
+@pytest.mark.asyncio
+async def test_builder_last_untrimmed_tokens_reflects_pressure():
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    agent_config = AgentConfig(
+        name="a",
+        llm=llm_config,
+        rcs=RuntimeContextSummarizerConfig(enabled=True),
+    )
+    builder = ContextWindowBuilder()
+    session = AgentSession(session_id="s", agent_id="a")
+    tc = ToolCallRecord(
+        tc_id="TC1",
+        tc_index=1,
+        tool_name="t",
+        raw_response="z" * 20_000,
+        tokens_raw=20_000,
+    )
+    session.turns.append(
+        TurnRecord(
+            turn_index=0,
+            user_message="hi",
+            llm_messages=[{"role": "assistant", "content": "go"}],
+            tool_calls=[tc],
+        )
+    )
+
+    messages = await builder.build(session, agent_config, token_budget=10_400)
+    final_tokens = TokenCounter.count_messages(messages, "gpt-4o")
+    assert builder.last_untrimmed_tokens > final_tokens
+    assert builder.last_untrimmed_tokens > 10_400
+
+
+@pytest.mark.asyncio
+async def test_maybe_compact_uses_untrimmed_token_count():
+    """Compactor should_trigger sees pre-degradation size, not the trimmed list."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from nexus.runner.agent_runner import AgentRunner
+
+    llm_config = LLMProviderConfig(
+        provider="openai",
+        model="gpt-4o",
+        api_key="sk",
+        context_window_tokens=128_000,
+    )
+    agent_config = AgentConfig(
+        name="a",
+        llm=llm_config,
+        rcs=RuntimeContextSummarizerConfig(
+            enabled=True,
+            fallback_compactor=ServerCompactorConfig(enabled=True, trigger_token_threshold=1000),
+        ),
+    )
+    manager = SessionManager()
+    runner = AgentRunner(
+        config=agent_config,
+        tool_registry=MagicMock(),
+        storage_config=manager,
+    )
+
+    session = AgentSession(session_id="s", agent_id="a")
+    huge = "q" * 30_000
+    tc = ToolCallRecord(
+        tc_id="TC1",
+        tc_index=1,
+        tool_name="t",
+        raw_response=huge,
+        tokens_raw=30_000,
+    )
+    session.turns.append(
+        TurnRecord(
+            turn_index=0,
+            user_message="dashboard",
+            llm_messages=[{"role": "assistant", "content": "fetching"}],
+            tool_calls=[tc],
+        )
+    )
+
+    messages = await runner.ctx_builder.build(
+        session, agent_config, current_user_message=None, token_budget=400
+    )
+    runner.ctx_builder.last_untrimmed_tokens = 25_000
+
+    seen: list[int] = []
+
+    async def _should_trigger(_session, tokens):
+        seen.append(tokens)
+        return False
+
+    runner.compactor.should_trigger = _should_trigger
+    runner.compactor.compact = AsyncMock(return_value={"tokens_saved": 0})
+
+    await runner._maybe_compact_and_summarize(
+        session, messages, session_turn_index=1, current_user_message=None
+    )
+    assert seen == [25_000]

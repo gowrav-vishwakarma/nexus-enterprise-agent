@@ -66,7 +66,7 @@ In YAML orchestration, use `persona.prompt` + `prompt_args` instead of `system_p
 | `api_key` | No | `""` | Secret API key |
 | `base_url` | No | `None` | Custom endpoint (proxies, local servers) |
 | `api_version` | No | `None` | Provider-specific API version |
-| `context_window_tokens` | No | `128000` | Max context size for budgeting |
+| `context_window_tokens` | No | `128000` | Max context size for budgeting. When a build exceeds this, Nexus first tries RCS compaction, then replaces oversized raw tool bodies with a retry notice, and only then drops whole turns. A user query is always preserved in the final message list. |
 | `timeout` | No | `60` | Request timeout in seconds |
 | `max_retries` | No | `3` | Retry count on failure |
 | `retry_delay` | No | `1.0` | Seconds between retries |

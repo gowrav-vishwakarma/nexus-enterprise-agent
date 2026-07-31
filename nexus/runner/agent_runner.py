@@ -629,7 +629,8 @@ class AgentRunner:
         execution and surfaced via ``ContextUpdate.tokens_saved``.
         """
         model = self.config.llm.model
-        current_tokens = TokenCounter.count_messages(messages, model)
+        trimmed_tokens = TokenCounter.count_messages(messages, model)
+        current_tokens = max(trimmed_tokens, self.ctx_builder.last_untrimmed_tokens)
         context_window = self.config.llm.context_window_tokens
         compactor_tokens_saved = 0
 
@@ -640,7 +641,8 @@ class AgentRunner:
                 messages = await self._build_context_messages(
                     session, current_user_message=current_user_message
                 )
-                current_tokens = TokenCounter.count_messages(messages, model)
+                trimmed_tokens = TokenCounter.count_messages(messages, model)
+                current_tokens = max(trimmed_tokens, self.ctx_builder.last_untrimmed_tokens)
 
         if self.context_summarizer.should_trigger(
             session, current_tokens, context_window

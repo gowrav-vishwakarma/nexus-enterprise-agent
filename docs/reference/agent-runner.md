@@ -125,6 +125,18 @@ OpenAI tolerates two assistant messages in a row, but most other providers (Qwen
 1. Every tool call always renders a `tool` message, so an assistant message carrying `tool_calls` is always followed by the results answering it. RCS summarizes a result but never removes the step — see [RCS](agent-config.md#runtimecontextsummarizerconfig-rcs).
 2. As a backstop, `ContextWindowBuilder._coalesce_consecutive_assistants()` merges adjacent assistant messages, joining their text with a blank line. A message carrying `tool_calls` is never merged, because it is a discrete step that must stay paired with its call ids. This covers histories built from older or externally-converted sessions.
 
+## Context pressure
+
+When the assembled message list exceeds `llm.context_window_tokens`, `ContextWindowBuilder` applies pressure in this order:
+
+1. **RCS fallback compactor** — `AgentRunner._maybe_compact_and_summarize()` triggers on the *untrimmed* token count (before degradation), so a huge tool result gets a real summary instead of being lost.
+2. **Tool-body degradation** — the oldest unsummarized raw tool result is replaced at render time with a short notice telling the model to re-run with a narrower scope. The step stays in context (`tool_call_id` unchanged); `ToolCallRecord.raw_response` in storage is untouched.
+3. **Whole-turn drop** — only when every tool body has already been degraded and the list still does not fit.
+
+After budgeting, if no bare `user` message survived, the builder inserts the anchor user query (the current message, or the newest `turn.user_message`) immediately after the system message. That keeps Qwen-style chat templates happy during multi-step tool loops, where inner iterations rebuild context without re-appending the user text.
+
+See [agent-config.md](agent-config.md#llmproviderconfig) for `context_window_tokens`.
+
 ## AgentOrchestrator
 
 Same constructor args as `AgentRunner`, but `config` is `AgentGroupConfig`.
