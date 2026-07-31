@@ -36,6 +36,7 @@ _context_updates = []
 - Every `summary` must be real text. Never send an empty summary and never send `"[]"`
   as a summary — to summarize nothing, send the empty list shown above instead
 - A TC you do not summarize simply keeps its full result and stays available later
+- if you think you might need the same data again in the future, do not summarize it to save your future tool call to get same data again
 - You may summarize 0, some, or all tagged TCs each turn
 - Do NOT reference TCs from other sessions or groups
 
