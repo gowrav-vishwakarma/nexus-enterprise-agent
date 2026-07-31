@@ -152,7 +152,5 @@ class MemoryStorageAdapter(StorageAdapter):
                     if tc.tc_id == tc_id:
                         tc.summarized_response = summarized_response
                         tc.summarized_by_turn = summarized_by_turn
-                        if summarized_response == "[]":
-                            tc.is_dropped = True
                         session.updated_at = datetime.now()
                         return

@@ -119,7 +119,16 @@ See [context-summary.md](context-summary.md) for the full field table (`summariz
 
 ### RuntimeContextSummarizerConfig (RCS)
 
-RCS keeps long tool outputs from filling the context window. When enabled, every tool schema gets an extra `_context_updates` parameter. The LLM can pass summaries of old tool results through this parameter on its next tool call; the interceptor strips it before the tool runs (transparent to tool authors). Summarized results keep their tool signature but lose their `[TCn]` tag so they are not re-summarized. A `[]` sentinel drops a result entirely.
+RCS keeps long tool outputs from filling the context window. When enabled, every tool schema gets an extra `_context_updates` parameter. The LLM can pass summaries of old tool results through this parameter on its next tool call; the interceptor strips it before the tool runs (transparent to tool authors). Summarized results keep their tool signature but lose their `[TCn]` tag so they are not re-summarized.
+
+A tool call is **never removed** from the context. Each one has exactly two possible states:
+
+| State | Rendered as |
+|-------|-------------|
+| Not summarized | `[TCn] tool_name(args)` + the full raw response |
+| Summarized | `tool_name(args)` + the summary (no tag, so it is not re-summarized) |
+
+To summarize nothing on a given turn, the LLM sends an empty list (`_context_updates: []`) or omits the parameter. Every `summary` it does send must be non-empty text: a missing, null, empty, or `"[]"` summary is treated as "not summarized", leaving that result raw and still eligible on a later turn. Older versions used `"[]"` as a sentinel meaning "drop this result"; sessions stored that way now replay their full raw response.
 
 | Name | Required? | Default | What it does |
 |------|-----------|---------|--------------|
@@ -128,7 +137,6 @@ RCS keeps long tool outputs from filling the context window. When enabled, every
 | `tc_tag_include_tool_signature` | No | `True` | Include tool name + args in the tag prefix |
 | `context_updates_param_name` | No | `"_context_updates"` | Extra param injected into every tool schema |
 | `context_updates_param_description` | No | default | Description text for the injected param |
-| `empty_summary_sentinel` | No | `"[]"` | Value meaning "drop this result from context" |
 | `rcs_system_block` | No | default | RCS contract block appended to the system prompt |
 | `fallback_compactor.enabled` | No | `False` | Separate LLM call to summarize old results when context overflows |
 | `fallback_compactor.trigger_token_threshold` | No | `10000` | Token count that triggers the fallback compactor |
@@ -154,7 +162,7 @@ RCS tracks **two** savings metrics:
 | Metric | What it measures | Where it lives |
 |--------|-----------------|----------------|
 | `total_tokens_saved_by_rcs` | **One-time** compression savings — `tokens_raw - tokens_summarized` per TC, counted once at the moment the LLM summarizes it via `_context_updates`. | `AgentSession`, `AgentRunResult`, `AgentGroupResult` |
-| `cumulative_input_tokens_saved_by_rcs` | **Recurring** input-token savings — how many input tokens RCS saves *each turn* by having summarized/dropped TCs in context instead of their raw versions. A TC summarized in turn N saves input tokens in every subsequent turn that includes it, so this grows monotonically. | `AgentSession`, `AgentRunResult` (`cumulative_input_tokens_saved_by_rcs`), `AgentGroupResult` (`cumulative_tokens_saved_by_rcs`) |
+| `cumulative_input_tokens_saved_by_rcs` | **Recurring** input-token savings — how many input tokens RCS saves *each turn* by having summarized TCs in context instead of their raw versions. A TC summarized in turn N saves input tokens in every subsequent turn that includes it, so this grows monotonically. | `AgentSession`, `AgentRunResult` (`cumulative_input_tokens_saved_by_rcs`), `AgentGroupResult` (`cumulative_tokens_saved_by_rcs`) |
 
 **Why two metrics?** The one-time metric tells you how much each TC was compressed (e.g. "500-token result → 20-token summary"). The cumulative metric tells you the true cost impact: after N turns, the same summarized TC has saved input tokens N times (once per subsequent turn), so the real savings can be many times larger.
 

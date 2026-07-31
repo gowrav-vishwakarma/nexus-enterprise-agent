@@ -29,10 +29,6 @@ class ContextUpdate(BaseModel):
         "formula as session.total_tokens_saved_by_rcs.",
     )
 
-    def is_empty_sentinel(self) -> bool:
-        """Check if this is an empty sentinel (drop from context)."""
-        return self.summary == "[]"
-
 
 class PendingInteraction(BaseModel):
     """A paused client-tool or elicitation waiting for an external result."""
@@ -63,7 +59,9 @@ class ToolCallRecord(BaseModel):
     raw_response: str = Field(..., description="Original tool output")
     summarized_response: Optional[str] = Field(
         None,
-        description="Summarized by LLM via _context_updates. None=not yet, '[]'=dropped",
+        description="Summary of raw_response, set by the LLM via _context_updates or "
+        "by the fallback compactor. None or empty means not summarized, so the raw "
+        "response is used in context.",
     )
     summarized_by_turn: Optional[int] = Field(
         None, description="Turn that summarized this TC"
@@ -73,9 +71,6 @@ class ToolCallRecord(BaseModel):
         None, description="Token count after summary"
     )
     timestamp: datetime = Field(default_factory=datetime.now)
-    is_dropped: bool = Field(
-        default=False, description="True if summary is empty sentinel"
-    )
 
 
 class TurnRecord(BaseModel):
@@ -107,7 +102,7 @@ class TurnRecord(BaseModel):
     recurring_savings_this_turn: int = Field(
         default=0,
         description="Recurring input-token savings this turn: how many input tokens RCS saved "
-        "by having summarized/dropped TCs in context instead of their raw versions. "
+        "by having summarized TCs in context instead of their raw versions. "
         "Accumulates into session.cumulative_input_tokens_saved_by_rcs."
     )
     media_metadata: dict[str, Any] = Field(

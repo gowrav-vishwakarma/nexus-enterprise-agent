@@ -335,8 +335,9 @@ async def test_rcs_e2e_streaming():
 
 
 @pytest.mark.asyncio
-async def test_rcs_e2e_drop_sentinel():
-    """LLM passes summary='[]' to drop a TC; it must not appear in later tool messages."""
+async def test_rcs_e2e_legacy_sentinel_is_ignored():
+    """LLM passes the legacy summary='[]'; it is a no-op, so the TC keeps its full
+    result and stays available for a real summary later. Nothing is ever dropped."""
     from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
 
     llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-test")
@@ -380,13 +381,19 @@ async def test_rcs_e2e_drop_sentinel():
 
     sess = await manager.load_session("rcs-drop-sess")
     noise_tc = sess.turns[0].tool_calls[0]
-    assert noise_tc.is_dropped is True
-    assert noise_tc.summarized_response == "[]"
+    assert noise_tc.summarized_response is None
 
-    # Dropped TC must not appear in rebuilt context
+    # The result is still in context, tagged so it can be summarized on a later turn.
     messages = await ContextWindowBuilder().build(sess, agent_config)
     tool_contents = [m["content"] for m in messages if m.get("role") == "tool"]
-    assert not any("PANDAS COOKBOOK" in c for c in tool_contents)
+    assert any("PANDAS COOKBOOK" in c for c in tool_contents)
+    assert any("[TC1]" in c for c in tool_contents)
+
+    # Every requested tool_call is answered, so no two assistants end up adjacent.
+    roles = [m["role"] for m in messages]
+    assert not any(
+        roles[i] == "assistant" and roles[i + 1] == "assistant" for i in range(len(roles) - 1)
+    )
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ from nexus.config import AgentConfig, LLMProviderConfig, DEFAULT_RCS_SYSTEM_BLOC
 from nexus.config.rcs import RuntimeContextSummarizerConfig, ServerCompactorConfig
 from nexus.context.builder import ContextWindowBuilder
 from nexus.context.rcs_injector import RCSSystemPromptInjector
+from nexus.llm.content_tool_calls import EMPTY_ASSISTANT_PLACEHOLDER
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, ToolCallRecord, TurnRecord, ContextUpdate
 from nexus.tools.interceptor import ContextUpdateInterceptor
@@ -78,7 +79,6 @@ async def test_context_update_interceptor():
     target_tc = session.turns[0].tool_calls[0]
     assert target_tc.summarized_response == "Search summary"
     assert target_tc.summarized_by_turn == 1
-    assert target_tc.is_dropped is False
 
     # 2. Validation: cross-session / invalid TC ID reference ignored
     tool_input_invalid = {
@@ -99,7 +99,8 @@ async def test_context_update_interceptor():
 
 @pytest.mark.asyncio
 async def test_context_window_builder():
-    """Test message formatting cases (unsummarized tag, summarized plain, omitted dropped)."""
+    """Test message formatting: unsummarized keeps its tag, summarized loses it, and a
+    legacy "[]" summary falls back to the full raw response."""
     manager = SessionManager()
     llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key")
     agent_config = AgentConfig(
@@ -113,8 +114,7 @@ async def test_context_window_builder():
     # Create dummy session
     session = AgentSession(session_id="sess-1", agent_id="test-agent")
 
-    # Add tool calls representing Case 1, 2, and 3
-    # Case 1: Unsummarized
+    # Case 1: Not summarized
     tc_unsummarized = ToolCallRecord(
         tc_id="TC1",
         tc_index=1,
@@ -131,22 +131,21 @@ async def test_context_window_builder():
         raw_response="Original response...",
         summarized_response="Short summary",
     )
-    # Case 3: Dropped
-    tc_dropped = ToolCallRecord(
+    # Legacy "[]" sentinel written by an older version: counts as NOT summarized
+    tc_legacy_sentinel = ToolCallRecord(
         tc_id="TC3",
         tc_index=3,
         tool_name="tool_c",
         tool_input={},
         raw_response="Verbose error trace...",
         summarized_response="[]",
-        is_dropped=True,
     )
 
     turn = TurnRecord(
         turn_index=0,
         user_message="Find details",
         llm_messages=[{"role": "assistant", "content": "Let me run tools"}],
-        tool_calls=[tc_unsummarized, tc_summarized, tc_dropped],
+        tool_calls=[tc_unsummarized, tc_summarized, tc_legacy_sentinel],
     )
     session.turns.append(turn)
 
@@ -157,10 +156,9 @@ async def test_context_window_builder():
     assert messages[1]["role"] == "user"
     assert messages[1]["content"] == "Find details"
 
-    # 2. Verify rendering of Case 1: Unsummarized tag
+    # 2. Every tool call yields a tool message — nothing is ever omitted
     tool_messages = [m for m in messages if m["role"] == "tool"]
-    # TC1 and TC2 should yield messages, TC3 (dropped) should be omitted
-    assert len(tool_messages) == 2
+    assert len(tool_messages) == 3
 
     # Case 1 rendering: [TC1] tool_a(x=10)\nUnsummarized raw result
     assert "[TC1] tool_a(x=10)" in tool_messages[0]["content"]
@@ -170,39 +168,87 @@ async def test_context_window_builder():
     assert tool_messages[1]["content"] == "tool_b()\nShort summary"
     assert "[TC2]" not in tool_messages[1]["content"]
 
+    # Legacy "[]" renders the full raw response, tagged so it can be summarized later
+    assert "[TC3] tool_c()" in tool_messages[2]["content"]
+    assert "Verbose error trace..." in tool_messages[2]["content"]
+
 
 # =============================================================================
 # Interceptor: additional coverage
 # =============================================================================
 
 @pytest.mark.asyncio
-async def test_interceptor_empty_sentinel_drops_tc():
-    """summary == '[]' marks the TC as dropped and zero summarized tokens."""
+@pytest.mark.parametrize(
+    "update_item",
+    [
+        {"tc_id": "TC1", "summary": "[]"},
+        {"tc_id": "TC1", "summary": ""},
+        {"tc_id": "TC1", "summary": "   "},
+        {"tc_id": "TC1", "summary": None},
+        {"tc_id": "TC1"},
+    ],
+    ids=["sentinel", "empty", "whitespace", "null", "missing"],
+)
+async def test_interceptor_no_summary_leaves_tc_untouched(update_item):
+    """Every spelling of "no summary" is a no-op: the TC stays raw, never dropped."""
     manager = SessionManager()
-    session = await manager.create_session(agent_id="a", session_id="drop-sess")
+    session = await manager.create_session(agent_id="a", session_id="nosum-sess")
     tc = ToolCallRecord(tc_id="TC1", tc_index=1, tool_name="t", raw_response="big", tokens_raw=100)
-    await manager.append_turn("drop-sess", TurnRecord(turn_index=0, tool_calls=[tc]))
-    session = await manager.load_session("drop-sess")
+    await manager.append_turn("nosum-sess", TurnRecord(turn_index=0, tool_calls=[tc]))
+    session = await manager.load_session("nosum-sess")
 
     interceptor = ContextUpdateInterceptor()
     rcs = RuntimeContextSummarizerConfig(enabled=True)
 
     cleaned, updates = await interceptor.intercept(
         tool_name="t",
-        tool_input={"_context_updates": [{"tc_id": "TC1", "summary": "[]"}]},
+        tool_input={"_context_updates": [update_item]},
         session=session,
         current_turn_index=1,
         storage_adapter=manager,
         rcs_config=rcs,
     )
     assert cleaned == {}
-    assert len(updates) == 1
-    assert updates[0].tokens_saved == 100  # full raw saved when dropped
+    assert updates == []
 
-    session = await manager.load_session("drop-sess")
+    session = await manager.load_session("nosum-sess")
     target = session.turns[0].tool_calls[0]
-    assert target.is_dropped is True
-    assert target.tokens_summarized == 0
+    assert target.summarized_response is None
+    assert target.tokens_summarized is None
+
+
+@pytest.mark.asyncio
+async def test_builder_renders_raw_when_summary_is_empty():
+    """A stored empty summary must not blank out the result."""
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key")
+    agent_config = AgentConfig(
+        name="test-agent", llm=llm_config, rcs=RuntimeContextSummarizerConfig(enabled=True)
+    )
+    session = AgentSession(session_id="empty-sum", agent_id="test-agent")
+    session.turns.append(
+        TurnRecord(
+            turn_index=0,
+            user_message="go",
+            llm_messages=[{"role": "assistant", "content": "running"}],
+            tool_calls=[
+                ToolCallRecord(
+                    tc_id="TC1",
+                    tc_index=1,
+                    tool_name="tool_a",
+                    tool_input={},
+                    raw_response="THE REAL RESULT",
+                    summarized_response="",
+                )
+            ],
+        )
+    )
+
+    messages = await ContextWindowBuilder().build(session, agent_config)
+
+    tool_messages = [m for m in messages if m["role"] == "tool"]
+    assert len(tool_messages) == 1
+    assert "THE REAL RESULT" in tool_messages[0]["content"]
+    assert "[TC1] tool_a()" in tool_messages[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -389,7 +435,8 @@ async def test_compactor_should_trigger_thresholds():
 
 @pytest.mark.asyncio
 async def test_compactor_compact_with_mocked_llm():
-    """compact() summarizes oldest unsummarized TCs, sets is_dropped for [], persists."""
+    """compact() summarizes oldest unsummarized TCs and persists them. A TC whose
+    summary comes back unusable keeps its raw result instead of being discarded."""
     from nexus.rcs.compactor import ServerCompactor
     from nexus.llm.response import LLMResponse, TokenUsage
     from unittest.mock import AsyncMock, MagicMock
@@ -405,22 +452,21 @@ async def test_compactor_compact_with_mocked_llm():
     llm = MagicMock()
     llm.chat = AsyncMock(side_effect=[
         LLMResponse(content="summary1", usage=TokenUsage(), finish_reason="stop", raw_response={}),
-        LLMResponse(content="[]", usage=TokenUsage(), finish_reason="stop", raw_response={}),
+        LLMResponse(content="", usage=TokenUsage(), finish_reason="stop", raw_response={}),
     ])
     compactor = ServerCompactor(config=cfg, llm_proxy=llm, storage_adapter=manager)
 
     result = await compactor.compact(session, current_turn_index=1)
 
-    assert len(result["tcs_compacted"]) == 2
+    # Only the TC with a usable summary is compacted; the other is left alone.
+    assert result["tcs_compacted"] == ["TC1"]
     assert result["tokens_saved"] > 0
     assert session.total_tokens_saved_by_rcs == result["tokens_saved"]
 
     session = await manager.load_session("compact-sess")
     tcs = session.turns[0].tool_calls
     assert tcs[0].summarized_response == "summary1"
-    assert tcs[0].is_dropped is False
-    assert tcs[1].summarized_response == "[]"
-    assert tcs[1].is_dropped is True
+    assert tcs[1].summarized_response is None
 
 
 # =============================================================================
@@ -460,13 +506,17 @@ async def test_builder_custom_tag_format():
 
 
 @pytest.mark.asyncio
-async def test_builder_all_dropped_tool_calls_filtered_from_assistant():
-    """When all tool_calls in a turn are dropped, the assistant message is filtered."""
+async def test_builder_keeps_assistant_tool_calls_answered():
+    """Assistant tool_calls are always kept and always answered by a tool message.
+
+    Legacy sessions stored a "[]" summary to mean "dropped". Those must now replay
+    intact rather than having the tool_call stripped out of the assistant message.
+    """
     llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
     agent_config = AgentConfig(name="a", llm=llm_config, rcs=RuntimeContextSummarizerConfig(enabled=True))
     builder = ContextWindowBuilder()
     session = AgentSession(session_id="s", agent_id="a")
-    tc = ToolCallRecord(tc_id="TC1", tc_index=1, tool_name="t", tool_input={}, raw_response="r", summarized_response="[]", is_dropped=True)
+    tc = ToolCallRecord(tc_id="TC1", tc_index=1, tool_name="t", tool_input={}, raw_response="r", summarized_response="[]")
     session.turns.append(TurnRecord(
         turn_index=0,
         user_message="hi",
@@ -474,11 +524,70 @@ async def test_builder_all_dropped_tool_calls_filtered_from_assistant():
         tool_calls=[tc],
     ))
     messages = await builder.build(session, agent_config, current_user_message="next")
-    assistant_msgs = [m for m in messages if m["role"] == "assistant"]
-    # The dropped tool_call should be filtered from the assistant message
-    for m in assistant_msgs:
-        if m.get("tool_calls"):
-            assert all(tc_call.get("id") != "TC1" for tc_call in m["tool_calls"])
+
+    requested_ids = {
+        c["id"]
+        for m in messages
+        if m["role"] == "assistant"
+        for c in (m.get("tool_calls") or [])
+    }
+    answered_ids = {m["tool_call_id"] for m in messages if m["role"] == "tool"}
+    assert requested_ids == {"TC1"}
+    assert requested_ids == answered_ids
+
+
+@pytest.mark.asyncio
+async def test_builder_never_has_consecutive_assistant_messages():
+    """Several summarized tool turns in a row must not leave adjacent assistants."""
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
+    agent_config = AgentConfig(name="a", llm=llm_config, rcs=RuntimeContextSummarizerConfig(enabled=True))
+    builder = ContextWindowBuilder()
+    session = AgentSession(session_id="s", agent_id="a")
+    for i in range(3):
+        session.turns.append(TurnRecord(
+            turn_index=i,
+            user_message="hi" if i == 0 else None,
+            llm_messages=[{
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": f"call-{i}", "type": "function", "function": {"name": "t", "arguments": "{}"}}],
+            }],
+            tool_calls=[ToolCallRecord(
+                tc_id=f"TC{i}", tc_index=i, tool_name="t", tool_input={},
+                raw_response="r" * 200, call_id=f"call-{i}", summarized_response="[]",
+            )],
+        ))
+
+    messages = await builder.build(session, agent_config, current_user_message="next")
+
+    roles = [m["role"] for m in messages]
+    assert not any(
+        roles[i] == "assistant" and roles[i + 1] == "assistant" for i in range(len(roles) - 1)
+    )
+    assert messages[-1]["role"] == "user"
+    assert not any(EMPTY_ASSISTANT_PLACEHOLDER in (m.get("content") or "") for m in messages)
+
+
+def test_coalesce_consecutive_assistants_merges_text_only():
+    """Adjacent plain assistants merge; a tool_calls-bearing assistant never does."""
+    coalesce = ContextWindowBuilder._coalesce_consecutive_assistants
+
+    merged = coalesce([
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ])
+    assert [m["role"] for m in merged] == ["user", "assistant"]
+    assert merged[-1]["content"] == "first\n\nsecond"
+
+    tool_call = {"id": "c1", "type": "function", "function": {"name": "t", "arguments": "{}"}}
+    untouched = coalesce([
+        {"role": "assistant", "content": "text", "tool_calls": [tool_call]},
+        {"role": "tool", "tool_call_id": "c1", "content": "res"},
+        {"role": "assistant", "content": "after"},
+    ])
+    assert len(untouched) == 3
+    assert untouched[0]["tool_calls"] == [tool_call]
 
 
 @pytest.mark.asyncio
@@ -520,7 +629,7 @@ async def test_token_accounting_consistency():
         tool_name="t1",
         tool_input={"_context_updates": [
             {"tc_id": "TC1", "summary": "s1"},
-            {"tc_id": "TC2", "summary": "[]"},
+            {"tc_id": "TC2", "summary": "s2"},
         ]},
         session=session, current_turn_index=1, storage_adapter=manager, rcs_config=rcs,
     )
@@ -536,7 +645,7 @@ async def test_token_accounting_consistency():
 
 @pytest.mark.asyncio
 async def test_count_rcs_savings_zero_when_nothing_summarized():
-    """No summarized/dropped TCs → zero recurring savings."""
+    """No summarized TCs → zero recurring savings."""
     llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
     agent_config = AgentConfig(name="a", llm=llm_config, rcs=RuntimeContextSummarizerConfig(enabled=True))
     builder = ContextWindowBuilder()
@@ -570,15 +679,16 @@ async def test_count_rcs_savings_positive_when_summarized():
 
 
 @pytest.mark.asyncio
-async def test_count_rcs_savings_dropped_tc():
-    """Dropped TC that would have been in context → full raw tokens as savings."""
+async def test_count_rcs_savings_zero_for_legacy_sentinel():
+    """A legacy "[]" summary is not a summary, so it yields no savings — its full
+    raw response is back in context."""
     llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk")
     agent_config = AgentConfig(name="a", llm=llm_config, rcs=RuntimeContextSummarizerConfig(enabled=True))
     builder = ContextWindowBuilder()
     session = AgentSession(session_id="s", agent_id="a")
     tc = ToolCallRecord(
         tc_id="TC1", tc_index=1, tool_name="t", tool_input={"q": "x"},
-        raw_response="A" * 500, call_id="call-1", summarized_response="[]", is_dropped=True,
+        raw_response="A" * 500, call_id="call-1", summarized_response="[]",
     )
     session.turns.append(TurnRecord(
         turn_index=0, user_message="hi",
@@ -587,8 +697,7 @@ async def test_count_rcs_savings_dropped_tc():
     ))
     messages = await builder.build(session, agent_config, current_user_message="next")
     savings = builder.count_rcs_savings(messages, session, agent_config)
-    # Dropped TC's full raw rendering is the savings
-    assert savings > 0
+    assert savings == 0
 
 
 @pytest.mark.asyncio

@@ -101,16 +101,21 @@ class ServerCompactor:
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=self.config.max_tokens_per_summary or 150,
                 )
-                summary = response.content.strip() if response.content else "[]"
+                summary = response.content.strip() if response.content else ""
             except Exception as e:
                 logger.error("ServerCompactor: LLM summarization failed for %s: %s", tc.tc_id, e)
+                continue
+
+            # No usable summary: keep the raw result rather than losing the step.
+            if not summary or summary == "[]":
+                logger.warning(
+                    "ServerCompactor: empty summary for %s, keeping raw result", tc.tc_id
+                )
                 continue
 
             # Update TC record
             tc.summarized_response = summary
             tc.summarized_by_turn = current_turn_index
-            if summary == "[]":
-                tc.is_dropped = True
 
             # Save atomically to storage
             try:
@@ -126,7 +131,7 @@ class ServerCompactor:
                 logger.error("ServerCompactor: Failed to save summary to storage: %s", e)
 
             # Count savings (single token-count call, consistent with interceptor)
-            summary_tokens = TokenCounter.count_string(summary) if not tc.is_dropped else 0
+            summary_tokens = TokenCounter.count_string(summary)
             saved = max(0, tc.tokens_raw - summary_tokens)
             tc.tokens_summarized = summary_tokens
             session.total_tokens_saved_by_rcs += saved

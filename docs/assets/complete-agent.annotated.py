@@ -74,7 +74,6 @@ def build_agent_config() -> AgentConfig:
             tc_tag_format="[TC{n}]",                   # optional, default: "[TC{n}]"
             tc_tag_include_tool_signature=True,         # optional, default: True
             context_updates_param_name="_context_updates",  # optional, default: "_context_updates"
-            empty_summary_sentinel="[]",                # optional, default: "[]"
             fallback_compactor=ServerCompactorConfig(
                 enabled=False,                          # optional, default: False
                 trigger_token_threshold=10000,          # optional, default: 10000

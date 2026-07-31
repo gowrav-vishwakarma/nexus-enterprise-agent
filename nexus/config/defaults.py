@@ -11,9 +11,11 @@ This parameter allows you to compress historical tool results to save context wi
 1. Tool results in your context may be tagged with `[TC{n}]` (e.g., `[TC1]`, `[TC2]`)
 2. These tags indicate results that have NOT yet been summarized
 3. When calling your next tool, you CAN include `_context_updates` to summarize old TCs
-4. Pass an empty list `[]` if you don't want to summarize anything this turn
+4. Pass an empty list if you don't want to summarize anything this turn
 
 ### Format:
+
+To summarize two earlier results:
 
 ```
 _context_updates = [
@@ -22,10 +24,18 @@ _context_updates = [
 ]
 ```
 
+To summarize nothing this turn, send an empty list (or omit the parameter):
+
+```
+_context_updates = []
+```
+
 ### Rules:
 - Only summarize TCs that are tagged with `[TC{n}]` in your current context
 - Summaries should be CONCISE but preserve KEY information (numbers, names, URLs, code snippets)
-- If a TC result is empty or not useful, pass `"[]"` (empty sentinel) to drop it from context
+- Every `summary` must be real text. Never send an empty summary and never send `"[]"`
+  as a summary — to summarize nothing, send the empty list shown above instead
+- A TC you do not summarize simply keeps its full result and stays available later
 - You may summarize 0, some, or all tagged TCs each turn
 - Do NOT reference TCs from other sessions or groups
 
@@ -46,7 +56,8 @@ The agent has not yet compressed this result and the context window is at risk o
 
 Your job: Write a 1-3 sentence factual summary of the most important information in the result.
 Focus on facts that an agent would need to reference later.
-If the result contains nothing useful (errors, empty responses, irrelevant data), output exactly: []
+Always produce a summary. If the result is an error or is mostly empty, say so briefly
+(e.g. "Request failed: timeout") rather than returning nothing.
 
 Tool: {tool_name}
 Input: {tool_input}
@@ -55,7 +66,7 @@ Result:
 {raw_response}
 ---
 
-Compact summary (or []):"""
+Compact summary:"""
 
 # Default system prompt template (Jinja2)
 DEFAULT_SYSTEM_TEMPLATE = """You are {{ persona.role }}.
@@ -143,5 +154,6 @@ Updated summary:"""
 # Default tool call schema description for RCS
 DEFAULT_CONTEXT_UPDATES_PARAM_DESC = """_context_updates (list of dict, optional): Context compression updates for previous tool call results.
 Each dict has: {"tc_id": "TC{n}", "summary": "brief summary"}.
-Pass [] if no compression needed. Only summarize TCs tagged with [TC{n}] in your context.
+Every summary must be non-empty text. Pass [] if no compression is needed this turn.
+Only summarize TCs tagged with [TC{n}] in your context.
 This is OPTIONAL - include it to compress historical tool results and save context space."""

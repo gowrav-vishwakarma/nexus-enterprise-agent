@@ -41,33 +41,80 @@ class ContextWindowBuilder:
         )
         return f"{tc.tool_name}({args_str})"
 
-    def _render_tool_message(self, tc: ToolCallRecord, rcs_enabled: bool, tc_tag_format: str, include_signature: bool) -> Optional[str]:
+    @staticmethod
+    def _summary_text(tc: ToolCallRecord) -> str:
+        """Return the usable summary for a TC, or ``""`` when it has none.
+
+        A missing, empty, whitespace-only, or legacy ``"[]"`` value all mean the
+        same thing: this tool call is simply not summarized, so its full raw
+        response is used. ``"[]"`` was written by older versions to mark a
+        result as dropped; it is now treated as "no summary".
+        """
+        summary = (tc.summarized_response or "").strip()
+        return "" if summary == "[]" else summary
+
+    @staticmethod
+    def _coalesce_consecutive_assistants(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Merge adjacent assistant messages into one.
+
+        Strict-alternation providers (Qwen, GLM, Kimi, Ollama) reject two
+        assistant messages in a row, unlike OpenAI which tolerates it. A message
+        carrying ``tool_calls`` is never merged: it is a discrete step that must
+        stay paired with the ``tool`` messages answering its call ids.
+        """
+        out: list[dict[str, Any]] = []
+        for msg in messages:
+            prev = out[-1] if out else None
+            mergeable = (
+                prev is not None
+                and prev.get("role") == "assistant"
+                and msg.get("role") == "assistant"
+                and not prev.get("tool_calls")
+                and not msg.get("tool_calls")
+                and isinstance(prev.get("content"), str)
+                and isinstance(msg.get("content"), str)
+            )
+            if not mergeable:
+                out.append(msg)
+                continue
+
+            joined = "\n\n".join(
+                part for part in (prev["content"].strip(), msg["content"].strip()) if part
+            )
+            out[-1] = {**prev, "content": joined or prev["content"]}
+        return out
+
+    def _render_tool_message(self, tc: ToolCallRecord, rcs_enabled: bool, tc_tag_format: str, include_signature: bool) -> str:
         """Render a tool result message according to its RCS status.
 
-        Returns None if the tool call is dropped.
+        A tool call always yields a tool message: RCS replaces the result body
+        with a summary, it never removes the step.
 
         Rendering rules:
-        - Dropped (``is_dropped`` or summary == ``"[]"``): omitted entirely.
         - Summarized: keep the tool signature (``tool_name(args)``) so the LLM
           knows what was called and with what params, but DROP the ``[TCn]`` tag
           so the result is not eligible for re-summarization in a later turn.
           The summary text replaces the raw response.
-        - Unsummarized with RCS on: prefix with ``[TCn]`` tag (and signature when
+        - Not summarized, RCS on: prefix with ``[TCn]`` tag (and signature when
           configured) so the LLM can target it via ``_context_updates``.
         - RCS off: raw response only.
-        """
-        # Case 3: Dropped
-        if tc.is_dropped or tc.summarized_response == "[]":
-            return None
 
-        # Case 2: Summarized — signature kept, [TCn] tag intentionally dropped
-        if tc.summarized_response is not None:
+        An empty, whitespace-only, or legacy ``"[]"`` summary counts as *not
+        summarized*, so the full raw response is rendered with its tag. That
+        keeps sessions written by older versions readable.
+        """
+        summary = self._summary_text(tc)
+
+        # Summarized — signature kept, [TCn] tag intentionally dropped
+        if summary:
             signature = self._format_tool_signature(tc, include_signature)
             if signature:
-                return f"{signature}\n{tc.summarized_response}"
-            return tc.summarized_response
+                return f"{signature}\n{summary}"
+            return summary
 
-        # Case 1: Unsummarized
+        # Not summarized
         if rcs_enabled:
             tag = tc_tag_format.format(n=tc.tc_index)
             signature = self._format_tool_signature(tc, include_signature)
@@ -156,51 +203,10 @@ class ContextWindowBuilder:
             if turn.user_message:
                 turn_messages.append({"role": "user", "content": turn.user_message})
 
-            # We need to match LLM messages (assistant) and Tool Call messages (tool)
-            # and render/prune them based on dropped/summarized TCs.
-            dropped_tc_ids = set()
-            for tc in turn.tool_calls:
-                if tc.is_dropped or tc.summarized_response == "[]":
-                    dropped_tc_ids.add(tc.tc_id)
-
-            # Process LLM messages
+            # Process LLM messages. Every tool call renders a tool message below,
+            # so assistant tool_calls are always answered and need no filtering.
             for msg in turn.llm_messages:
                 msg_copy = copy.deepcopy(msg)
-                
-                # If there are tool calls inside assistant message, we strip the ones that are dropped
-                if msg_copy.get("role") == "assistant" and msg_copy.get("tool_calls"):
-                    filtered_calls = []
-                    for tc_call in msg_copy["tool_calls"]:
-                        tc_id = tc_call.get("id")
-                        # Match by id or index if needed
-                        # In turn records, tool_calls has ToolCallRecord.
-                        # Let's see: we can match by comparing tool name / input if ID isn't a direct match
-                        # But typically the ID is the tool call ID returned by LLM.
-                        
-                        # Find corresponding ToolCallRecord
-                        matching_tc = None
-                        for record in turn.tool_calls:
-                            # We can check record.tc_index or we can store the raw LLM tool call ID
-                            # Let's see: if we matched the TC index, we can identify it.
-                            # Usually, TurnRecord.tool_calls is populated sequentially.
-                            pass
-
-                        # If this tool call was dropped, we filter it out of the assistant message to keep provider APIs happy
-                        # We also filter out corresponding 'tool' message.
-                        # To map raw LLM tool_call IDs to our internal TC1, TC2, etc:
-                        # Let's map sequentially for this turn.
-                        tc_index_in_turn = msg_copy["tool_calls"].index(tc_call)
-                        if tc_index_in_turn < len(turn.tool_calls):
-                            record = turn.tool_calls[tc_index_in_turn]
-                            if record.tc_id in dropped_tc_ids:
-                                continue
-                        
-                        filtered_calls.append(tc_call)
-                    
-                    msg_copy["tool_calls"] = filtered_calls
-                    if not msg_copy["tool_calls"] and not msg_copy.get("content"):
-                        msg_copy.pop("tool_calls", None)
-                        msg_copy["content"] = EMPTY_ASSISTANT_PLACEHOLDER
 
                 if msg_copy.get("role") == "assistant":
                     msg_copy = sanitize_assistant_llm_message(
@@ -218,9 +224,6 @@ class ContextWindowBuilder:
                     tc_tag_format=tc_tag_format,
                     include_signature=include_signature,
                 )
-                if content is None:
-                    # Dropped
-                    continue
 
                 # Find the matching tool_call_id from turn's assistant messages
                 # To align with LLM tool call requirements
@@ -273,13 +276,16 @@ class ContextWindowBuilder:
         for t_msgs in history_turns:
             flat_history.extend(t_msgs)
 
-        final_messages = [system_message] + flat_history + current_messages
+        final_messages = self._coalesce_consecutive_assistants(
+            [system_message] + flat_history + current_messages
+        )
 
         # Emit observability event (awaited so it is not silently lost)
         if self.event_emitter:
             from nexus.events.models import RCSContextBuiltEvent
-            tc_tags_count = sum(1 for turn in session.turns for tc in turn.tool_calls if tc.summarized_response is None)
-            tc_summarized_count = sum(1 for turn in session.turns for tc in turn.tool_calls if tc.summarized_response is not None)
+            all_tcs = [tc for turn in session.turns for tc in turn.tool_calls]
+            tc_summarized_count = sum(1 for tc in all_tcs if self._summary_text(tc))
+            tc_tags_count = len(all_tcs) - tc_summarized_count
             await self.event_emitter.emit(
                 RCSContextBuiltEvent(
                     session_id=session.session_id,
@@ -301,18 +307,13 @@ class ContextWindowBuilder:
     ) -> int:
         """Compute the recurring input-token savings from RCS for the given context.
 
-        For each tool message in ``messages`` that corresponds to a summarized
-        or dropped TC, compute what the message WOULD have been if RCS had not
-        applied (raw rendering with tag + signature + raw_response), and return
-        the total token difference.
+        For each tool message in ``messages`` whose TC has been summarized,
+        compute what the message WOULD have been without RCS (raw rendering with
+        tag + signature + raw_response) and return the total token difference.
 
-        Dropped TCs are absent from ``messages`` entirely; their savings are
-        counted by checking whether other messages from the same turn are
-        present (meaning the turn survived the sliding-window pruning).
-
-        This gives the true recurring savings for the current turn — the
-        input tokens saved by having summaries/drops instead of raw results
-        in context. The runner accumulates this across turns into
+        This gives the true recurring savings for the current turn — the input
+        tokens saved by having summaries instead of raw results in context. The
+        runner accumulates this across turns into
         ``session.cumulative_input_tokens_saved_by_rcs``.
         """
         if not agent_config.rcs.enabled:
@@ -329,21 +330,8 @@ class ContextWindowBuilder:
                 if tc.call_id:
                     tc_by_call_id[tc.call_id] = tc
 
-        # Collect tool_call_ids present in the built messages
-        present_call_ids: set[str] = set()
-        # Also collect which turn indices are represented (by user message content)
-        present_user_messages: set[str] = set()
-        for msg in messages:
-            if msg.get("role") == "tool":
-                cid = msg.get("tool_call_id")
-                if cid:
-                    present_call_ids.add(cid)
-            if msg.get("role") == "user":
-                present_user_messages.add(msg.get("content", ""))
-
         total_savings = 0
 
-        # 1. Summarized TCs that are in context: compute raw-vs-summarized delta
         for msg in messages:
             if msg.get("role") != "tool":
                 continue
@@ -351,7 +339,7 @@ class ContextWindowBuilder:
             tc = tc_by_call_id.get(call_id) if call_id else None
             if tc is None:
                 continue
-            if tc.summarized_response is None or tc.is_dropped:
+            if not self._summary_text(tc):
                 continue
 
             actual_content = msg.get("content") or ""
@@ -364,31 +352,5 @@ class ContextWindowBuilder:
             counterfactual_tokens = TokenCounter.count_string(counterfactual_content, model)
 
             total_savings += max(0, counterfactual_tokens - actual_tokens)
-
-        # 2. Dropped TCs: absent from messages, but would have been present without RCS.
-        # Count their full raw rendering as savings if their turn is in context.
-        for turn in session.turns:
-            # Check if this turn is in context: its user message or any of its
-            # tool messages are present in the built messages.
-            turn_in_context = False
-            if turn.user_message and turn.user_message in present_user_messages:
-                turn_in_context = True
-            for tc in turn.tool_calls:
-                if tc.call_id and tc.call_id in present_call_ids:
-                    turn_in_context = True
-                    break
-            if not turn_in_context:
-                continue
-
-            for tc in turn.tool_calls:
-                if not tc.is_dropped and tc.summarized_response != "[]":
-                    continue
-                # Dropped TC: full raw rendering is the savings
-                tag = tc_tag_format.format(n=tc.tc_index)
-                signature = self._format_tool_signature(tc, include_signature)
-                counterfactual_prefix = f"{tag} {signature}\n" if signature else f"{tag}\n"
-                counterfactual_content = f"{counterfactual_prefix}{tc.raw_response}"
-                counterfactual_tokens = TokenCounter.count_string(counterfactual_content, model)
-                total_savings += counterfactual_tokens
 
         return total_savings

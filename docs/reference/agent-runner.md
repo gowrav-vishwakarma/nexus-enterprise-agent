@@ -118,6 +118,13 @@ Assistant turns persisted to the session are normalized with `build_assistant_ll
 
 LiteLLM’s `modify_params` message sanitization is **Anthropic-only** today; do not rely on it for `openai/*` proxy routes.
 
+## Message role alternation
+
+OpenAI tolerates two assistant messages in a row, but most other providers (Qwen, GLM, Kimi, Ollama) reject it with `Cannot have 2 or more assistant messages at the end of the list`. Two rules keep replayed history safe:
+
+1. Every tool call always renders a `tool` message, so an assistant message carrying `tool_calls` is always followed by the results answering it. RCS summarizes a result but never removes the step — see [RCS](agent-config.md#runtimecontextsummarizerconfig-rcs).
+2. As a backstop, `ContextWindowBuilder._coalesce_consecutive_assistants()` merges adjacent assistant messages, joining their text with a blank line. A message carrying `tool_calls` is never merged, because it is a discrete step that must stay paired with its call ids. This covers histories built from older or externally-converted sessions.
+
 ## AgentOrchestrator
 
 Same constructor args as `AgentRunner`, but `config` is `AgentGroupConfig`.

@@ -111,7 +111,7 @@ def _print_turn_accounting(session: Any, agent_config: AgentConfig, turn_index: 
         print(
             f"    {tc.tc_id} {tc.tool_name}  "
             f"raw={tc.tokens_raw}  summarized={tc.tokens_summarized}  "
-            f"dropped={tc.is_dropped}  summary={tc.summarized_response!r}"
+            f"summary={tc.summarized_response!r}"
         )
     print(f"  running session.total_tokens_saved_by_rcs = {session.total_tokens_saved_by_rcs}")
     print(f"  running session.cumulative_input_tokens_saved_by_rcs = {session.cumulative_input_tokens_saved_by_rcs}")

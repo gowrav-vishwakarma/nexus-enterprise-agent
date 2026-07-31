@@ -58,10 +58,6 @@ class RuntimeContextSummarizerConfig(BaseModel):
         default="",
         description="Description for the _context_updates param (empty = use default)",
     )
-    empty_summary_sentinel: str = Field(
-        default="[]",
-        description="Sentinel value meaning 'this TC result is useless, drop it from context'",
-    )
 
     # System Prompt Injection
     rcs_system_block: str = Field(

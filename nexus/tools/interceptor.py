@@ -42,14 +42,14 @@ class ContextUpdateInterceptor:
             if not isinstance(item, dict):
                 continue
             
-            tc_id = item.get("tc_id")
-            summary = item.get("summary")
-            
-            if not tc_id or summary is None:
-                continue
+            tc_id = (item.get("tc_id") or "").strip()
+            summary = (item.get("summary") or "").strip()
 
-            tc_id = tc_id.strip()
-            summary = summary.strip()
+            # No summary supplied (missing, null, empty, or the legacy "[]"
+            # sentinel): the TC is simply not summarized. It keeps its raw
+            # response and [TCn] tag and stays eligible on a later turn.
+            if not tc_id or not summary or summary == "[]":
+                continue
 
             # Security: Validate TC ID belongs to current session turns
             target_tc: Optional[ToolCallRecord] = None
@@ -80,8 +80,6 @@ class ContextUpdateInterceptor:
             # Update in-memory session object for consistency in the current run loop
             target_tc.summarized_response = summary
             target_tc.summarized_by_turn = current_turn_index
-            if summary == rcs_config.empty_summary_sentinel or summary == "":
-                target_tc.is_dropped = True
 
             # 3. Save atomically to storage
             try:
@@ -106,7 +104,7 @@ class ContextUpdateInterceptor:
                 if target_tc.tokens_summarized is not None
                 else target_tc.tokens_raw
             )
-            new_tokens = TokenCounter.count_string(summary) if not target_tc.is_dropped else 0
+            new_tokens = TokenCounter.count_string(summary)
             target_tc.tokens_summarized = new_tokens
 
             saved = max(0, old_tokens - new_tokens)

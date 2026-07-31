@@ -315,8 +315,6 @@ class FileStorageAdapter(StorageAdapter):
                     if tc.tc_id == tc_id:
                         tc.summarized_response = summarized_response
                         tc.summarized_by_turn = summarized_by_turn
-                        if summarized_response == "[]":
-                            tc.is_dropped = True
                         session.update_timestamp()
                         await self.save_session(session)
                         return

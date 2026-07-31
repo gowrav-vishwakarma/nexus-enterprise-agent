@@ -88,14 +88,14 @@ async def test_sqlite_update_tc_summary():
         updated_tc = loaded.turns[0].tool_calls[0]
         assert updated_tc.summarized_response == "short summary"
         assert updated_tc.summarized_by_turn == 1
-        assert updated_tc.is_dropped is False
 
         await manager.update_tc_summary(
-            "sq-3", "TC1", "[]", summarized_by_turn=2,
+            "sq-3", "TC1", "a newer summary", summarized_by_turn=2,
             scope=scope,
         )
         loaded = await manager.load_session("sq-3", scope=scope)
-        assert loaded.turns[0].tool_calls[0].is_dropped is True
+        assert loaded.turns[0].tool_calls[0].summarized_response == "a newer summary"
+        assert loaded.turns[0].tool_calls[0].summarized_by_turn == 2
 
 
 @pytest.mark.asyncio
