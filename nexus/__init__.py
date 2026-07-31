@@ -66,7 +66,7 @@ from nexus.multiagent.results import AgentGroupResult
 from nexus.orchestration import OrchestrationManifest, OrchestrationRuntime
 from nexus.events import EventEmitted, NexusEventEmitter, NexusEventType, NexusEvent
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 __all__ = [
     # Version
