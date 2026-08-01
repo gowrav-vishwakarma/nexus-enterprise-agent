@@ -9,8 +9,10 @@
 - **OrchestrationRuntime** — Loads a YAML manifest and creates the right executor (runner or orchestrator).
 - **Blocking** — `run()` waits and returns a full result object.
 - **Streaming** — `run_stream()` yields events as the LLM generates text.
-- **SessionScope** — Tenant / company / user filter for storage load/save (from `RunContext.to_scope()`).
+- **SessionScope** — Ownership filter for storage load/save (from `RunContext.to_scope()`). Not the chat thread id.
 - **Resume** — Continue a paused run after client tools or elicitations return.
+
+How `RunContext`, `SessionScope`, `storage_config`, and `cross_session_memory_store` differ: [Four objects people mix up](../architecture.md#four-objects-people-mix-up).
 
 ## AgentRunner constructor
 
@@ -18,17 +20,17 @@
 |------|-----------|---------|--------------|
 | `config` | Yes | — | `AgentConfig` for this agent |
 | `tool_registry` | Yes | — | Registered tools the LLM can call |
-| `storage_config` | No | in-memory | `SessionStorageConfig` or `SessionManager` |
+| `storage_config` | No | in-memory | Wires chat-history persistence: `SessionStorageConfig` or a ready `SessionManager` (not the adapter itself) |
 | `run_context` | No | empty `RunContext()` | Customer, user, chat id for this call |
 | `event_emitter` | No | new `NexusEventEmitter` | Observability event hook |
-| `cross_session_memory_store` | No | `None` | Store for facts across chat threads |
+| `cross_session_memory_store` | No | `None` | Live store for user facts across chat threads (separate from chat JSON) |
 | `on_turn_end` | No | `None` | Async hook after each persisted turn; may return `TurnDecision` to stop or inject a message |
 
 Storage resolution order: `storage_config` on runner → `config.storage` → in-memory.
 
 ## SessionScope wiring
 
-Every load / append / save passes a scope built from the current `RunContext` (`tenant_id`, `company_id`, `user_id`). You do not pass scope into `run()` yourself — set identity on `RunContext` before constructing or updating the runner.
+Every load / append / save passes a scope built from the current `RunContext` (`tenant_id`, `company_id`, `user_id`). Scope is the ownership filter — “whose rows may I touch?” — not which chat thread. The chat thread id is `session_id`. You do not pass scope into `run()` yourself — set identity on `RunContext` before constructing or updating the runner.
 
 ```python
 ctx = RunContext(tenant_id="acme", company_id="co-1", user_id="u-42")

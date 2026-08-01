@@ -10,7 +10,7 @@
 - **Session** — One chat thread (conversation). Same as **chat thread id**.
 - **Metadata** — Extra key/value data your tools can read.
 - **Service registry** — Private handles (DB pools, HTTP clients) on `RunContext` that are never serialized.
-- **SessionScope** — The tenant / company / user filter used by storage and stores. Built with `to_scope()`.
+- **SessionScope** — Ownership filter (tenant / company / user) for chat-history load/list/delete. Built with `to_scope()`. Not the chat thread id (`session_id`). See [Four objects people mix up](../architecture.md#four-objects-people-mix-up).
 
 ## RunContext fields
 
@@ -50,7 +50,7 @@ Services (database pools, HTTP clients, feature flags) live in a private dict. T
 | `service(key, default=None)` | No | — | Look up one registered service |
 | `with_service(key, value)` | No | — | Register one service; returns `self` for chaining |
 | `bind_services(**services)` | No | — | Register many services at once; returns `self` |
-| `to_scope()` | No | — | Build a `SessionScope` from `tenant_id` / `company_id` / `user_id` |
+| `to_scope()` | No | — | Build a `SessionScope` ownership filter from `tenant_id` / `company_id` / `user_id` (not the chat id) |
 
 ```python
 from nexus import RunContext

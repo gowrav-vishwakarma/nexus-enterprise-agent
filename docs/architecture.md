@@ -8,7 +8,7 @@
 - **Run context** (`RunContext`) — Describes this specific call: which customer, which user, which chat thread.
 - **Runner** (`AgentRunner`) — Runs one agent. You pass config, tools, storage, and run context into it.
 - **Orchestrator** (`AgentOrchestrator`) — Runs a team of agents in a pattern (supervisor or pipeline).
-- **Storage config** — Tells Nexus where to save chat history on disk or in a database.
+- **Storage config** (`storage_config`) — Wires where chat history JSON is saved: a `SessionStorageConfig` or a ready `SessionManager`.
 - **Tool registry** — A catalog of tools the LLM can call. You register tools here before running.
 
 ## One rule
@@ -54,6 +54,40 @@ flowchart TB
   crossStore --> crossMem
   Orchestrator --> Runner
 ```
+
+## Four objects people mix up
+
+When you wire a multi-tenant SaaS app, four names sit next to each other on `AgentRunner`. They answer different questions.
+
+| Object | Answers | Is it the chat thread? |
+|--------|---------|------------------------|
+| `RunContext` | Who is calling, which chat id, flags, metadata, services | Holds `session_id` (the chat thread id) |
+| `SessionScope` | Ownership **filter** for storage ops (`tenant_id` / `company_id` / `user_id`) | No — does not include `session_id` |
+| `storage_config` | Where/how **chat history JSON** is saved | Config (`SessionStorageConfig`) or a ready `SessionManager` |
+| `cross_session_memory_store` | Where **user facts** live across chat threads | Separate store — not chat JSON |
+
+```mermaid
+flowchart TD
+  rc[RunContext]
+  rc -->|session_id| chatId[Chat thread id]
+  rc -->|to_scope| scope[SessionScope ownership filter]
+  storageConfig[storage_config]
+  storageConfig --> manager[SessionManager]
+  manager --> adapter[StorageAdapter chat JSON]
+  chatId --> adapter
+  scope --> adapter
+  rc -->|tenant user company| memStore[cross_session_memory_store]
+  memStore --> facts[User facts across chats]
+```
+
+**Common mistakes:**
+
+- `SessionScope` is **not** the chat session. The chat thread is `session_id` on `RunContext` / `AgentSession`. Scope is only “whose rows may I touch?” when loading or listing.
+- `SessionScope` is **not** “the SaaS user.” It is an optional filter on up to three identity fields. Products choose dimensions (for example tenant + company, or tenant + user).
+- `storage_config` is **not** the adapter. The adapter is `StorageAdapter`. The runner arg either describes which adapter to build or passes a ready `SessionManager` that already wraps one.
+- `cross_session_memory_store` is **not** `SessionScope` and **not** chat history. It holds durable key/value facts keyed by tenant + user + namespace (optional company).
+
+Details: [Run context](reference/run-context.md), [Storage](reference/storage.md), [Memory](reference/memory.md).
 
 ## Storage priority
 
@@ -136,3 +170,4 @@ See [pipelines guide](../guides/pipelines.md) and [realtime-agents reference](re
 - [Getting started (Python)](getting-started-python.md)
 - [Run context reference](reference/run-context.md)
 - [Storage reference](reference/storage.md)
+- [Memory reference](reference/memory.md)

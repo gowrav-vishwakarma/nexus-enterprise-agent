@@ -5,19 +5,21 @@
 ## Key terms
 
 - **User memory** — Durable key/value facts about a user, stored outside the chat session JSON.
-- **Cross-session memory store** — The database or cache that holds user memory (`CrossSessionMemoryStore`).
+- **Cross-session memory store** — The live object that holds user memory (`CrossSessionMemoryStore`). Pass it as `cross_session_memory_store=` on the runner.
 - **Named store** — A labeled bucket inside memory (for example `user` vs `notes`) with its own inject policy.
 - **Curator** — An optional extra LLM call that extracts facts after each turn and writes them to the store.
 - **Memory tools** — `memory.write` / `search` / `list` / `remove` the agent can call when `expose_tools` is on.
-- **Chat history** — The full turn-by-turn conversation in `AgentSession.turns` (within one chat thread).
+- **Chat history** — The full turn-by-turn conversation in `AgentSession.turns` (within one chat thread). Saved via `storage_config`, not via the memory store.
 - **RCS** — Runtime Context Summarization; compresses tool results in context. Not a fact store.
+
+Chat JSON vs user facts vs ownership filter: [Four objects people mix up](../architecture.md#four-objects-people-mix-up).
 
 ## Two mechanisms
 
 | Question | Mechanism | Survives new chat thread? |
 |----------|-----------|---------------------------|
-| Remember within this chat? | `session.turns` + optional RCS summaries | No (same `session_id` only) |
-| Remember this user next time? | `memory` config + cross-session store | Yes (with persistent store) |
+| Remember within this chat? | `session.turns` + optional RCS summaries (via `storage_config`) | No (same `session_id` only) |
+| Remember this user next time? | `memory` config + `cross_session_memory_store` | Yes (with persistent store) |
 | Search a large document set? | Your own RAG tool | N/A (not built into Nexus) |
 
 Within a single chat, the conversation history is the context. For long chats, enable [RCS](agent-config.md) to compress tool outputs and optional [context summary](context-summary.md) to fold older turns into `summary_text`.
@@ -104,10 +106,12 @@ Pass `RunContext.tenant_id` and a stable `RunContext.user_id` on every run. In a
 
 When `memory.enabled` is True, you also need:
 
-1. `cross_session_memory_store` on `AgentRunner` / orchestrator
+1. `cross_session_memory_store` on `AgentRunner` / orchestrator — a **live store instance** (not a config object). Chat history still uses `storage_config` separately.
 2. `RunContext.user_id` on every run
 
 If either is missing, load and write are skipped silently.
+
+With YAML orchestration, `PersistenceFactory` can build a matching store from `SessionStorageConfig` (same `adapter`, or `custom_memory_adapter_class`). On the Python `AgentRunner` path you usually construct and pass the store yourself. See [Custom memory stores](../guides/custom-memory-store.md).
 
 ## Built-in cross-session stores
 
