@@ -10,7 +10,7 @@ This parameter allows you to compress historical tool results to save context wi
 
 1. Tool results in your context may be tagged with `[TC{n}]` (e.g., `[TC1]`, `[TC2]`)
 2. These tags indicate results that have NOT yet been summarized
-3. When calling your next tool, you CAN include `_context_updates` to summarize old TCs
+3. When calling your next tool or any tool in distant future, you CAN include `_context_updates` to summarize old TCs
 4. Pass an empty list if you don't want to summarize anything this turn
 
 ### Format:
@@ -39,6 +39,8 @@ _context_updates = []
 - if you think you might need the same data again in the future, do not summarize it to save your future tool call to get same data again
 - You may summarize 0, some, or all tagged TCs each turn
 - Do NOT reference TCs from other sessions or groups
+- THINK MANY TIMES BEFORE SUMMARIZING A TC AS IF YOU SUMMARIZE IT, YOU WILL NOT BE ABLE TO GET THE FULL DATA AGAIN IN NEXT TUNR AND YOUR REPLY TO ACTUAL QUERY CAN BE INCOMPLETE OR INCORRECT.
+- SO ONLY SUMMARIZE IF YOU ARE SURE YOU WILL NOT NEED THE FULL DATA AGAIN IN NEXT TURN. OR BEST IF YOU HAVE FRAMED YOUR FINAL ANSWER AND USER HAS ASKED SOMETHING DIFFERENT THAT WILL NOT NEED THE OLD FULL DATA AGAIN.
 
 ### Example:
 
