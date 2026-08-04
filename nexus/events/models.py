@@ -189,6 +189,24 @@ class RCSCompactorCompletedEvent(NexusEvent):
     tokens_saved: int = 0
 
 
+class HumanInLoopRequestedEvent(NexusEvent):
+    """Emitted when the run pauses for human input or approval."""
+
+    event_type: NexusEventType = NexusEventType.HUMAN_IN_LOOP_REQUESTED
+    kind: str = "elicitation"
+    tool_name: Optional[str] = None
+    tc_id: Optional[str] = None
+    reason: str = ""
+
+
+class HumanInLoopResponseEvent(NexusEvent):
+    """Emitted when human-in-the-loop input is received on resume."""
+
+    event_type: NexusEventType = NexusEventType.HUMAN_IN_LOOP_RESPONSE
+    tc_id: Optional[str] = None
+    kind: str = ""
+
+
 class LLMCallStartedEvent(NexusEvent):
     """Emitted when an LLM API call starts."""
     

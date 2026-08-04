@@ -94,7 +94,7 @@ events, separate from the answer. See [streaming.md](streaming.md#reasoning-thin
 |------|-----------|---------|--------------|
 | `name` | Yes | — | Group name |
 | `description` | No | `None` | Optional description |
-| `pattern` | No | `supervisor` | `supervisor`, `pipeline`, `parallel`, `swarm` |
+| `pattern` | No | `supervisor` | `supervisor`, `pipeline`, `parallel` |
 | `members` | No | `[]` | List of `AgentConfig` or nested `AgentGroupConfig` |
 | `max_turns` | No | `20` | Total turns across members (enforced by orchestrator) |
 | `aggregation_strategy` | No | `supervisor` | How to combine results |

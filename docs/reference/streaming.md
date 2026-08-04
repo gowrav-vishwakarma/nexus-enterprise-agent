@@ -57,6 +57,72 @@ Events are emitted **as they arrive** from the provider, in the order they occur
 A turn that ends in a tool call still streams whatever text the model wrote first, so
 you can render narration, tool calls and the final answer as one ordered timeline.
 
+### Sequence numbers and reconnecting
+
+Every event carries `event.data["seq"]` — a counter starting at `1` that increases by
+exactly one per event, whatever the event type. A browser that loses its SSE
+connection can remember the last `seq` it rendered and drop anything at or below that
+number when it reconnects, so a reconnect never duplicates text:
+
+```python
+last_seen = 0
+async for event in runner.run_stream(user_msg, stream=True):
+    seq = event.data["seq"]
+    if seq <= last_seen:
+        continue          # already rendered before the drop
+    last_seen = seq
+    render(event)
+```
+
+Numbering is per runner instance, so persist `last_seen` alongside the session if you
+want it to survive a process restart — see [jobs.md](jobs.md#run-checkpoints).
+
+De-duplicating on the client only helps if the client can get the missed events at
+all. On its own, a reconnect means resending the message and paying for a second
+run. To avoid that, keep the events server-side.
+
+### Reattaching to a dropped stream
+
+`nexus[serve]` buffers each run's events and exposes
+`GET /v1/sessions/{session_id}/stream`. The client reconnects with the last
+sequence number it saw, as a `Last-Event-ID` header — which browsers send
+automatically for `EventSource` — or a `last_seq` query parameter:
+
+```javascript
+// The browser resends Last-Event-ID from the id: line of the last frame.
+const stream = new EventSource("/v1/sessions/abc/stream");
+```
+
+The endpoint replays the buffered events after that point and then follows the run
+until it ends, so a client that reattaches mid-run still receives the rest of the
+answer. The agent is not re-run.
+
+Buffers are keyed by [scope](scope.md) plus session id, so one tenant can never
+reattach to another's stream. Responses are:
+
+| Status | Meaning |
+|--------|---------|
+| 200 | Replaying from your cursor |
+| 404 | No buffered stream for that session and scope |
+| 409 | Your cursor is older than the retained window; reload the session instead |
+
+Tune retention when you mount the router:
+
+```python
+from nexus.serve import create_agent_router
+from nexus.serve.replay import StreamReplayBuffer
+
+router = create_agent_router(
+    runner_factory,
+    context_factory,
+    replay_buffer=StreamReplayBuffer(max_events_per_session=2000, ttl_seconds=1800),
+)
+```
+
+The built-in buffer lives in the process's memory. Behind more than one worker,
+either pin a session to a worker or pass your own object with the same `has`,
+`start`, `append`, `finish`, `earliest_seq`, and `replay` methods backed by Redis.
+
 ### Reasoning ("thinking")
 
 Reasoning-capable models (Qwen3, DeepSeek-R1, Claude extended thinking, Gemini

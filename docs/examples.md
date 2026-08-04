@@ -9,6 +9,18 @@ Not sure which example fits your use case? See the [pipelines guide](guides/pipe
 - **Example** — A script or config in the `examples/` folder you can run or copy.
 - **Fixture** — Test data under `tests/fixtures/` used by pytest.
 
+## Starter templates
+
+Whole-application skeletons to copy into a new project, rather than single-feature
+examples. Each one runs as-is.
+
+| Template | Shape | Start it |
+|----------|-------|----------|
+| [templates/saas-chat](../templates/saas-chat) | Multi-tenant chat API, tenant per request | `uv run uvicorn templates.saas-chat.main:app` |
+| [templates/personal-agent](../templates/personal-agent) | One operator, durable memory, terminal loop | `uv run python templates/personal-agent/main.py` |
+| [templates/background-worker](../templates/background-worker) | Scheduled agents with nobody waiting | `uv run python templates/background-worker/main.py --once` |
+| [templates/voice-agent](../templates/voice-agent) | Points at the realtime voice examples below | — |
+
 ## Orchestration (YAML) — text agents
 
 | Path | What you will learn |

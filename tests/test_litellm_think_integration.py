@@ -1,10 +1,10 @@
 """Live LiteLLM think vs no-think tests against the configured proxy.
 
-Requires network + a reachable LITELLM_BASE_URL (or NEXUS_LLM_BASE_URL).
-Skipped in CI when no endpoint is configured.
+Requires network + a reachable LITELLM_BASE_URL (or NEXUS_LLM_BASE_URL), so the
+whole module is marked ``live_llm`` and skipped by the default test run.
 
 Run:
-    uv run pytest tests/test_litellm_think_integration.py -v -s
+    uv run pytest -m live_llm tests/test_litellm_think_integration.py -v -s
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ import pytest
 from nexus.config.llm import LLMProviderConfig
 from nexus.llm.adapters.litellm import LiteLLMAdapter
 from nexus.realtime.pipelines.cascaded import _strip_think
+
+pytestmark = pytest.mark.live_llm
 
 
 def _load_dotenv() -> None:

@@ -87,20 +87,16 @@ def test_parallel_pattern_is_implemented(caplog):
     assert not any("falling back to pipeline" in record.message for record in caplog.records)
 
 
-def test_unimplemented_pattern_warns_and_falls_back(caplog):
+def test_unimplemented_pattern_raises():
     manifest = OrchestrationManifest.load(FIXTURES / "parallel.yaml")
-    # Force the still-unimplemented 'swarm' pattern on the root group.
     manifest.schema.groups[manifest.schema.root]["pattern"] = "swarm"
     resolver = ManifestResolver(
         manifest.schema,
         manifest.prompts,
         RunContext(),
     )
-    with caplog.at_level(logging.WARNING):
-        config = resolver.resolve_root()
-    assert isinstance(config, AgentGroupConfig)
-    assert config.pattern == "pipeline"
-    assert any("falling back to pipeline" in record.message for record in caplog.records)
+    with pytest.raises(ManifestLoadError, match="unsupported pattern"):
+        resolver.resolve_root()
 
 
 def test_nested_group_resolution():

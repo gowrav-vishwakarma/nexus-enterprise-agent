@@ -1,14 +1,16 @@
 """Tool registry to manage and execute tools."""
 
+import asyncio
 import inspect
 import logging
 import types
 from collections.abc import Iterable
-from typing import Any, Callable, Optional, Type, Union, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Optional, Union, get_args, get_origin, get_type_hints
 
-from pydantic import BaseModel, create_model
+from pydantic import create_model
 
 from nexus.config.rcs import RuntimeContextSummarizerConfig
+from nexus.errors import ToolTimeoutError
 from nexus.tools.context import RunContext
 from nexus.tools.schema_injector import RCSSchemaInjector
 from nexus.tools.toolsets import (
@@ -63,7 +65,7 @@ class ToolRegistry:
                     "description": getattr(val, "_tool_description", ""),
                     "tags": getattr(val, "_tool_tags", []),
                     "requires_approval": getattr(val, "_tool_requires_approval", False),
-                    "timeout_seconds": getattr(val, "_tool_timeout_seconds", 30),
+                    "timeout_seconds": getattr(val, "_tool_timeout_seconds", None),
                     "execution": getattr(val, "_tool_execution", "server"),
                     "plugin": plugin_name,
                 }
@@ -113,7 +115,7 @@ class ToolRegistry:
             "description": getattr(func, "_tool_description", func.__doc__ or ""),
             "tags": getattr(func, "_tool_tags", []),
             "requires_approval": getattr(func, "_tool_requires_approval", False),
-            "timeout_seconds": getattr(func, "_tool_timeout_seconds", 30),
+            "timeout_seconds": getattr(func, "_tool_timeout_seconds", None),
             "execution": getattr(func, "_tool_execution", "server"),
             "plugin": plugin_meta,
         }
@@ -411,6 +413,19 @@ class ToolRegistry:
         plugin, _, tool = full_name.partition(".")
         return await self.execute(plugin, tool, args, run_context)
 
+    def get_tool_metadata(self, full_name: str) -> dict[str, Any]:
+        """Return metadata dict for a registered tool."""
+        return dict(self._tool_metadata.get(full_name) or {})
+
+    def requires_approval(self, full_name: str) -> bool:
+        """Return whether the tool requires human approval before execution."""
+        return bool(self.get_tool_metadata(full_name).get("requires_approval"))
+
+    def get_timeout_seconds(self, full_name: str) -> Optional[int]:
+        """Return the tool's declared timeout, or None when it declared none."""
+        declared = self.get_tool_metadata(full_name).get("timeout_seconds")
+        return int(declared) if declared else None
+
     async def execute(
         self,
         plugin: str,
@@ -452,11 +467,24 @@ class ToolRegistry:
             elif param.default != inspect.Parameter.empty:
                 continue
 
-        # Execute
-        try:
+        # Execute with optional timeout
+        timeout = self.get_timeout_seconds(full_name)
+
+        async def _run() -> Any:
             if inspect.iscoroutinefunction(func):
                 return await func(**call_args)
             return func(**call_args)
+
+        try:
+            if timeout and timeout > 0:
+                return await asyncio.wait_for(_run(), timeout=timeout)
+            return await _run()
+        except asyncio.TimeoutError as exc:
+            raise ToolTimeoutError(
+                f"Tool '{full_name}' timed out after {timeout}s",
+                tool_name=full_name,
+                cause=exc,
+            ) from exc
         except Exception as e:
             logger.error("Error executing tool %s: %s", full_name, e)
             raise

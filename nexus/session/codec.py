@@ -62,6 +62,9 @@ class DefaultSessionCodec:
         ctx: Any = None,
     ) -> AgentSession:
         parsed = json.loads(data) if isinstance(data, str) else dict(data)
+        from nexus.session.migrations import migrate_session_data
+
+        parsed = migrate_session_data(parsed)
         _parse_datetimes(parsed)
         return AgentSession.model_validate(parsed)
 

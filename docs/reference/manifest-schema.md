@@ -88,7 +88,7 @@ See [agent-config.md](agent-config.md) for nested fields (`turns`, `memory`, `rc
 
 | Name | Required? | Default | What it does |
 |------|-----------|---------|--------------|
-| `pattern` | No | `supervisor` | How members run: `supervisor`, `pipeline`, `parallel` (`swarm` falls back to pipeline) |
+| `pattern` | No | `supervisor` | How members run: `supervisor`, `pipeline`, `parallel` |
 | `members` | No | `[]` | Agent names, inline agents, or nested group refs |
 | `session_id_prefix` | No | `""` | Prefix for member chat ids |
 | `max_turns` | No | `20` | Total turns across the group |

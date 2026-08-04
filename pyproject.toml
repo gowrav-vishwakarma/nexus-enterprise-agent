@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexus-enterprise-agent"
-version = "0.3.3"
+version = "0.4.0"
 description = "Enterprise-ready, SaaS-native Python multi-agent framework"
 readme = "README.md"
 license = {text = "MIT"}
@@ -62,7 +62,20 @@ otel = [
     "opentelemetry-exporter-otlp>=1.24",
 ]
 
-# FastAPI integration
+# Framework extras (optional capability packs)
+mcp = ["httpx>=0.27"]
+guardrails = []
+rag = []
+jobs = []
+serve = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "sse-starlette>=2.1",
+    "python-multipart>=0.0.9",
+]
+eval = []
+
+# FastAPI integration (legacy extra — same deps as serve)
 fastapi = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
@@ -112,7 +125,7 @@ moshi = [
 
 # All dependencies
 all = [
-    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,fastapi,realtime,moshi,grpc]",
+    "nexus-enterprise-agent[sqlite,postgres,file,openai,anthropic,gemini,litellm,groq,ollama,otel,serve,realtime,moshi,grpc,mcp,guardrails,rag,jobs,eval]",
 ]
 
 # Full test suite (all adapters + storage + FastAPI + gRPC)
@@ -136,6 +149,9 @@ dev = [
     "redis>=5.0",
     "hiredis>=3.0",
 ]
+
+[project.scripts]
+nexus = "nexus.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["nexus"]

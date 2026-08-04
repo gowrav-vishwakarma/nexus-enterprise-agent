@@ -135,7 +135,7 @@ groups:
 
 **Reference:** [multi-agent.md](../reference/multi-agent.md), [manifest-schema.md](../reference/manifest-schema.md).
 
-**Not implemented:** `swarm` falls back to `pipeline` with a warning.
+Supported group patterns: `supervisor`, `pipeline`, `parallel`.
 
 ---
 

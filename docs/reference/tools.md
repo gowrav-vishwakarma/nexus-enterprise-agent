@@ -40,9 +40,16 @@ registry.add_tool(echo)  # → echo (flat name, no plugin prefix)
 | `name` | No | function name | Tool name the LLM sees |
 | `description` | No | docstring | Human-readable description |
 | `tags` | No | `[]` | Optional tags for metadata and filtering |
-| `timeout_seconds` | No | `30` | Max seconds for tool execution |
-| `requires_approval` | No | `False` | **Planned** human-in-the-loop gate — not enforced in runner yet; use external HITL ([runtime-control.md](../guides/runtime-control.md)) |
+| `timeout_seconds` | No | `None` | Max seconds for tool execution. `None` means no per-tool limit |
+| `requires_approval` | No | `False` | Pauses the run for human approval before the tool executes ([runtime-control.md](../guides/runtime-control.md)) |
 | `execution` | No | `"server"` | `"server"` runs in-process; `"client"` pauses the run and waits for `AgentRunner.resume()` |
+
+**About `timeout_seconds`.** A tool is only cancelled if you declare a timeout. Tools that
+declare nothing run until the turn-level `TurnConfig.turn_timeout_seconds` (default 300)
+bounds them, so adding a timeout is opt-in and never silently shortens an existing tool.
+Cancellation uses `asyncio.wait_for`, which can only interrupt `async def` tools — a
+blocking synchronous tool runs to completion even past its declared timeout, so give
+synchronous tools an internal client-level timeout (for example `httpx.Client(timeout=...)`).
 
 `registry.add_tool(fn)` is the preferred modern API: it registers a flat tool name with no `plugin.` prefix. This matches products that already expose bare names such as `execute_sql` or `memory_write`. The legacy `register_tool(fn, plugin_name="utilities")` still registers `utilities.echo` if you need class-style namespaces, and `execute()` resolves bare, flat, and legacy namespaced names automatically.
 

@@ -62,6 +62,13 @@ flowchart TD
 | Custom storage adapter | [guides/custom-storage-adapter.md](guides/custom-storage-adapter.md) |
 | Custom memory store | [guides/custom-memory-store.md](guides/custom-memory-store.md) |
 | Tools | [reference/tools.md](reference/tools.md) |
+| Scope (global, tenant, company, user) | [reference/scope.md](reference/scope.md) |
+| Guardrails, cost, and audit | [reference/guardrails.md](reference/guardrails.md) |
+| MCP client and server | [reference/mcp.md](reference/mcp.md) |
+| Retrieval (RAG) | [reference/rag.md](reference/rag.md) |
+| Jobs, artifacts, caching | [reference/jobs.md](reference/jobs.md) |
+| FastAPI routers and CLI | [reference/serve.md](reference/serve.md) |
+| Testing and evaluation | [reference/eval.md](reference/eval.md) |
 | Memory | [reference/memory.md](reference/memory.md) |
 | Context summary | [reference/context-summary.md](reference/context-summary.md) |
 | Pipelines (text, voice, teams) | [guides/pipelines.md](guides/pipelines.md) |

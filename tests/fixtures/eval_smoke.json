@@ -1,0 +1,5 @@
+{
+  "cases": [
+    {"id": "smoke", "input": "Hello", "expect_contains": "ok"}
+  ]
+}

@@ -41,12 +41,55 @@ Pass the same `event_emitter=` to `OrchestrationRuntime.from_manifest()` for **s
 | `CustomCallbackSink` | Calls your async `callback(event)` |
 | `WebhookEventSink` | POSTs JSON to a URL |
 | `OTelEventSink` | Exports spans to OpenTelemetry (needs `opentelemetry-api`) |
+| `RedactingEventSink` | Wraps another sink and strips PII and secrets first |
+| `AuditSink` | Writes an append-only, scope-keyed audit line per tool call and approval |
 
 ```python
 from nexus.events.emitter import WebhookEventSink
 
 emitter.add_sink(WebhookEventSink("https://your-app.com/nexus-events"))
 ```
+
+## Keeping customer data out of traces
+
+Events carry whatever the model passed to a tool, so a webhook or tracing backend
+outside your tenant boundary will otherwise receive customer emails, phone numbers,
+and API tokens. Wrap those sinks:
+
+```python
+from nexus.events.emitter import OTelEventSink, RedactingEventSink, WebhookEventSink
+
+emitter.register_sink(RedactingEventSink(WebhookEventSink("https://collector/events")))
+emitter.register_sink(RedactingEventSink(OTelEventSink()))
+```
+
+`RedactingEventSink` rewrites every field of an event except the ones you search on
+(`event_id`, `event_type`, `timestamp`, `session_id`, `agent_id`, `turn_index`).
+Email addresses become `[EMAIL]`, phone numbers `[PHONE]`, and any dict key named
+like a credential (`api_key`, `token`, `password`, `authorization`, `secret`, and
+their variants) becomes `[REDACTED]`. Pass `sensitive_keys={...}` to replace that
+key list with your own.
+
+The same patterns back `PIIRedactionGuard`, so a value stripped from a prompt is
+stripped from a trace — see [nexus/guardrails/redaction.py](../../nexus/guardrails/redaction.py).
+
+## Audit trail
+
+`AuditSink` records *that* a tool ran, for compliance, without archiving the data it
+carried. Give it the run's `RunContext` so each line is scope-keyed:
+
+```python
+from nexus.guardrails.audit import AuditSink
+
+emitter.register_sink(AuditSink(ctx=run_context))
+```
+
+It logs JSON lines to the `nexus.audit` logger for `tool_call.*` and
+`human_in_loop.*` events, and ignores everything else. Each line carries `scope`
+(the [scope key](scope.md) at user level), `tenant_id`, `company_id`, `user_id`,
+`session_id`, and the redacted event. Point the `nexus.audit` logger at a file or a
+log shipper to retain it. Pass `redact=False` only if the sink writes somewhere that
+is already inside your compliance boundary.
 
 ## Event types
 
@@ -62,7 +105,7 @@ emitter.add_sink(WebhookEventSink("https://your-app.com/nexus-events"))
 | Session | `session.created`, `session.loaded`, `session.saved` |
 | Multi-agent | `agent_group.started`, `agent_group.completed`, `agent.handoff` |
 | Realtime / voice | `realtime.session_started`, `realtime.transcribed`, `realtime.barge_in`, `realtime.response_completed`, `realtime.session_ended` |
-| Human-in-loop | `human_in_loop.requested`, `human_in_loop.response` (reserved — not emitted by runner yet) |
+| Human-in-loop | `human_in_loop.requested`, `human_in_loop.response` (emitted on pause/resume) |
 
 Each `NexusEvent` has `event_id`, `timestamp`, `session_id`, `agent_id`, `turn_index`, and a `data` dict with event-specific fields.
 

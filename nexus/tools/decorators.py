@@ -10,7 +10,7 @@ def tool(
     description: Optional[str] = None,
     tags: Optional[list[str]] = None,
     requires_approval: bool = False,
-    timeout_seconds: int = 30,
+    timeout_seconds: Optional[int] = None,
     execution: str = "server",
 ) -> Callable[[F], F]:
     """Decorator to register a function or method as an agent tool.
@@ -20,7 +20,9 @@ def tool(
         description: Optional description. Defaults to function docstring.
         tags: Optional list of tags for metadata and filtering.
         requires_approval: Whether this tool requires human-in-the-loop approval.
-        timeout_seconds: Maximum execution time in seconds.
+        timeout_seconds: Maximum execution time in seconds. ``None`` (the
+            default) means no per-tool limit; the turn-level
+            ``TurnConfig.turn_timeout_seconds`` still bounds the run.
         execution: ``server`` (default) or ``client`` — client tools pause the
             run and wait for ``AgentRunner.resume()`` with the tool result.
     """

@@ -46,8 +46,8 @@ class KeysSkillScopeResolver:
 
     def resolve(self, ctx: RunContext) -> SessionScope:
         data: dict[str, Any] = {}
-        for key in self.keys:
-            data[key] = getattr(ctx, key, None)
+        for field in self.keys:
+            data[field] = getattr(ctx, field, None)
         return SessionScope(
             tenant_id=data.get("tenant_id"),
             company_id=data.get("company_id"),

@@ -3,7 +3,7 @@
 import abc
 import logging
 import sys
-from typing import Any, Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from nexus.events.models import NexusEvent
 
@@ -85,6 +85,44 @@ class OTelEventSink(EventSink):
                 span.set_attribute("turn_index", event.turn_index)
             for k, v in event.data.items():
                 span.set_attribute(f"data.{k}", str(v))
+
+
+class RedactingEventSink(EventSink):
+    """Wrap any sink so PII and secrets never reach it.
+
+    Traces, webhooks, and log aggregators are usually third-party systems, and
+    tool arguments routinely carry customer data. Wrap the sink rather than
+    trusting every backend:
+
+        emitter.register_sink(RedactingEventSink(WebhookEventSink(url)))
+    """
+
+    #: Identity and routing fields, kept as-is so traces stay searchable.
+    PRESERVED_FIELDS = frozenset(
+        {"event_id", "event_type", "timestamp", "session_id", "agent_id", "turn_index"}
+    )
+
+    def __init__(self, inner: EventSink, *, sensitive_keys: Optional[set[str]] = None):
+        from nexus.guardrails.redaction import SENSITIVE_KEYS
+
+        self.inner = inner
+        self.sensitive_keys = (
+            frozenset(k.lower() for k in sensitive_keys)
+            if sensitive_keys is not None
+            else SENSITIVE_KEYS
+        )
+
+    async def emit(self, event: NexusEvent) -> None:
+        from nexus.guardrails.redaction import redact_payload
+
+        updates = {
+            name: redact_payload(
+                getattr(event, name), sensitive_keys=self.sensitive_keys
+            )
+            for name in type(event).model_fields
+            if name not in self.PRESERVED_FIELDS
+        }
+        await self.inner.emit(event.model_copy(update=updates))
 
 
 class NexusEventEmitter:

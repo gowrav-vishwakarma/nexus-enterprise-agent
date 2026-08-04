@@ -46,7 +46,9 @@ from nexus.config import (
     DEFAULT_CONTEXT_SUMMARY_PROMPT,
 )
 from nexus.runner.agent_runner import AgentRunner
-from nexus.runner.hooks import TurnContext, TurnDecision
+from nexus.runner.hooks import TurnContext, TurnDecision, RunnerHooks, ToolCallContext, LLMCallContext
+from nexus.scope import ScopeLevel, scope_key, scope_keys_from_config
+from nexus.errors import NexusError, LLMError, ToolError, GuardrailError, TurnTimeoutError, ValidationError
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
 from nexus.tools.context import RunContext
 from nexus.tools.decorators import tool, tool_plugin
@@ -66,7 +68,12 @@ from nexus.multiagent.results import AgentGroupResult
 from nexus.orchestration import OrchestrationManifest, OrchestrationRuntime
 from nexus.events import EventEmitted, NexusEventEmitter, NexusEventType, NexusEvent
 
-__version__ = "0.3.3"
+from nexus.tools.registry import ToolRegistry
+from nexus.session.manager import SessionManager
+from nexus.runner.checkpoint import RunCheckpoint, checkpoint_from_session
+from nexus.runner.structured_output import validate_structured_result
+
+__version__ = "0.4.0"
 
 __all__ = [
     # Version
@@ -94,6 +101,25 @@ __all__ = [
     "AgentStreamEvent",
     "TurnContext",
     "TurnDecision",
+    "RunnerHooks",
+    "ToolCallContext",
+    "LLMCallContext",
+    # Scope & errors
+    "ScopeLevel",
+    "scope_key",
+    "scope_keys_from_config",
+    "NexusError",
+    "LLMError",
+    "ToolError",
+    "GuardrailError",
+    "TurnTimeoutError",
+    "ValidationError",
+    # Registry & session (public surface)
+    "ToolRegistry",
+    "SessionManager",
+    "RunCheckpoint",
+    "checkpoint_from_session",
+    "validate_structured_result",
     # Tools
     "RunContext",
     "tool",

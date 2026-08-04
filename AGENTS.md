@@ -17,6 +17,18 @@ When checking behaviour, read the docs first, then the code; if they disagree, u
 |----------------|-------------------|
 | `nexus/orchestration/schema.py` or `nexus/orchestration/resolver.py` | `docs/reference/manifest-schema.md`, `docs/assets/complete-manifest.annotated.yaml` |
 | `nexus/config/*.py` (fields, defaults, descriptions) | Matching file under `docs/reference/` |
+| `nexus/scope.py` | `docs/reference/scope.md` |
+| `nexus/guardrails/*` | `docs/reference/guardrails.md` |
+| `nexus/mcp/*` | `docs/reference/mcp.md` |
+| `nexus/rag/*` | `docs/reference/rag.md` |
+| `nexus/serve/*`, `nexus/cli/*` | `docs/reference/serve.md` |
+| `nexus/serve/replay.py` | `docs/reference/streaming.md` (Reattaching to a dropped stream), `docs/reference/serve.md` |
+| `nexus/events/emitter.py` or `nexus/guardrails/redaction.py` / `audit.py` | `docs/reference/events.md`, `docs/reference/guardrails.md` |
+| `templates/*` | `docs/examples.md` (Starter templates) and that template's `README.md` |
+| `nexus/eval/*` | `docs/reference/eval.md` |
+| `nexus/jobs/*`, `nexus/artifacts/*`, `nexus/cache/*`, `nexus/runner/checkpoint.py` | `docs/reference/jobs.md` |
+| `nexus/tools/decorators.py` or `nexus/tools/registry.py` | `docs/reference/tools.md` |
+| Any new `docs/reference/*.md` page | Add it to the Quick links table in `docs/index.md` |
 | `OrchestrationRuntime` or `AgentRunner` signatures | `docs/reference/agent-runner.md`, `docs/assets/complete-run.annotated.py`, `docs/assets/complete-agent.annotated.py` |
 | `nexus/llm/content_tool_calls.py` or assistant history sanitization in `agent_runner` / `context/builder` | `docs/reference/agent-runner.md` (Content-side tool-call recovery) |
 | `.env.example` | `docs/reference/environment.md` |

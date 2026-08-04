@@ -23,8 +23,6 @@ logger = logging.getLogger(__name__)
 
 MemberConfig = Union[AgentConfig, AgentGroupConfig]
 
-_UNIMPLEMENTED_PATTERNS = frozenset({"swarm"})
-
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Deep-merge override into a copy of base."""
@@ -104,13 +102,11 @@ class ManifestResolver:
         merged["name"] = name
 
         pattern = merged.get("pattern", "supervisor")
-        if pattern in _UNIMPLEMENTED_PATTERNS:
-            logger.warning(
-                "Group %r pattern %r is not implemented; falling back to pipeline",
-                name,
-                pattern,
+        if pattern not in ("supervisor", "pipeline", "parallel"):
+            raise ManifestLoadError(
+                f"Group {name!r} has unsupported pattern {pattern!r}. "
+                "Supported: supervisor, pipeline, parallel"
             )
-            merged["pattern"] = "pipeline"
 
         members_spec = merged.get("members", [])
         resolved_members: list[MemberConfig] = []

@@ -16,7 +16,6 @@
 | `supervisor` | Implemented | Lead agent delegates to members |
 | `pipeline` | Implemented | Members run sequentially |
 | `parallel` | Implemented | All members run on the same input; outputs merged per `aggregation_strategy` |
-| `swarm` | Not yet | Falls back to pipeline with warning |
 
 ## AgentGroupConfig
 

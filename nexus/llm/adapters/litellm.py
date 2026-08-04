@@ -24,14 +24,17 @@ Usage examples in LLMProviderConfig:
     LLMProviderConfig(provider="gemini", model="gemini-2.0-flash-exp", api_key="...")
 """
 
+import asyncio
 import json
 import logging
 from typing import Any, AsyncIterator, Optional
 
 from nexus.config.llm import LLMProviderConfig, ProviderType
+from nexus.errors import classify_litellm_error
 from nexus.llm.adapters.base import LLMAdapter
 from nexus.llm.response import LLMResponse, LLMStreamChunk, TokenUsage, ToolCallRequest
 from nexus.llm.tool_format import format_openai_tools
+from nexus.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +271,16 @@ class LiteLLMAdapter(LLMAdapter):
 
     # ── Public interface ──────────────────────────────────────────────────────
 
+    async def _acompletion_with_timeout(self, **kw: Any) -> Any:
+        """Call litellm.acompletion with configured timeout."""
+        timeout = self.config.timeout
+        if timeout and timeout > 0:
+            return await asyncio.wait_for(
+                self._litellm.acompletion(**kw),
+                timeout=timeout,
+            )
+        return await self._litellm.acompletion(**kw)
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -283,12 +296,23 @@ class LiteLLMAdapter(LLMAdapter):
         kw.update(kwargs)
 
         logger.debug("LiteLLMAdapter.chat → model=%s", self._model)
-        try:
-            response = await self._litellm.acompletion(**kw)
+
+        async def _call() -> LLMResponse:
+            response = await self._acompletion_with_timeout(**kw)
             return self._parse_response(response)
+
+        try:
+            if self.config.max_retries > 0:
+                return await retry_with_backoff(
+                    _call,
+                    max_retries=self.config.max_retries,
+                    base_delay=self.config.retry_delay,
+                    retry_on=(Exception,),
+                )
+            return await _call()
         except Exception as exc:
             logger.error("LiteLLM chat error (model=%s): %s", self._model, exc)
-            raise
+            raise classify_litellm_error(exc) from exc
 
     async def chat_stream(
         self,
@@ -307,7 +331,13 @@ class LiteLLMAdapter(LLMAdapter):
 
         logger.debug("LiteLLMAdapter.chat_stream → model=%s", self._model)
         try:
-            stream = await self._litellm.acompletion(**kw)
+            if self.config.timeout and self.config.timeout > 0:
+                stream = await asyncio.wait_for(
+                    self._litellm.acompletion(**kw),
+                    timeout=self.config.timeout,
+                )
+            else:
+                stream = await self._litellm.acompletion(**kw)
             async for chunk in stream:
                 content_delta: Optional[str] = None
                 reasoning_delta: Optional[str] = None
@@ -349,4 +379,4 @@ class LiteLLMAdapter(LLMAdapter):
                 )
         except Exception as exc:
             logger.error("LiteLLM stream error (model=%s): %s", self._model, exc)
-            raise
+            raise classify_litellm_error(exc) from exc

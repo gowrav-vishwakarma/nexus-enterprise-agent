@@ -111,6 +111,15 @@ class AgentConfig(BaseModel):
         default=False,
         description="Default execution mode: stream AgentStreamEvents vs return blocking AgentRunResult",
     )
+    parallel_tool_calls: bool = Field(
+        default=False,
+        description="When True, execute independent tool calls in parallel within a turn",
+    )
+    structured_output_max_retries: int = Field(
+        default=2,
+        ge=0,
+        description="Validation retries when result_type is set and output fails schema check",
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Arbitrary metadata for this agent"
     )
@@ -126,7 +135,7 @@ class AgentGroupConfig(BaseModel):
 
     name: str = Field(..., description="Human-readable group name")
     description: Optional[str] = Field(None, description="Group description")
-    pattern: Literal["supervisor", "pipeline", "parallel", "swarm"] = Field(
+    pattern: Literal["supervisor", "pipeline", "parallel"] = Field(
         default="supervisor",
         description="Internal orchestration pattern",
     )

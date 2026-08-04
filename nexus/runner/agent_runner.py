@@ -1,5 +1,6 @@
 """Agent Runner orchestrating the main agentic loop with RCS."""
 
+import asyncio
 import inspect
 import json
 import logging
@@ -12,6 +13,7 @@ from nexus.config.agent import AgentConfig
 from nexus.config.storage import SessionStorageConfig
 from nexus.context.builder import ContextWindowBuilder
 from nexus.context.summarizer import ContextSummarizer
+from nexus.errors import TurnTimeoutError, ValidationError
 from nexus.events.emitter import NexusEventEmitter, StdoutEventSink
 from nexus.events.models import (
     AgentStartedEvent,
@@ -26,6 +28,8 @@ from nexus.events.models import (
     LLMCallCompletedEvent,
     LLMCallErrorEvent,
     LLMStreamChunkEvent,
+    HumanInLoopRequestedEvent,
+    HumanInLoopResponseEvent,
 )
 from nexus.llm.proxy import LLMProxy
 from nexus.llm.content_tool_calls import build_assistant_llm_message, promote_content_tool_calls
@@ -37,7 +41,17 @@ from nexus.memory.cross_session_store import (
     resolve_cross_session_namespace,
 )
 from nexus.rcs.compactor import ServerCompactor
-from nexus.runner.hooks import TurnContext, TurnDecision
+from nexus.runner.hooks import (
+    LLMCallContext,
+    RunnerHooks,
+    ToolCallContext,
+    TurnContext,
+    TurnDecision,
+)
+from nexus.runner.structured_output import (
+    format_validation_retry_message,
+    validate_structured_result,
+)
 from nexus.runner.result import AgentRunResult, AgentStreamEvent
 from nexus.session.manager import SessionManager
 from nexus.session.models import AgentSession, PendingInteraction, ToolCallRecord, TurnRecord
@@ -116,6 +130,7 @@ class AgentRunner:
         on_turn_end: Optional[
             Callable[[TurnContext], Awaitable[Optional[TurnDecision]]]
         ] = None,
+        hooks: Optional[RunnerHooks] = None,
     ):
         self.config = config
         self.tool_registry = tool_registry
@@ -134,7 +149,11 @@ class AgentRunner:
         self.run_context = run_context or RunContext()
         self.cross_session_memory_store = cross_session_memory_store
         self.on_turn_end = on_turn_end
+        self.hooks = hooks or RunnerHooks()
+        if on_turn_end and self.hooks.on_turn_end is None:
+            self.hooks.on_turn_end = on_turn_end
         self._user_memory: dict[str, str] = {}
+        self._stream_seq: int = 0
 
         self.event_emitter = event_emitter or NexusEventEmitter()
         if self.config.trace_enabled and not self.event_emitter._sinks:
@@ -270,7 +289,8 @@ class AgentRunner:
         tool_results: list[dict[str, Any]],
         final_response: Optional[str],
     ) -> Optional[TurnDecision]:
-        if not self.on_turn_end:
+        hook = self.hooks.on_turn_end if self.hooks else self.on_turn_end
+        if not hook:
             return None
         ctx = TurnContext(
             session=session,
@@ -281,10 +301,63 @@ class AgentRunner:
             final_response=final_response,
         )
         try:
-            return await self.on_turn_end(ctx)
+            return await hook(ctx)
         except Exception as exc:
             logger.warning("AgentRunner: on_turn_end hook failed: %s", exc)
             return None
+
+    def _next_stream_seq(self) -> int:
+        self._stream_seq += 1
+        return self._stream_seq
+
+    def _number_stream_event(self, event: AgentStreamEvent) -> AgentStreamEvent:
+        """Stamp a gap-free sequence number so dropped clients can resume."""
+        payload = dict(event.data or {})
+        payload["seq"] = self._next_stream_seq()
+        event.data = payload
+        return event
+
+    def _stream_event(
+        self,
+        event_type: str,
+        *,
+        content: Optional[str] = None,
+        data: Optional[dict[str, Any]] = None,
+    ) -> AgentStreamEvent:
+        return AgentStreamEvent(event_type=event_type, content=content, data=dict(data or {}))
+
+    async def _emit_hitl_requested(
+        self,
+        session: AgentSession,
+        *,
+        kind: str,
+        tool_name: Optional[str] = None,
+        tc_id: Optional[str] = None,
+        reason: str = "",
+        turn_index: int = 0,
+    ) -> None:
+        await self.event_emitter.emit(
+            HumanInLoopRequestedEvent(
+                session_id=session.session_id,
+                agent_id=self.config.name,
+                turn_index=turn_index,
+                kind=kind,
+                tool_name=tool_name,
+                tc_id=tc_id,
+                reason=reason,
+            )
+        )
+
+    def _limit_tool_calls(self, tool_calls: list[ToolCallRequest]) -> list[ToolCallRequest]:
+        limit = self.config.turns.max_tool_calls_per_turn
+        if limit <= 0 or len(tool_calls) <= limit:
+            return tool_calls
+        logger.warning(
+            "AgentRunner: truncating %d tool calls to max_tool_calls_per_turn=%d",
+            len(tool_calls),
+            limit,
+        )
+        return tool_calls[:limit]
 
     def _maybe_pause_for_human_in_loop(
         self, session: AgentSession, run_turn_index: int
@@ -303,6 +376,21 @@ class AgentRunner:
                 args={},
                 kind="elicitation",
             )
+        )
+        return True
+
+    async def _maybe_pause_for_human_in_loop_async(
+        self, session: AgentSession, run_turn_index: int, turn_index: int
+    ) -> bool:
+        if not self._maybe_pause_for_human_in_loop(session, run_turn_index):
+            return False
+        await self._emit_hitl_requested(
+            session,
+            kind="human_in_loop",
+            tool_name="human_in_loop",
+            tc_id="HITL",
+            reason=f"Paused after {run_turn_index + 1} turns",
+            turn_index=turn_index,
         )
         return True
 
@@ -852,6 +940,8 @@ class AgentRunner:
         total_tokens_in = 0
         total_tokens_out = 0
         final_resp: Optional[str] = None
+        structured_result: Optional[dict[str, Any]] = None
+        struct_retries_remaining = self.config.structured_output_max_retries
         turn_limit = self.config.turns.max_turns
         if max_turns is not None:
             turn_limit = min(turn_limit, max_turns)
@@ -860,6 +950,7 @@ class AgentRunner:
             current_user_message = user_message
 
             while run_turn_index < turn_limit:
+                turn_started_at = time.time()
                 turn_user_msg = current_user_message if run_turn_index == 0 else None
                 messages = await self._build_context_messages(
                     session, current_user_message=turn_user_msg
@@ -910,6 +1001,20 @@ class AgentRunner:
                     )
                 )
 
+                if self.hooks and self.hooks.before_llm_call:
+                    hook_ctx = LLMCallContext(
+                        session=session,
+                        turn_index=session_turn_index,
+                        messages=messages,
+                        run_context=self.run_context,
+                    )
+                    try:
+                        modified = await self.hooks.before_llm_call(hook_ctx)
+                        if modified is not None:
+                            messages = modified
+                    except Exception as exc:
+                        logger.warning("AgentRunner: before_llm_call hook failed: %s", exc)
+
                 llm_response: Optional[LLMResponse] = None
                 async for item in self._call_llm(
                     stream=stream,
@@ -925,8 +1030,34 @@ class AgentRunner:
 
                 assert llm_response is not None
                 llm_response = promote_content_tool_calls(llm_response)
+                if llm_response.tool_calls:
+                    limited = self._limit_tool_calls(llm_response.tool_calls)
+                    if len(limited) != len(llm_response.tool_calls):
+                        llm_response = llm_response.model_copy(update={"tool_calls": limited})
                 total_tokens_in += llm_response.usage.prompt_tokens
                 total_tokens_out += llm_response.usage.completion_tokens
+
+                turn_structured: Optional[dict[str, Any]] = None
+                if not llm_response.tool_calls and self.config.result_type:
+                    try:
+                        turn_structured = validate_structured_result(
+                            llm_response.content, self.config.result_type
+                        )
+                        structured_result = turn_structured
+                        struct_retries_remaining = self.config.structured_output_max_retries
+                    except ValidationError as val_err:
+                        if struct_retries_remaining > 0:
+                            struct_retries_remaining -= 1
+                            current_user_message = format_validation_retry_message(val_err)
+                            continue
+                        raise
+
+                if (
+                    turn_structured is not None
+                    and self.config.turns.stop_on_result_type
+                    and not llm_response.tool_calls
+                ):
+                    final_resp = llm_response.content
 
                 if not llm_response.tool_calls and self.config.turns.stop_on_empty_tool_calls:
                     final_resp = llm_response.content
@@ -966,12 +1097,14 @@ class AgentRunner:
                         run_turn_index += 1
                         continue
 
-                    if self._maybe_pause_for_human_in_loop(session, run_turn_index):
+                    if await self._maybe_pause_for_human_in_loop_async(
+                        session, run_turn_index, session_turn_index
+                    ):
                         status = "paused"
                         await self._maybe_save_session(session)
                         if stream:
-                            yield AgentStreamEvent(
-                                event_type="paused",
+                            yield self._stream_event(
+                                "paused",
                                 data={
                                     "session_id": session.session_id,
                                     "pending_interactions": [
@@ -984,13 +1117,37 @@ class AgentRunner:
 
                     session_turn_index += 1
                     run_turn_index += 1
+                    if structured_result is not None and self.config.turns.stop_on_result_type:
+                        break
                     break
 
                 turn_tool_records = []
                 tokens_saved_this_turn = compactor_tokens_saved
                 all_updates = []
 
-                for tc_req in llm_response.tool_calls:
+                tool_requests = list(llm_response.tool_calls)
+                use_parallel = (
+                    self.config.parallel_tool_calls
+                    and len(tool_requests) > 1
+                    and all(
+                        self.tool_registry.get_execution_mode(tc.tool_name) != "client"
+                        and not self.tool_registry.requires_approval(
+                            tc.tool_name if self.tool_registry.has(tc.tool_name) else tc.tool_name
+                        )
+                        for tc in tool_requests
+                    )
+                )
+
+                # session and session_turn_index are bound as defaults, not closed
+                # over: the turn loop reassigns both after the tools for this turn
+                # have run, and parallel handlers must see this turn's values.
+                async def _handle_tool(
+                    tc_req: ToolCallRequest,
+                    *,
+                    session: AgentSession = session,
+                    session_turn_index: int = session_turn_index,
+                ) -> tuple[ToolCallRecord, bool, list[dict[str, Any]], int]:
+                    nonlocal status
                     clean_args, updates = await self.interceptor.intercept(
                         tool_name=tc_req.tool_name,
                         tool_input=tc_req.tool_input,
@@ -999,45 +1156,32 @@ class AgentRunner:
                         storage_adapter=self.session_manager,
                         rcs_config=self.config.rcs,
                     )
-                    all_updates.extend([u.model_dump() for u in updates])
-                    # Use the interceptor's per-update tokens_saved (computed with
-                    # TokenCounter, same formula as session.total_tokens_saved_by_rcs)
-                    # so turn.tokens_saved_this_turn ties out to the session counter.
-                    tokens_saved_this_turn += sum(u.tokens_saved for u in updates)
-
+                    update_dicts = [u.model_dump() for u in updates]
+                    saved = sum(u.tokens_saved for u in updates)
                     session.next_tc_index()
                     tc_index = session.tc_counter
                     tc_id = f"TC{tc_index}"
-
-                    if stream:
-                        yield AgentStreamEvent(
-                            event_type="tool_call",
-                            data={
-                                "agent_id": self.config.name,
-                                "turn_index": session_turn_index,
-                                "tool_name": tc_req.tool_name,
-                                "tool_args": clean_args,
-                                "tc_id": tc_id,
-                            },
-                        )
-
-                    await self.event_emitter.emit(
-                        ToolCallStartedEvent(
-                            session_id=session.session_id,
-                            agent_id=self.config.name,
-                            turn_index=session_turn_index,
-                            tool_name=tc_req.tool_name,
-                            tool_args=clean_args,
-                        )
-                    )
-
                     execution = self.tool_registry.get_execution_mode(tc_req.tool_name)
                     call_id = getattr(tc_req, "id", "") or ""
-                    if execution == "client" or tc_req.tool_name.endswith("request_user_input"):
+                    resolved_tool = tc_req.tool_name
+                    try:
+                        resolved_tool = self.tool_registry.resolve_tool_name(tc_req.tool_name)
+                    except ValueError:
+                        pass
+                    needs_approval = self.tool_registry.requires_approval(resolved_tool)
+                    if (
+                        execution == "client"
+                        or tc_req.tool_name.endswith("request_user_input")
+                        or needs_approval
+                    ):
                         kind = (
-                            "elicitation"
-                            if tc_req.tool_name.endswith("request_user_input")
-                            else "client_tool"
+                            "approval"
+                            if needs_approval
+                            else (
+                                "elicitation"
+                                if tc_req.tool_name.endswith("request_user_input")
+                                else "client_tool"
+                            )
                         )
                         pending = PendingInteraction(
                             tc_id=tc_id,
@@ -1047,7 +1191,7 @@ class AgentRunner:
                             kind=kind,
                         )
                         session.pending_interactions.append(pending)
-                        tc_record = ToolCallRecord(
+                        record = ToolCallRecord(
                             tc_id=tc_id,
                             tc_index=tc_index,
                             tool_name=tc_req.tool_name,
@@ -1056,31 +1200,35 @@ class AgentRunner:
                             raw_response="",
                             tokens_raw=0,
                         )
-                        turn_tool_records.append(tc_record)
-                        if stream:
-                            yield AgentStreamEvent(
-                                event_type=(
-                                    "elicitation" if kind == "elicitation" else "client_tool_call"
-                                ),
-                                data={
-                                    "agent_id": self.config.name,
-                                    "turn_index": session_turn_index,
-                                    "tool_name": tc_req.tool_name,
-                                    "tool_args": clean_args,
-                                    "tc_id": tc_id,
-                                    "call_id": call_id,
-                                    "kind": kind,
-                                },
-                            )
+                        await self._emit_hitl_requested(
+                            session,
+                            kind=kind,
+                            tool_name=tc_req.tool_name,
+                            tc_id=tc_id,
+                            turn_index=session_turn_index,
+                        )
                         status = "paused"
-                        break
+                        return record, True, update_dicts, saved
+
+                    if self.hooks and self.hooks.before_tool_call:
+                        tctx = ToolCallContext(
+                            session=session,
+                            turn_index=session_turn_index,
+                            tool_name=tc_req.tool_name,
+                            tool_args=clean_args,
+                            run_context=self.run_context,
+                            tc_id=tc_id,
+                        )
+                        try:
+                            await self.hooks.before_tool_call(tctx)
+                        except Exception as exc:
+                            logger.warning("AgentRunner: before_tool_call hook failed: %s", exc)
 
                     tool_start = time.time()
                     try:
                         parts = tc_req.tool_name.split(".")
                         plugin = parts[0]
                         tool = parts[1] if len(parts) > 1 else ""
-
                         raw_result = await self.tool_registry.execute(
                             plugin=plugin,
                             tool=tool,
@@ -1088,7 +1236,6 @@ class AgentRunner:
                             run_context=self.run_context,
                         )
                         result_str = str(raw_result)
-
                         await self.event_emitter.emit(
                             ToolCallCompletedEvent(
                                 session_id=session.session_id,
@@ -1110,20 +1257,7 @@ class AgentRunner:
                                 error=str(e),
                             )
                         )
-
-                    if stream:
-                        yield AgentStreamEvent(
-                            event_type="tool_result",
-                            content=result_str,
-                            data={
-                                "agent_id": self.config.name,
-                                "turn_index": session_turn_index,
-                                "tool_name": tc_req.tool_name,
-                                "tc_id": tc_id,
-                            },
-                        )
-
-                    tc_record = ToolCallRecord(
+                    record = ToolCallRecord(
                         tc_id=tc_id,
                         tc_index=tc_index,
                         tool_name=tc_req.tool_name,
@@ -1132,7 +1266,65 @@ class AgentRunner:
                         raw_response=result_str,
                         tokens_raw=TokenCounter.count_string(result_str, self.config.llm.model),
                     )
-                    turn_tool_records.append(tc_record)
+                    return record, False, update_dicts, saved
+
+                if use_parallel:
+                    results = await asyncio.gather(*[_handle_tool(tc) for tc in tool_requests])
+                    for record, paused, upd, saved in results:
+                        all_updates.extend(upd)
+                        tokens_saved_this_turn += saved
+                        turn_tool_records.append(record)
+                        if paused:
+                            break
+                else:
+                    for tc_req in tool_requests:
+                        await self.event_emitter.emit(
+                            ToolCallStartedEvent(
+                                session_id=session.session_id,
+                                agent_id=self.config.name,
+                                turn_index=session_turn_index,
+                                tool_name=tc_req.tool_name,
+                                tool_args=tc_req.tool_input,
+                            )
+                        )
+                        if stream:
+                            yield self._stream_event(
+                                "tool_call",
+                                data={
+                                    "agent_id": self.config.name,
+                                    "turn_index": session_turn_index,
+                                    "tool_name": tc_req.tool_name,
+                                    "tool_args": tc_req.tool_input,
+                                },
+                            )
+                        record, paused, upd, saved = await _handle_tool(tc_req)
+                        all_updates.extend(upd)
+                        tokens_saved_this_turn += saved
+                        turn_tool_records.append(record)
+                        if stream and record.raw_response:
+                            yield self._stream_event(
+                                "tool_result",
+                                content=record.raw_response,
+                                data={
+                                    "agent_id": self.config.name,
+                                    "turn_index": session_turn_index,
+                                    "tool_name": tc_req.tool_name,
+                                    "tc_id": record.tc_id,
+                                },
+                            )
+                        if paused:
+                            if stream:
+                                yield self._stream_event(
+                                    "paused",
+                                    data={
+                                        "session_id": session.session_id,
+                                        "pending_interactions": [
+                                            p.model_dump(mode="json")
+                                            for p in session.pending_interactions
+                                        ],
+                                    },
+                                )
+                            break
 
                 llm_messages_to_save = [
                     build_assistant_llm_message(
@@ -1212,12 +1404,14 @@ class AgentRunner:
                     run_turn_index += 1
                     continue
 
-                if self._maybe_pause_for_human_in_loop(session, run_turn_index):
+                if await self._maybe_pause_for_human_in_loop_async(
+                    session, run_turn_index, session_turn_index
+                ):
                     status = "paused"
                     await self._maybe_save_session(session)
                     if stream:
-                        yield AgentStreamEvent(
-                            event_type="paused",
+                        yield self._stream_event(
+                            "paused",
                             data={
                                 "session_id": session.session_id,
                                 "pending_interactions": [
@@ -1228,12 +1422,35 @@ class AgentRunner:
                         )
                     break
 
+                elapsed_turn = time.time() - turn_started_at
+                if elapsed_turn > self.config.turns.turn_timeout_seconds:
+                    raise TurnTimeoutError(
+                        f"Turn exceeded timeout of {self.config.turns.turn_timeout_seconds}s"
+                    )
+
                 session_turn_index += 1
                 run_turn_index += 1
 
             if run_turn_index >= turn_limit:
                 status = "max_turns_reached"
 
+        except TurnTimeoutError as e:
+            status = "error"
+            error_msg = str(e)
+            logger.error("AgentRunner turn timeout: %s", e)
+            await self.event_emitter.emit(
+                AgentErrorEvent(
+                    session_id=session.session_id,
+                    agent_id=self.config.name,
+                    error=error_msg,
+                )
+            )
+            if stream:
+                yield AgentStreamEvent(
+                    event_type="error",
+                    content=error_msg,
+                    data={"agent_id": self.config.name, "status": "error"},
+                )
         except Exception as e:
             status = "error"
             error_msg = str(e)
@@ -1282,6 +1499,7 @@ class AgentRunner:
         run_result = AgentRunResult(
             session_id=session.session_id,
             final_response=final_resp,
+            structured_result=structured_result,
             turns_used=run_turn_index,
             total_tokens_in=total_tokens_in,
             total_tokens_out=total_tokens_out,
@@ -1367,7 +1585,7 @@ class AgentRunner:
             initial_context=initial_context,
             max_turns=max_turns,
         ):
-            yield event
+            yield self._number_stream_event(event)
 
         assert state.result is not None
 
@@ -1396,6 +1614,14 @@ class AgentRunner:
         for pending in list(session.pending_interactions):
             match = by_tc.get(pending.tc_id) or by_call.get(pending.call_id)
             content = (match or {}).get("content", "")
+            await self.event_emitter.emit(
+                HumanInLoopResponseEvent(
+                    session_id=session_id,
+                    agent_id=self.config.name,
+                    tc_id=pending.tc_id,
+                    kind=pending.kind,
+                )
+            )
             for turn in reversed(session.turns):
                 for tc in turn.tool_calls:
                     if tc.tc_id == pending.tc_id and not tc.raw_response:
