@@ -159,6 +159,21 @@ flowchart LR
 
 See [pipelines guide](../guides/pipelines.md) and [realtime-agents reference](reference/realtime-agents.md).
 
+## Least-privilege context
+
+Give the model the smallest context that can still do the job (sometimes called ALARA: as low as reasonably achievable).
+
+| Layer | Pattern in Nexus |
+|-------|------------------|
+| Skill catalog | Names and one-line descriptions in the system prompt |
+| Skill body | Full `SKILL.md` only after `skills.load_skill` |
+| Skill section | One `##` heading via `skills.load_skill(..., section="security")` |
+| Tools | Narrow `toolset` packs; do not grant `sh` / `python` by default |
+| Delegation | `run_as` / `derive_child` so a subagent does not inherit the parent’s whole tool list |
+| Regulated files | Fixed paths and allow-lists, not an open filesystem |
+
+Do not dump every skill, every tool, and every document into the first turn. Load on demand. See [skills.md](reference/skills.md) and [tools.md](reference/tools.md).
+
 ## Related guides
 
 - [Pipelines](../guides/pipelines.md) — which pipeline to run (text, voice, teams)

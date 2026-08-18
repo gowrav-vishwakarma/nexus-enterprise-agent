@@ -8,7 +8,8 @@
 - **Cross-session memory store** — The live object that holds user memory (`CrossSessionMemoryStore`). Pass it as `cross_session_memory_store=` on the runner.
 - **Named store** — A labeled bucket inside memory (for example `user` vs `notes`) with its own inject policy.
 - **Curator** — An optional extra LLM call that extracts facts after each turn and writes them to the store.
-- **Memory tools** — `memory.write` / `search` / `list` / `remove` the agent can call when `expose_tools` is on.
+- **Memory tools** — `memory.write` / `search` / `list` / `remove` the agent can call when `expose_tools` is on. With `require_approval`, also `memory.approve` / `reject` / `edit`.
+- **Memory provider** — Optional richer backend (`MemoryProvider`) for semantic search or vendors (Mem0, Honcho). Unset = keep the key/value store path.
 - **Chat history** — The full turn-by-turn conversation in `AgentSession.turns` (within one chat thread). Saved via `storage_config`, not via the memory store.
 - **RCS** — Runtime Context Summarization; compresses tool results in context. Not a fact store.
 
@@ -20,7 +21,7 @@ Chat JSON vs user facts vs ownership filter: [Four objects people mix up](../arc
 |----------|-----------|---------------------------|
 | Remember within this chat? | `session.turns` + optional RCS summaries (via `storage_config`) | No (same `session_id` only) |
 | Remember this user next time? | `memory` config + `cross_session_memory_store` | Yes (with persistent store) |
-| Search a large document set? | Your own RAG tool | N/A (not built into Nexus) |
+| Search a large document set? | Opt-in [RAG](rag.md) (`AgentConfig.rag`) | N/A (not user-fact memory) |
 
 Within a single chat, the conversation history is the context. For long chats, enable [RCS](agent-config.md) to compress tool outputs and optional [context summary](context-summary.md) to fold older turns into `summary_text`.
 
@@ -43,6 +44,10 @@ Set on `AgentConfig` as `memory`:
 | `curator_prompt` | No | default prompt | Custom curator prompt |
 | `curator_agent` | No | `None` | Full `AgentConfig` used as curator (advanced) |
 | `max_conversation_chars` | No | `6000` | Max chars fed to curator |
+| `provider` | No | `None` | Optional backend: `builtin_semantic`, `builtin_kv`, `mem0`, `honcho`, or `custom_class`. `None` uses `CrossSessionMemoryStore` directly (current behaviour) |
+| `provider_class` | No | `None` | Dotted import path when `provider` is `custom_class` |
+| `provider_config` | No | `{}` | Kwargs passed to the provider constructor |
+| `require_approval` | No | `False` | When `True`, curator and `memory.write` go to a `pending` store; only approved facts are injected |
 
 ## MemoryStoreConfig (named stores)
 
@@ -81,11 +86,49 @@ When `enabled=True` and `expose_tools=True`, the runner registers the `memory` p
 | Tool | What it does |
 |------|--------------|
 | `memory.write` | Save a durable fact (`key`, `value`, optional `store`) |
-| `memory.search` | Substring search in a store (`query`, optional `store`, `k`) |
+| `memory.search` | Substring or provider search (`query`, optional `store`, `k`) |
 | `memory.list` | List all facts in a store |
 | `memory.remove` | Delete a fact by key |
+| `memory.approve` | Move a pending fact into the injectable store (`require_approval` only) |
+| `memory.reject` | Discard a pending fact (`require_approval` only) |
+| `memory.edit` | Change a pending fact before approving it (`require_approval` only) |
 
 Writes are skipped when `RunContext.user_id` is missing or `should_persist` is `False` (cron / subagent / `persistable=False`).
+
+## Memory providers
+
+When `memory.provider` is unset, the runner and `MemoryPlugin` call `load` / `save` / `merge_entities` on `cross_session_memory_store` exactly as before. Custom stores such as a product `TenantMemoryStore` need **zero** edits.
+
+When `memory.provider` is set, tools and prompt injection go through `MemoryProvider`:
+
+| Method | What it does |
+|--------|--------------|
+| `prefetch(ctx)` | Facts injected into the system prompt |
+| `search(ctx, query, k)` | Semantic or keyword search |
+| `write` / `remove` | Mutate one fact |
+| `list_stores(ctx)` | Named store list |
+| `curate(ctx, turn_summary)` | Optional provider-side write after a turn |
+
+| Provider id | Extra | Notes |
+|-------------|-------|--------|
+| `builtin_semantic` / `builtin_kv` | none | Wraps `CrossSessionMemoryStore` and adds token-overlap search |
+| `mem0` | install `mem0ai` yourself | Optional. Not a Nexus required dependency |
+| `honcho` | install `honcho` yourself | Optional. Not a Nexus required dependency |
+| `custom_class` | your module | `provider_class` dotted path |
+
+Keep `from nexus.memory.provider import MemoryProviderProtocol` — it is an alias of `MemoryProvider`.
+
+## Human review (`require_approval`)
+
+Default is `False`: the curator writes injectable facts immediately.
+
+When `True`:
+
+1. Curator and `memory.write` write to a `pending` store.
+2. Prompt injection (`prefetch`) returns only approved facts.
+3. The agent (or an operator via `resume()`) calls `memory.approve`, `memory.reject`, or `memory.edit`.
+
+This is off until a tenant asks for it. It uses the same pending-interaction style as other human-in-the-loop pauses.
 
 ## Isolation scope
 
@@ -142,6 +185,7 @@ If you only need within-chat context, rely on chat history and RCS. Memory is fu
 
 ## Next steps
 
+- [RAG](rag.md) — document retrieval (separate from user facts)
 - [Agent config](agent-config.md)
 - [Storage](storage.md)
 - [Custom memory stores](../guides/custom-memory-store.md)

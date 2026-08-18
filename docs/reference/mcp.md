@@ -38,6 +38,8 @@ servers = [
     MCPServerConfig(
         name="filesystem",
         command=["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+        transport="stdio",          # stdio | sse | streamable-http
+        tools=["read_file", "list_dir"],  # optional allow-list; omit = all discovered tools
     )
 ]
 mounted = await mount_mcp_tools(registry, servers)   # currently returns []
@@ -61,3 +63,21 @@ await mount_mcp_tools(registry, servers, credential_resolver=resolve)
 The resolver receives the calling `RunContext` and the server name, and its return
 value is merged into the tool arguments. Credentials should come from
 `RunContext.auth` or `RunContext.services`, never module-level config.
+
+### Client checklist (roadmap M2)
+
+When the transport is implemented, a working client must include:
+
+| Field / hook | Why |
+|--------------|-----|
+| `MCPServerConfig.transport` | Explicit `stdio`, `sse`, or `streamable-http` (do not guess) |
+| `MCPServerConfig.tools` | Allow-list; `None` mounts every discovered tool |
+| `credential_resolver(ctx, server_name)` | Per-tenant secrets from `RunContext`, not a global file |
+
+`mount_mcp_tools` already skips tools that are not in `server.tools` when that list is set.
+
+## Next steps
+
+- [Tools](tools.md)
+- [Run context](run-context.md)
+- [Guardrails](guardrails.md)

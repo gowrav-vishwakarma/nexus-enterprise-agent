@@ -30,15 +30,16 @@ class SkillsPlugin:
     @tool(
         name="load_skill",
         description=(
-            "Load the full instructions for a skill by name. Use when a task matches "
-            "a skill listed in the available skills catalog."
+            "Load skill instructions by name. Pass section='all' (default) for the "
+            "full SKILL.md, or a ## heading name (for example 'security') to load "
+            "only that section."
         ),
     )
-    def load_skill(self, skill_name: str) -> str:
-        """Return full SKILL.md body and resource/script index."""
+    def load_skill(self, skill_name: str, section: str = "all") -> str:
+        """Return SKILL.md body (full or one ## section) and resource index."""
         try:
             skill = self.registry.get_skill(skill_name, self.run_context)
-            return skill.format_load_response()
+            return skill.format_load_response(section=section)
         except SkillNotFoundError as exc:
             return f"Error: {exc}"
 

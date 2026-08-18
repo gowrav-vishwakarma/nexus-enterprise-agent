@@ -21,6 +21,9 @@ When checking behaviour, read the docs first, then the code; if they disagree, u
 | `nexus/guardrails/*` | `docs/reference/guardrails.md` |
 | `nexus/mcp/*` | `docs/reference/mcp.md` |
 | `nexus/rag/*` | `docs/reference/rag.md` |
+| `nexus/memory/*` | `docs/reference/memory.md` |
+| `nexus/skills/models.py` or `nexus/skills/plugin.py` | `docs/reference/skills.md` |
+| `nexus/multiagent/orchestrator.py` | `docs/reference/multi-agent.md` |
 | `nexus/serve/*`, `nexus/cli/*` | `docs/reference/serve.md` |
 | `nexus/serve/replay.py` | `docs/reference/streaming.md` (Reattaching to a dropped stream), `docs/reference/serve.md` |
 | `nexus/events/emitter.py` or `nexus/guardrails/redaction.py` / `audit.py` | `docs/reference/events.md`, `docs/reference/guardrails.md` |
@@ -39,6 +42,14 @@ When checking behaviour, read the docs first, then the code; if they disagree, u
 ## how to run python code
 
 the project is made with uv, so any python code must be run with uv to pick all dependencies.
+
+```bash
+uv sync --extra sqlite --extra file
+uv run pytest
+uv run pytest -m live_llm   # real LLM calls; needs NEXUS_LLM_* in .env
+```
+
+Test tools (pytest, ruff, aiosqlite, …) live in `[dependency-groups] dev`, which `uv sync` installs by default. Do not `uv pip install` them into a local venv — that skips the lockfile and other machines will miss the packages. Use `uv add --dev <pkg>` if you need a new test dependency.
 
 ## README policy
 

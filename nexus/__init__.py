@@ -61,7 +61,11 @@ from nexus.memory import (
     SQLiteCrossSessionMemoryStore,
     PostgreSQLCrossSessionMemoryStore,
     RedisCrossSessionMemoryStore,
+    MemoryProvider,
+    BuiltInSemanticMemoryProvider,
 )
+from nexus.rag.config import RAGConfig
+from nexus.rag.protocol import RAGProvider
 from nexus.persistence import PersistenceBundle, PersistenceFactory, PersistenceResolver
 from nexus.multiagent.orchestrator import AgentOrchestrator
 from nexus.multiagent.results import AgentGroupResult
@@ -133,6 +137,10 @@ __all__ = [
     "SQLiteCrossSessionMemoryStore",
     "PostgreSQLCrossSessionMemoryStore",
     "RedisCrossSessionMemoryStore",
+    "MemoryProvider",
+    "BuiltInSemanticMemoryProvider",
+    "RAGConfig",
+    "RAGProvider",
     # Persistence
     "PersistenceBundle",
     "PersistenceFactory",

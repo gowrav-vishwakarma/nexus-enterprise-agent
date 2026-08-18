@@ -15,6 +15,8 @@ from nexus.memory.cross_session_store import (
     make_cross_session_memory_key,
     resolve_cross_session_namespace,
 )
+from nexus.memory.provider import MemoryProvider, MemoryProviderProtocol
+from nexus.memory.providers.builtin_semantic import BuiltInSemanticMemoryProvider
 
 __all__ = [
     "MemoryCurator",
@@ -27,4 +29,7 @@ __all__ = [
     "RedisCrossSessionMemoryStore",
     "make_cross_session_memory_key",
     "resolve_cross_session_namespace",
+    "MemoryProvider",
+    "MemoryProviderProtocol",
+    "BuiltInSemanticMemoryProvider",
 ]

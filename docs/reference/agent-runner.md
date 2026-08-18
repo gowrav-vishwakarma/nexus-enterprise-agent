@@ -24,6 +24,8 @@ How `RunContext`, `SessionScope`, `storage_config`, and `cross_session_memory_st
 | `run_context` | No | empty `RunContext()` | Customer, user, chat id for this call |
 | `event_emitter` | No | new `NexusEventEmitter` | Observability event hook |
 | `cross_session_memory_store` | No | `None` | Live store for user facts across chat threads (separate from chat JSON) |
+| `rag_provider` | No | built from `config.rag` | Optional `RAGProvider`. Ignored when `config.rag` is `None` |
+| `memory_provider` | No | built from `config.memory.provider` | Optional `MemoryProvider`. Unset provider keeps the KV store path |
 | `on_turn_end` | No | `None` | Async hook after each persisted turn; may return `TurnDecision` to stop or inject a message |
 
 Storage resolution order: `storage_config` on runner → `config.storage` → in-memory.

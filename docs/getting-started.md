@@ -23,7 +23,7 @@ The repo already includes a working example at [examples/orchestration/](../exam
 ## Step 1: Install
 
 ```bash
-uv sync --extra dev --extra sqlite --extra litellm
+uv sync --extra sqlite --extra litellm
 ```
 
 Copy [.env.example](../.env.example) to `.env` and set your LLM API key:
@@ -247,3 +247,5 @@ For pipeline choice (cascaded vs S2S vs IVR), see [guides/pipelines.md](guides/p
 - [Architecture](architecture.md)
 - [Multi-agent patterns](reference/multi-agent.md)
 - [SaaS example guide](guides/saas-example.md)
+- [RAG](reference/rag.md) — opt-in document retrieval
+- [Memory](reference/memory.md) — user facts across chats

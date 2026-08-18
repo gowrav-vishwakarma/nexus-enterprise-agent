@@ -148,7 +148,31 @@ dev = [
     "asyncpg>=0.29",
     "redis>=5.0",
     "hiredis>=3.0",
+    "python-dotenv>=1.0",
 ]
+
+# Default `uv sync` / `uv run pytest` group. Keep in sync with optional extra `dev`.
+# Do not `uv pip install` test tools — they would be missing on other machines.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.14",
+    "respx>=0.21",
+    "faker>=25.0",
+    "coverage>=7.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "filelock>=3.13",
+    "aiosqlite>=0.20",
+    "asyncpg>=0.29",
+    "redis>=5.0",
+    "hiredis>=3.0",
+    "python-dotenv>=1.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
 
 [project.scripts]
 nexus = "nexus.cli.main:main"

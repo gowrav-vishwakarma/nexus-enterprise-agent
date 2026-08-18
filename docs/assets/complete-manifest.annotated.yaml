@@ -75,6 +75,18 @@ agents:
     # memory:                          # optional, default: disabled — cross-session user facts
     #   enabled: true
     #   inject_into_prompt: true       # optional, default: true — show user_memory in system prompt
+    #   provider: builtin_semantic     # optional, default: none — CrossSessionMemoryStore path
+    #   require_approval: false        # optional, default: false — HITL pending facts
+    # rag:                             # optional, default: none — no rag.retrieve tool unless set
+    #   provider: in_memory            # in_memory | pgvector | custom_class
+    #   collection: handbook
+    #   chunker:
+    #     strategy: recursive          # fixed | recursive | semantic | none
+    #     chunk_size: 256
+    #     overlap: 32
+    #   retrieval:
+    #     k: 3
+    #     hybrid: true                 # dense + keyword fusion
     # context_summary:                 # optional, default: disabled — fold oldest turns when context fills
     #   summarize_on: 0.8              # trigger at 80% of context_window_tokens
     #   inject_into_prompt: true       # optional, default: true — show summary_text in system prompt
@@ -120,7 +132,8 @@ groups:
     members: [supervisor, analysis_pipeline]  # nested group reference
 
   # pattern: parallel runs all members concurrently on the same input and
-  # combines their replies. aggregation_strategy: concat (labelled) | first_complete
+  # combines their replies. aggregation_strategy: concat (labelled) | first_complete | vote
+  # (plurality of identical replies, no extra LLM call). consensus is held until cost/budget wiring.
   # analysis_panel:
   #   pattern: parallel
   #   aggregation_strategy: concat      # optional, default: supervisor

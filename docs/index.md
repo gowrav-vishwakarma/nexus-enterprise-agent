@@ -113,7 +113,14 @@ pip install "nexus-enterprise-agent[realtime,fastapi,grpc,server,litellm]"
 For local development:
 
 ```bash
-uv sync --extra dev --extra sqlite --extra file
+uv sync --extra sqlite --extra file
+```
+
+Pytest, ruff, and aiosqlite come from the default `dev` group (`uv add --dev`). For the full test extras (FastAPI, gRPC, Redis, …):
+
+```bash
+uv sync --extra test
+uv run pytest
 ```
 
 For Voice Lab:

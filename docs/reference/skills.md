@@ -16,7 +16,7 @@
 | Stage | What loads | When |
 |-------|------------|------|
 | Advertise | Skill name + description | Start of run (`activation_mode` auto or both) |
-| Activate | Full `SKILL.md` | Agent calls `skills.load_skill` |
+| Activate | Full `SKILL.md`, or one `##` section | Agent calls `skills.load_skill` (optional `section`) |
 | Execute | Files in `references/`, `assets/` | Agent calls `skills.read_skill_resource` |
 
 ## Folder layout (agentskills.io)
@@ -75,11 +75,23 @@ See [Skills storage](../guides/skills-storage.md) for resolver and backend examp
 
 | Mode | System prompt | Tools |
 |------|---------------|-------|
-| `auto` | Catalog only | `load_skill`, `read_skill_resource` |
+| `auto` | Catalog only | `load_skill` (optional `section`), `read_skill_resource` |
 | `explicit` | Full bodies of listed skills | Same |
 | `both` | Explicit bodies + catalog for rest | Same |
 
 Per-request skills via `RunContext(metadata={"skills": ["code-review"]})` with `explicit` or `both` mode.
+
+## Section disclosure (`section=`)
+
+`skills.load_skill(skill_name, section="all")` is the default: the full body plus a short index of `##` headings.
+
+Pass `section` (matched case-insensitively against a heading) to inject only that part:
+
+```text
+skills.load_skill("code-review", section="security")
+```
+
+Unknown sections return an error that lists the available headings. This keeps the prompt small (catalog → body → one section) instead of always dumping the whole file.
 
 ## Learned skills
 

@@ -1,0 +1,50 @@
+{"id":"q01","query":"What river is the Nile?","doc":"The Nile is a long river in Africa.","answer":"Africa"}
+{"id":"q02","query":"What is photosynthesis?","doc":"Photosynthesis converts sunlight into chemical energy in plants.","answer":"sunlight"}
+{"id":"q03","query":"Capital of France?","doc":"Paris is the capital city of France.","answer":"Paris"}
+{"id":"q04","query":"Who wrote Hamlet?","doc":"William Shakespeare wrote the play Hamlet.","answer":"Shakespeare"}
+{"id":"q05","query":"What planet is closest to the Sun?","doc":"Mercury is the closest planet to the Sun.","answer":"Mercury"}
+{"id":"q06","query":"What do pandas eat?","doc":"Giant pandas mainly eat bamboo.","answer":"bamboo"}
+{"id":"q07","query":"Where is the Eiffel Tower?","doc":"The Eiffel Tower stands in Paris, France.","answer":"Paris"}
+{"id":"q08","query":"What gas do plants absorb?","doc":"Plants absorb carbon dioxide during photosynthesis.","answer":"carbon dioxide"}
+{"id":"q09","query":"Who developed relativity?","doc":"Albert Einstein developed the theory of relativity.","answer":"Einstein"}
+{"id":"q10","query":"What is H2O?","doc":"H2O is the chemical formula for water.","answer":"water"}
+{"id":"q11","query":"Largest ocean on Earth?","doc":"The Pacific Ocean is the largest ocean on Earth.","answer":"Pacific"}
+{"id":"q12","query":"What language does Python use?","doc":"Python is a high-level programming language.","answer":"programming"}
+{"id":"q13","query":"Where do penguins live?","doc":"Many penguin species live in Antarctica.","answer":"Antarctica"}
+{"id":"q14","query":"What is mitochondria?","doc":"The mitochondria is the powerhouse of the cell.","answer":"powerhouse"}
+{"id":"q15","query":"Who painted the Mona Lisa?","doc":"Leonardo da Vinci painted the Mona Lisa.","answer":"Leonardo"}
+{"id":"q16","query":"What metal is Au?","doc":"Au is the chemical symbol for gold.","answer":"gold"}
+{"id":"q17","query":"Tallest mountain on Earth?","doc":"Mount Everest is the tallest mountain on Earth.","answer":"Everest"}
+{"id":"q18","query":"What do bees make?","doc":"Honey bees make honey from nectar.","answer":"honey"}
+{"id":"q19","query":"Capital of Japan?","doc":"Tokyo is the capital of Japan.","answer":"Tokyo"}
+{"id":"q20","query":"What is gravity?","doc":"Gravity is the force that attracts masses together.","answer":"force"}
+{"id":"q21","query":"Who invented the telephone?","doc":"Alexander Graham Bell invented the telephone.","answer":"Bell"}
+{"id":"q22","query":"What is DNA?","doc":"DNA stores genetic information in living cells.","answer":"genetic"}
+{"id":"q23","query":"Largest planet in the solar system?","doc":"Jupiter is the largest planet in the solar system.","answer":"Jupiter"}
+{"id":"q24","query":"What is boiling point of water?","doc":"Water boils at 100 degrees Celsius at sea level.","answer":"100"}
+{"id":"q25","query":"Who is the author of 1984?","doc":"George Orwell wrote the novel 1984.","answer":"Orwell"}
+{"id":"q26","query":"What continent is Egypt in?","doc":"Egypt is a country in Africa.","answer":"Africa"}
+{"id":"q27","query":"What do cacti store?","doc":"Cacti store water in their stems to survive deserts.","answer":"water"}
+{"id":"q28","query":"What is a haiku?","doc":"A haiku is a short Japanese poem with three lines.","answer":"poem"}
+{"id":"q29","query":"Fastest land animal?","doc":"The cheetah is the fastest land animal.","answer":"cheetah"}
+{"id":"q30","query":"What is rust?","doc":"Rust is iron oxide formed when iron reacts with oxygen.","answer":"iron"}
+{"id":"q31","query":"Where is the Amazon rainforest?","doc":"The Amazon rainforest is mostly in South America.","answer":"South America"}
+{"id":"q32","query":"What is a sonnet?","doc":"A sonnet is a fourteen-line poem often about love.","answer":"fourteen"}
+{"id":"q33","query":"Who discovered penicillin?","doc":"Alexander Fleming discovered penicillin.","answer":"Fleming"}
+{"id":"q34","query":"What instrument has 88 keys?","doc":"A piano typically has 88 keys.","answer":"piano"}
+{"id":"q35","query":"Capital of Italy?","doc":"Rome is the capital of Italy.","answer":"Rome"}
+{"id":"q36","query":"What is chlorophyll?","doc":"Chlorophyll is the green pigment that captures light in plants.","answer":"pigment"}
+{"id":"q37","query":"Who wrote Pride and Prejudice?","doc":"Jane Austen wrote Pride and Prejudice.","answer":"Austen"}
+{"id":"q38","query":"What is a comet?","doc":"A comet is an icy body that orbits the Sun.","answer":"icy"}
+{"id":"q39","query":"Largest desert on Earth?","doc":"The Antarctic polar desert is the largest desert on Earth.","answer":"Antarctic"}
+{"id":"q40","query":"What is silk made by?","doc":"Silk is a fiber produced by silkworms.","answer":"silkworms"}
+{"id":"q41","query":"Who formulated the laws of motion?","doc":"Isaac Newton formulated the three laws of motion.","answer":"Newton"}
+{"id":"q42","query":"What is magma?","doc":"Magma is molten rock beneath the Earth's surface.","answer":"molten"}
+{"id":"q43","query":"Capital of Australia?","doc":"Canberra is the capital of Australia.","answer":"Canberra"}
+{"id":"q44","query":"What is a nebula?","doc":"A nebula is a cloud of gas and dust in space.","answer":"cloud"}
+{"id":"q45","query":"Who painted Starry Night?","doc":"Vincent van Gogh painted The Starry Night.","answer":"Gogh"}
+{"id":"q46","query":"What is helium?","doc":"Helium is a light noble gas used in balloons.","answer":"gas"}
+{"id":"q47","query":"Where is Machu Picchu?","doc":"Machu Picchu is an Incan citadel in Peru.","answer":"Peru"}
+{"id":"q48","query":"What is yeast used for?","doc":"Yeast is a fungus used to leaven bread and ferment beer.","answer":"bread"}
+{"id":"q49","query":"Who composed the Four Seasons?","doc":"Antonio Vivaldi composed The Four Seasons.","answer":"Vivaldi"}
+{"id":"q50","query":"What is a glacier?","doc":"A glacier is a slow-moving mass of ice on land.","answer":"ice"}

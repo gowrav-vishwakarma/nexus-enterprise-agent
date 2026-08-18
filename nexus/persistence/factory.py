@@ -74,6 +74,33 @@ class PersistenceFactory:
 
         return InMemoryCrossSessionMemoryStore()
 
+    @staticmethod
+    def create_rag_provider(rag_config: Any, *, session_adapter: Optional[Any] = None):
+        """Build a RAGProvider from RAGConfig, sharing a Postgres pool when present."""
+        from nexus.rag.factory import build_rag_provider
+
+        extra: dict[str, Any] = {}
+        if session_adapter is not None and getattr(rag_config, "provider", None) == "pgvector":
+            pool = getattr(session_adapter, "_pool", None)
+            if pool is not None:
+                extra["pool"] = pool
+            dsn = getattr(session_adapter, "dsn", None)
+            if dsn:
+                extra.setdefault("dsn", dsn)
+        return build_rag_provider(rag_config, **extra)
+
+    @staticmethod
+    def create_memory_provider(
+        memory_config: Any,
+        store: CrossSessionMemoryStore,
+        *,
+        agent_name: str = "",
+    ):
+        """Build a MemoryProvider, or None when memory.provider is unset."""
+        from nexus.memory.factory import build_memory_provider
+
+        return build_memory_provider(memory_config, store, agent_name=agent_name)
+
     @classmethod
     def from_storage_config(
         cls,

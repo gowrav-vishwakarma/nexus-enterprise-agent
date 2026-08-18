@@ -45,7 +45,7 @@ pip install "nexus-enterprise-agent[sqlite,litellm,fastapi,realtime,grpc]"
 ```bash
 git clone https://github.com/gowrav-vishwakarma/nexus-enterprise-agent.git
 cd nexus-enterprise-agent
-uv sync --extra dev --extra sqlite --extra file
+uv sync --extra sqlite --extra file
 cp .env.example .env   # set your LLM API key
 ```
 

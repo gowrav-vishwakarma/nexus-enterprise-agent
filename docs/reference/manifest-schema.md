@@ -48,7 +48,8 @@ Agents accept the same fields as `AgentConfig` plus orchestration persona keys:
 | `turns` | No | `TurnConfig()` defaults | Loop limits |
 | `tool_plugins` | No | `[]` | Allow-list of plugin namespaces |
 | `toolset` | No | `None` | Toolset name or list of names (packs are defined on the tool registry in code) |
-| `memory` | No | disabled | Cross-session user memory settings |
+| `memory` | No | disabled | Cross-session user memory settings (including optional `provider` / `require_approval`) |
+| `rag` | No | `None` | Optional retrieval (`provider`, `chunker`, `retrieval`) — see [rag.md](rag.md) |
 | `context_summary` | No | disabled | Rolling conversation summary (`summarize_on`) |
 | `rcs` | No | disabled | Long-context summarization |
 | `skills` | No | disabled | Static agentskills.io folders + optional learned skill store |
@@ -92,12 +93,12 @@ See [agent-config.md](agent-config.md) for nested fields (`turns`, `memory`, `rc
 | `members` | No | `[]` | Agent names, inline agents, or nested group refs |
 | `session_id_prefix` | No | `""` | Prefix for member chat ids |
 | `max_turns` | No | `20` | Total turns across the group |
-| `aggregation_strategy` | No | `supervisor` | For `parallel`: `concat` (labelled join) or `first_complete` |
+| `aggregation_strategy` | No | `supervisor` | For `parallel`: `concat` (labelled join), `first_complete`, or `vote` (plurality of `final_response` strings; no extra LLM call). `consensus` (an extra LLM call billed to the tenant) is **held** until guardrails cost/budget wiring exists |
 | `description` | No | `None` | Human-readable description |
 | `stream_output` | No | `False` | Default streaming mode for the group |
 
 The `parallel` pattern runs all members concurrently on the same input and
-combines their replies (see `aggregation_strategy`). The `voice_team` pattern
+combines their replies (see `aggregation_strategy`, including `vote`). The `voice_team` pattern
 (loaded by `RealtimeRuntime`, not the text runtime) wires a voice responder with
 an optional context agent — see [realtime-agents.md](realtime-agents.md).
 

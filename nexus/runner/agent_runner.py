@@ -127,6 +127,8 @@ class AgentRunner:
         run_context: Optional[RunContext] = None,
         event_emitter: Optional[NexusEventEmitter] = None,
         cross_session_memory_store: Optional[CrossSessionMemoryStore] = None,
+        rag_provider: Optional[Any] = None,
+        memory_provider: Optional[Any] = None,
         on_turn_end: Optional[
             Callable[[TurnContext], Awaitable[Optional[TurnDecision]]]
         ] = None,
@@ -148,6 +150,29 @@ class AgentRunner:
 
         self.run_context = run_context or RunContext()
         self.cross_session_memory_store = cross_session_memory_store
+        self.rag_provider = rag_provider
+        self.memory_provider = memory_provider
+        if self.rag_provider is None and self.config.rag is not None:
+            from nexus.rag.factory import build_rag_provider
+
+            extra: dict[str, Any] = {}
+            adapter = getattr(self.session_manager, "_adapter", None)
+            if adapter is not None and self.config.rag.provider == "pgvector":
+                pool = getattr(adapter, "_pool", None)
+                if pool is not None:
+                    extra["pool"] = pool
+                dsn = getattr(adapter, "dsn", None)
+                if dsn:
+                    extra.setdefault("dsn", dsn)
+            self.rag_provider = build_rag_provider(self.config.rag, **extra)
+        if self.memory_provider is None and self.config.memory.provider:
+            from nexus.memory.factory import build_memory_provider
+
+            self.memory_provider = build_memory_provider(
+                self.config.memory,
+                self.cross_session_memory_store,
+                agent_name=self.config.name,
+            )
         self.on_turn_end = on_turn_end
         self.hooks = hooks or RunnerHooks()
         if on_turn_end and self.hooks.on_turn_end is None:
@@ -182,6 +207,7 @@ class AgentRunner:
             event_emitter=self.event_emitter,
             cross_session_memory_store=self.cross_session_memory_store,
             agent_name=self.config.name,
+            memory_provider=self.memory_provider,
         )
         self.context_summarizer = ContextSummarizer(
             config=self.config.context_summary,
@@ -411,11 +437,14 @@ class AgentRunner:
             and "skill_manage" not in plugins
         ):
             plugins.append("skill_manage")
+        if self.config.rag is not None and "rag" not in plugins:
+            plugins.append("rag")
         return plugins
 
     def _setup_skills(self) -> None:
-        """Register skills/memory plugins and prepare prompt injection content."""
+        """Register skills/memory/rag plugins and prepare prompt injection content."""
         self._setup_memory_plugin()
+        self._setup_rag_plugin()
         self._setup_learned_skills()
 
         if not self.skills_registry:
@@ -441,11 +470,9 @@ class AgentRunner:
             self._explicit_skills_content = build_explicit_skills_block(explicit)
 
     def _setup_memory_plugin(self) -> None:
-        if not (
-            self.config.memory.enabled
-            and self.config.memory.expose_tools
-            and self.cross_session_memory_store
-        ):
+        if not (self.config.memory.enabled and self.config.memory.expose_tools):
+            return
+        if not self.cross_session_memory_store and not self.memory_provider:
             return
         from nexus.memory.plugin import create_memory_plugin
 
@@ -453,8 +480,16 @@ class AgentRunner:
             self.cross_session_memory_store,
             self.config.memory,
             agent_name=self.config.name,
+            provider=self.memory_provider,
         )
         self.tool_registry.register_plugin(plugin)
+
+    def _setup_rag_plugin(self) -> None:
+        if self.config.rag is None or self.rag_provider is None:
+            return
+        from nexus.rag.retrieve import RetrieveToolPlugin
+
+        self.tool_registry.register_plugin(RetrieveToolPlugin(self.rag_provider))
 
     def _setup_learned_skills(self) -> None:
         cfg = self.config.skills
@@ -604,9 +639,19 @@ class AgentRunner:
         ``inject="always"`` using the same namespace suffix rule as the memory
         plugin. Multiple stores prefix keys as ``{store}/{key}``.
         """
-        if not self.config.memory.enabled or not self.cross_session_memory_store:
+        if not self.config.memory.enabled:
             return {}
         if not self.run_context.user_id:
+            return {}
+        if self.memory_provider is not None:
+            try:
+                return dict(await self.memory_provider.prefetch(self.run_context))
+            except Exception as exc:
+                logger.warning(
+                    "AgentRunner: failed to prefetch memory via provider: %s", exc
+                )
+                return {}
+        if not self.cross_session_memory_store:
             return {}
 
         company_id = self.run_context.company_id

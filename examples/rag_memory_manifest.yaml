@@ -1,0 +1,44 @@
+# Optional RAG + memory provider example.
+# Run: uv run python examples/orchestration/run_rag_memory.py
+version: "1"
+root: librarian
+
+defaults:
+  llm: &default_llm
+    provider: openai
+    model: ${ENV:OPENAI_MODEL|gpt-4o-mini}
+    api_key: ${ENV:OPENAI_API_KEY|mock-key}
+
+storage:
+  adapter: memory
+
+agents:
+  librarian:
+    llm: *default_llm
+    persona:
+      role: Librarian
+      goal: Answer from retrieved passages and remembered user facts
+    memory:
+      enabled: true
+      expose_tools: true
+      provider: builtin_semantic
+      require_approval: false
+      stores:
+        - name: user
+          inject: always
+          description: Stable user profile
+        - name: notes
+          inject: on_recall
+          description: Searchable notes
+    rag:
+      provider: in_memory
+      collection: handbook
+      chunker:
+        strategy: recursive
+        chunk_size: 256
+        overlap: 32
+        contextual: false
+      retrieval:
+        k: 3
+        hybrid: true
+        rerank: false

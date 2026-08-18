@@ -29,6 +29,8 @@ examples. Each one runs as-is.
 | [examples/orchestration/research_team_prompts.py](../examples/orchestration/research_team_prompts.py) | PROMPTS dict, Jinja templates |
 | [examples/orchestration/run_team.py](../examples/orchestration/run_team.py) | CLI to load manifest, build a ToolRegistry with add_toolset(), and run |
 | [examples/orchestration/run_team_python.py](../examples/orchestration/run_team_python.py) | Same research team built in Python (`AgentGroupConfig` + `AgentOrchestrator`) |
+| [examples/rag_memory_manifest.yaml](../examples/rag_memory_manifest.yaml) | Opt-in `rag:` + `memory.provider` on one agent |
+| [examples/orchestration/run_rag_memory.py](../examples/orchestration/run_rag_memory.py) | Ingest a few docs, then run the librarian agent |
 
 ```bash
 uv run python examples/orchestration/run_team.py "Your question here"

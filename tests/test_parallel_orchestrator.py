@@ -72,7 +72,16 @@ async def test_parallel_concat_aggregation():
 
 
 @pytest.mark.asyncio
-async def test_parallel_first_complete():
+async def test_parallel_vote_aggregation():
+    orch = _build(_group("vote"))
+    with patch.object(
+        orch._members["alpha"].llm_proxy, "chat", _chat_for("yes")
+    ), patch.object(
+        orch._members["beta"].llm_proxy, "chat", _chat_for("yes")
+    ):
+        result = await orch.run("question")
+    assert result.status == "completed"
+    assert result.final_response == "yes"
     orch = _build(_group("first_complete"))
     with patch.object(
         orch._members["alpha"].llm_proxy, "chat", _chat_for("only A")

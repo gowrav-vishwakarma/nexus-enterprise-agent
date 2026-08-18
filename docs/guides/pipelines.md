@@ -121,7 +121,7 @@ groups:
 
 ### Parallel (same input, combine outputs)
 
-**What it does:** Every member runs on the same `user_message` concurrently. Results are merged per `aggregation_strategy` (`concat` or `first_complete`).
+**What it does:** Every member runs on the same `user_message` concurrently. Results are merged per `aggregation_strategy` (`concat`, `first_complete`, or `vote`).
 
 **When to use it:** Multiple independent opinions on one question (e.g. two reviewers).
 

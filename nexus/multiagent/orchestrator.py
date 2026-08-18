@@ -404,7 +404,15 @@ class AgentOrchestrator:
             return None
         if self.config.aggregation_strategy == "first_complete":
             return responses[0][1]
+        if self.config.aggregation_strategy == "vote":
+            from collections import Counter
+
+            counts = Counter(resp for _, resp in responses)
+            winner, _ = counts.most_common(1)[0]
+            return winner
         # Default: concatenate labeled member outputs.
+        # ``consensus`` is declared on AgentGroupConfig but held until cost/
+        # budget wiring exists (extra LLM call billed to the tenant).
         return "\n\n".join(f"[{name}]\n{resp}" for name, resp in responses)
 
     async def _run_parallel(

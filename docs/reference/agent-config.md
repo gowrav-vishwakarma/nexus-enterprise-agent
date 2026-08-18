@@ -8,6 +8,7 @@
 - **Turn** — One cycle of: send messages to LLM → maybe call tools → save results.
 - **RCS** — Runtime Context Summarization; keeps long tool outputs from filling the context window.
 - **Memory** — Durable user facts stored across chat threads (cross-session).
+- **RAG** — Optional retrieval over a document collection (`AgentConfig.rag`). Unset means no retrieve tool.
 
 ## AgentConfig
 
@@ -26,6 +27,7 @@
 
 The `toolset` value refers to a pack you define on the `ToolRegistry` with `add_toolset(name, [callables])` or `discover_package(...)`. Use `toolset` for modern flat-tool allow-lists; keep `tool_plugins` only when you still use class-based `@tool_plugin` namespaces.
 | `skills` | No | disabled | Static + learned skills — see [skills.md](skills.md) |
+| `rag` | No | `None` | Optional retrieval. `None` registers no `rag.retrieve` tool — see [rag.md](rag.md) |
 | `result_type` | No | `None` | Pydantic model for structured output |
 | `trace_enabled` | No | `False` | Emit observability events |
 | `trace_sink` | No | `"stdout"` | `"stdout"` or `"otel"` |
@@ -97,7 +99,7 @@ events, separate from the answer. See [streaming.md](streaming.md#reasoning-thin
 | `pattern` | No | `supervisor` | `supervisor`, `pipeline`, `parallel` |
 | `members` | No | `[]` | List of `AgentConfig` or nested `AgentGroupConfig` |
 | `max_turns` | No | `20` | Total turns across members (enforced by orchestrator) |
-| `aggregation_strategy` | No | `supervisor` | How to combine results |
+| `aggregation_strategy` | No | `supervisor` | For `parallel`: `concat`, `first_complete`, or `vote` (plurality of replies; no extra LLM call). `consensus` is **held** until cost/budget wiring exists |
 | `session_id_prefix` | No | `""` | Prefix for member chat ids |
 | `supervisor` | No | `None` | Lead member name for supervisor pattern |
 | `persist_members` | No | `False` | Persist member chat sessions when `True` |
@@ -114,6 +116,7 @@ See [context-summary.md](context-summary.md) for the full field table (`summariz
 ## Related references
 
 - [Memory](memory.md)
+- [RAG](rag.md)
 - [Context summary](context-summary.md)
 - [RCS fields](#runtimecontextsummarizerconfig-rcs) — see RuntimeContextSummarizerConfig below
 

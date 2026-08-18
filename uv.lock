@@ -2416,6 +2416,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-mock" },
+    { name = "python-dotenv" },
     { name = "redis" },
     { name = "respx" },
     { name = "ruff" },
@@ -2533,6 +2534,24 @@ test = [
     { name = "websockets" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "aiosqlite" },
+    { name = "asyncpg" },
+    { name = "coverage" },
+    { name = "faker" },
+    { name = "filelock" },
+    { name = "hiredis" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-mock" },
+    { name = "python-dotenv" },
+    { name = "redis" },
+    { name = "respx" },
+    { name = "ruff" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", marker = "extra == 'dev'", specifier = ">=0.20" },
@@ -2580,6 +2599,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14" },
+    { name = "python-dotenv", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "python-dotenv", marker = "extra == 'fastapi'", specifier = ">=1.0" },
     { name = "python-multipart", marker = "extra == 'fastapi'", specifier = ">=0.0.9" },
     { name = "python-multipart", marker = "extra == 'serve'", specifier = ">=0.0.9" },
@@ -2603,6 +2623,24 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'realtime'", specifier = ">=12" },
 ]
 provides-extras = ["sqlite", "postgres", "redis", "file", "openai", "anthropic", "gemini", "litellm", "groq", "ollama", "otel", "mcp", "guardrails", "rag", "jobs", "serve", "eval", "fastapi", "realtime", "grpc", "server", "moshi", "all", "test", "dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "aiosqlite", specifier = ">=0.20" },
+    { name = "asyncpg", specifier = ">=0.29" },
+    { name = "coverage", specifier = ">=7.0" },
+    { name = "faker", specifier = ">=25.0" },
+    { name = "filelock", specifier = ">=3.13" },
+    { name = "hiredis", specifier = ">=3.0" },
+    { name = "mypy", specifier = ">=1.10" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "pytest-mock", specifier = ">=3.14" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "redis", specifier = ">=5.0" },
+    { name = "respx", specifier = ">=0.21" },
+    { name = "ruff", specifier = ">=0.4" },
+]
 
 [[package]]
 name = "numpy"

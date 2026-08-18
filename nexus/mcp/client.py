@@ -15,13 +15,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class MCPServerConfig:
-    """Configuration for one MCP server."""
+    """Configuration for one MCP server.
+
+    ``transport``, ``tools``, and per-tenant ``credential_resolver`` (passed to
+    ``mount_mcp_tools``) are the acceptance checklist for a working client:
+    allow-list tools, explicit streamable-http vs SSE vs stdio, and credentials
+    from ``RunContext`` rather than a global file.
+    """
 
     name: str
     command: Optional[list[str]] = None
     url: Optional[str] = None
     env: dict[str, str] = field(default_factory=dict)
     tool_prefix: Optional[str] = None
+    transport: Optional[str] = None  # stdio | sse | streamable-http
+    tools: Optional[list[str]] = None  # allow-list; None = all discovered tools
 
 
 class MCPClient:
@@ -58,6 +66,8 @@ async def mount_mcp_tools(
         prefix = server.tool_prefix or server.name
         for tool_def in await client.list_tools():
             tool_name = tool_def.get("name", "unknown")
+            if server.tools is not None and tool_name not in server.tools:
+                continue
             full_name = f"{prefix}.{tool_name}"
 
             async def _handler(

@@ -81,6 +81,8 @@ def build_agent_config() -> AgentConfig:
                 max_tokens_per_summary=100,             # optional, default: 100
             ),
         ),
+        # rag (optional) — retrieval over a document collection; None = no rag.retrieve tool.
+        # rag=RAGConfig(provider="in_memory"),
         # memory (optional) — durable user facts across chat threads.
         memory=MemoryConfig(
             enabled=False,                              # optional, default: False

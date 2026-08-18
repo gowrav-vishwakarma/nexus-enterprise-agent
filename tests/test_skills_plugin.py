@@ -27,6 +27,17 @@ def test_load_skill(plugin):
     assert "checklist" in result
 
 
+def test_load_skill_section(plugin):
+    result = plugin.load_skill("code-review", section="instructions")
+    assert "Read the code carefully" in result
+    assert "Examples" not in result or "section: instructions" in result.lower()
+
+
+def test_load_skill_missing_section(plugin):
+    result = plugin.load_skill("code-review", section="does-not-exist")
+    assert "Error" in result
+
+
 def test_load_skill_not_found(plugin):
     result = plugin.load_skill("missing")
     assert "Error" in result

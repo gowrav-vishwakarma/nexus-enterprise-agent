@@ -15,7 +15,7 @@
 |---------|--------|--------------|
 | `supervisor` | Implemented | Lead agent delegates to members |
 | `pipeline` | Implemented | Members run sequentially |
-| `parallel` | Implemented | All members run on the same input; outputs merged per `aggregation_strategy` |
+| `parallel` | Implemented | All members run on the same input; outputs merged per `aggregation_strategy` (`concat`, `first_complete`, `vote`) |
 
 ## AgentGroupConfig
 
@@ -31,6 +31,7 @@ Groups do **not** have an `llm` field. Each member's `AgentConfig` has its own L
 | `persist_members` | No | `False` | When `False`, members run with `is_subagent` and skip durable chat persistence |
 | `context_sharing` | No | `inherit` | `isolated`, `inherit`, or `shared` (write-back to group after each member) |
 | `max_turns` | No | `20` | Total turns across members (**enforced** by the orchestrator) |
+| `aggregation_strategy` | No | `supervisor` | For `parallel`: `concat`, `first_complete`, or `vote` |
 
 ## Member chat ids
 
@@ -45,6 +46,23 @@ Member runners get `RunContext.is_subagent=True` by default (`persist_members=Fa
 Supervisor groups auto-register `supervisor.delegate_to_{member}` tools and **auto-grant** them to the lead agent even when the lead uses a narrow `toolset`. Optional YAML: `supervisor: lead_agent_name`.
 
 Python-only example: [run_team_python.py](../../examples/orchestration/run_team_python.py).
+
+## Parallel aggregation
+
+| Strategy | Extra LLM call? | What it does |
+|----------|-----------------|--------------|
+| `concat` | No | Labelled join of every member's `final_response` |
+| `first_complete` | No | First finished member wins |
+| `vote` | No | Plurality of identical `final_response` strings (`Counter.most_common`) |
+| `consensus` | Yes (held) | Would ask another model to merge replies. **Not shipped** until per-tenant cost/budget wiring exists, because that extra call is billed to the tenant |
+
+```yaml
+groups:
+  review_panel:
+    pattern: parallel
+    aggregation_strategy: vote
+    members: [reviewer_a, reviewer_b, reviewer_c]
+```
 
 ## Pipeline handoff
 

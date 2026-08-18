@@ -1,6 +1,6 @@
 """Cross-session memory configuration models."""
 
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -89,6 +89,28 @@ class MemoryConfig(BaseModel):
         default=6000,
         ge=200,
         description="Max characters of recent conversation fed to the curator",
+    )
+    provider: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional memory provider id: builtin_semantic, builtin_kv, mem0, honcho, "
+            "or custom_class. None = use CrossSessionMemoryStore directly (current behaviour)"
+        ),
+    )
+    provider_class: Optional[str] = Field(
+        default=None,
+        description="Dotted import path when provider is custom_class",
+    )
+    provider_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Kwargs passed to the provider constructor",
+    )
+    require_approval: bool = Field(
+        default=False,
+        description=(
+            "When True, curator writes pending facts; only approved facts are injected. "
+            "Default False keeps immediate curator writes"
+        ),
     )
 
     model_config = {"arbitrary_types_allowed": True}

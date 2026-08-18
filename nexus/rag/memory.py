@@ -24,13 +24,32 @@ class InMemoryVectorStore:
 
     def __init__(self) -> None:
         self._data: Dict[str, List[DocumentChunk]] = {}
+        self._dims: Dict[str, int] = {}
 
     async def upsert(self, collection: str, chunks: list[DocumentChunk]) -> None:
+        dim: int | None = None
+        for chunk in chunks:
+            if chunk.embedding:
+                dim = len(chunk.embedding)
+                break
+        if dim is not None:
+            existing = self._dims.get(collection)
+            if existing is not None and existing != dim:
+                raise ValueError(
+                    f"Embedding dimension mismatch: collection {collection!r} "
+                    f"has dim {existing}, new chunks have dim {dim}"
+                )
+            self._dims[collection] = dim
         self._data.setdefault(collection, []).extend(chunks)
 
     async def search(
         self, collection: str, query_embedding: list[float], k: int = 5
     ) -> list[DocumentChunk]:
+        expected = self._dims.get(collection)
+        if expected is not None and len(query_embedding) != expected:
+            raise ValueError(
+                f"Embedding dimension mismatch: {len(query_embedding)} vs {expected}"
+            )
         items = self._data.get(collection, [])
         scored = [
             (c, _cosine(query_embedding, c.embedding or []))
@@ -39,3 +58,30 @@ class InMemoryVectorStore:
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
         return [c for c, _ in scored[:k]]
+
+
+class InMemorySparseIndex:
+    """Keyword index using token overlap (no extra dependencies)."""
+
+    def __init__(self) -> None:
+        self._data: Dict[str, List[DocumentChunk]] = {}
+
+    async def upsert(self, collection: str, chunks: list[DocumentChunk]) -> None:
+        self._data.setdefault(collection, []).extend(chunks)
+
+    async def search(
+        self, collection: str, query: str, k: int = 5
+    ) -> list[DocumentChunk]:
+        tokens = set(query.lower().split())
+        if not tokens:
+            return []
+        scored: list[tuple[float, DocumentChunk]] = []
+        for chunk in self._data.get(collection, []):
+            chunk_tokens = set(chunk.text.lower().split())
+            if not chunk_tokens:
+                continue
+            overlap = len(tokens & chunk_tokens)
+            if overlap:
+                scored.append((overlap / len(tokens), chunk))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [c for _, c in scored[:k]]

@@ -10,6 +10,7 @@ from nexus.config.context_summary import ContextSummaryConfig
 from nexus.config.memory import MemoryConfig
 from nexus.config.rcs import RuntimeContextSummarizerConfig
 from nexus.config.storage import SessionStorageConfig
+from nexus.rag.config import RAGConfig
 from nexus.skills.config import SkillsConfig
 
 
@@ -101,6 +102,13 @@ class AgentConfig(BaseModel):
     skills: SkillsConfig = Field(
         default_factory=SkillsConfig,
         description="Agent skills configuration (agentskills.io compatible)",
+    )
+    rag: Optional[RAGConfig] = Field(
+        default=None,
+        description=(
+            "Optional retrieval-augmented generation. None (default) registers no "
+            "rag.retrieve tool, so existing apps are unchanged"
+        ),
     )
     result_type: Optional[type] = Field(
         None, description="Pydantic model for structured output"

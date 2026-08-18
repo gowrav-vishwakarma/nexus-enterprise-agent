@@ -7,6 +7,7 @@ from .context_summary import ContextSummaryConfig
 from .memory import MemoryConfig
 from .storage import SessionStorageConfig
 from nexus.skills.config import SkillsConfig
+from nexus.rag.config import RAGConfig, ChunkerConfig, RetrievalConfig
 from .defaults import (
     DEFAULT_RCS_SYSTEM_BLOCK,
     DEFAULT_COMPACTOR_PROMPT,
@@ -28,6 +29,9 @@ __all__ = [
     "ContextSummaryConfig",
     "SessionStorageConfig",
     "SkillsConfig",
+    "RAGConfig",
+    "ChunkerConfig",
+    "RetrievalConfig",
     "DEFAULT_RCS_SYSTEM_BLOCK",
     "DEFAULT_COMPACTOR_PROMPT",
     "DEFAULT_SYSTEM_TEMPLATE",

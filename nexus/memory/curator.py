@@ -20,6 +20,7 @@ from nexus.memory.cross_session_store import (
     CrossSessionMemoryStore,
     resolve_cross_session_namespace,
 )
+from nexus.memory.provider import MemoryProvider
 from nexus.llm.proxy import LLMProxy
 from nexus.session.models import AgentSession
 
@@ -96,6 +97,7 @@ class MemoryCurator:
         event_emitter: Any = None,
         cross_session_memory_store: Optional[CrossSessionMemoryStore] = None,
         agent_name: str = "",
+        memory_provider: Optional[MemoryProvider] = None,
     ):
         self.config = config or MemoryConfig()
         self.llm_proxy = llm_proxy
@@ -105,6 +107,7 @@ class MemoryCurator:
         self.event_emitter = event_emitter
         self.cross_session_memory_store = cross_session_memory_store
         self.agent_name = agent_name
+        self.memory_provider = memory_provider
         self._last_curated_turn: Optional[int] = None
 
     @property
@@ -159,12 +162,25 @@ class MemoryCurator:
 
         return update
 
+    def _persist_store_name(self) -> str:
+        if self.config.require_approval:
+            return "pending"
+        if self.config.stores:
+            return self.config.stores[0].name
+        return "default"
+
     async def _load_existing_entities(self) -> dict[str, str]:
         """Load current cross-session entities for the curator prompt."""
-        if not self.cross_session_memory_store:
-            return {}
         ctx = self.run_context
         if not ctx or not getattr(ctx, "user_id", None):
+            return {}
+        if self.memory_provider is not None:
+            try:
+                return dict(await self.memory_provider.prefetch(ctx))
+            except Exception as exc:
+                logger.warning("MemoryCurator: failed to prefetch via provider: %s", exc)
+                return {}
+        if not self.cross_session_memory_store:
             return {}
 
         namespace = resolve_cross_session_namespace(self.config.namespace, self.agent_name)
@@ -184,9 +200,7 @@ class MemoryCurator:
     async def _persist_entities(
         self, session: AgentSession, turn_index: int, update: MemoryUpdate
     ) -> None:
-        """Merge extracted entities directly into the cross-session memory store."""
-        if not self.cross_session_memory_store:
-            return
+        """Merge extracted entities into the provider or cross-session memory store."""
         ctx = self.run_context
         if not ctx or not getattr(ctx, "user_id", None):
             logger.debug(
@@ -194,17 +208,29 @@ class MemoryCurator:
             )
             return
 
+        store_name = self._persist_store_name()
         namespace = resolve_cross_session_namespace(self.config.namespace, self.agent_name)
+        if store_name != "default":
+            namespace = f"{namespace}:{store_name}"
+
         try:
-            record = await self.cross_session_memory_store.merge_entities(
-                getattr(ctx, "tenant_id", None),
-                ctx.user_id,
-                namespace,
-                update.entities,
-                max_entities=self.config.max_entities,
-                company_id=getattr(ctx, "company_id", None),
-            )
-            if self.event_emitter and record.entity_memory:
+            if self.memory_provider is not None:
+                for key, value in update.entities.items():
+                    await self.memory_provider.write(ctx, key, value, store=store_name)
+                entity_count = len(update.entities)
+            elif self.cross_session_memory_store:
+                record = await self.cross_session_memory_store.merge_entities(
+                    getattr(ctx, "tenant_id", None),
+                    ctx.user_id,
+                    namespace,
+                    update.entities,
+                    max_entities=self.config.max_entities,
+                    company_id=getattr(ctx, "company_id", None),
+                )
+                entity_count = len(record.entity_memory)
+            else:
+                return
+            if self.event_emitter and entity_count:
                 from nexus.events.models import NexusEvent, NexusEventType
 
                 await self.event_emitter.emit(
@@ -215,9 +241,10 @@ class MemoryCurator:
                         turn_index=turn_index,
                         data={
                             "scope": "cross_session",
-                            "entity_count": len(record.entity_memory),
+                            "entity_count": entity_count,
                             "updated_keys": list(update.entities.keys()),
                             "namespace": namespace,
+                            "pending": self.config.require_approval,
                         },
                     )
                 )
