@@ -66,6 +66,10 @@ from nexus.tools.toolsets import filter_schemas_by_tools
 logger = logging.getLogger(__name__)
 
 
+class RunCancelled(Exception):
+    """Raised when ``AgentRunner.cancel()`` stops a cooperative run."""
+
+
 @dataclass
 class _LoopState:
     """Holds the terminal result produced by _run_loop."""
@@ -179,6 +183,8 @@ class AgentRunner:
             self.hooks.on_turn_end = on_turn_end
         self._user_memory: dict[str, str] = {}
         self._stream_seq: int = 0
+        self._cancel_requested = False
+        self._loop_session: Optional[AgentSession] = None
 
         self.event_emitter = event_emitter or NexusEventEmitter()
         if self.config.trace_enabled and not self.event_emitter._sinks:
@@ -265,6 +271,12 @@ class AgentRunner:
 
     async def _maybe_save_session(self, session: AgentSession) -> None:
         """Save session unless the run is non-persistable."""
+        if (
+            self._loop_session is not None
+            and self._loop_session.session_id == session.session_id
+        ):
+            session.stream_seq = self._stream_seq
+            self._loop_session = session
         if not self.run_context.should_persist:
             return
         await self.session_manager.save_session(session)
@@ -305,7 +317,7 @@ class AgentRunner:
         session = await self._persist_turn(session, turn)
         session.state = dict(snapshot)
         self.run_context.state = dict(snapshot)
-        return session
+        return self._bind_loop_session(session)
 
     async def _invoke_turn_end_hook(
         self,
@@ -341,7 +353,35 @@ class AgentRunner:
         payload = dict(event.data or {})
         payload["seq"] = self._next_stream_seq()
         event.data = payload
+        if self._loop_session is not None:
+            self._loop_session.stream_seq = self._stream_seq
         return event
+
+    def _bind_loop_session(self, session: AgentSession) -> AgentSession:
+        """Keep the live session pointer in sync for stream_seq persistence."""
+        session.stream_seq = self._stream_seq
+        self._loop_session = session
+        return session
+
+    async def _persist_loop_stream_seq(self) -> None:
+        """Write numbered seq back to the session after streaming finishes."""
+        if self._loop_session is None:
+            return
+        self._loop_session.stream_seq = self._stream_seq
+        await self._maybe_save_session(self._loop_session)
+
+    def cancel(self) -> None:
+        """Request a cooperative stop of the in-flight run.
+
+        The loop checks this flag between turns, between sequential tool calls,
+        and between streamed LLM chunks. The run then ends with
+        ``status="interrupted"``.
+        """
+        self._cancel_requested = True
+
+    def _raise_if_cancelled(self) -> None:
+        if self._cancel_requested:
+            raise RunCancelled("Run cancelled.")
 
     def _stream_event(
         self,
@@ -725,7 +765,7 @@ class AgentRunner:
             if reloaded is not None:
                 session = reloaded
             self._user_memory = await self._load_user_memory()
-        return session
+        return self._bind_loop_session(session)
 
     async def _build_context_messages(
         self,
@@ -842,6 +882,7 @@ class AgentRunner:
             # live. Text that precedes a tool call is real assistant output (it is
             # persisted in the turn record either way), so it is streamed too.
             async for chunk in raw_stream:
+                self._raise_if_cancelled()
                 if chunk.reasoning:
                     reasoning_parts.append(chunk.reasoning)
                     await self.event_emitter.emit(
@@ -923,6 +964,8 @@ class AgentRunner:
 
             yield llm_response
 
+        except RunCancelled:
+            raise
         except Exception as e:
             await self.event_emitter.emit(
                 LLMCallErrorEvent(
@@ -945,7 +988,10 @@ class AgentRunner:
         max_turns: Optional[int] = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         """Shared agent loop. Yields AgentStreamEvents when stream=True."""
+        self._cancel_requested = False
         session = await self._get_or_create_session(session_id)
+        self._stream_seq = session.stream_seq or 0
+        self._bind_loop_session(session)
         # Record whether RCS was enabled for this chat and persist before any
         # append_turn reload so the flag (read by the token_usage aggregate)
         # survives in the stored chat JSON.
@@ -995,6 +1041,7 @@ class AgentRunner:
             current_user_message = user_message
 
             while run_turn_index < turn_limit:
+                self._raise_if_cancelled()
                 turn_started_at = time.time()
                 turn_user_msg = current_user_message if run_turn_index == 0 else None
                 messages = await self._build_context_messages(
@@ -1323,6 +1370,7 @@ class AgentRunner:
                             break
                 else:
                     for tc_req in tool_requests:
+                        self._raise_if_cancelled()
                         await self.event_emitter.emit(
                             ToolCallStartedEvent(
                                 session_id=session.session_id,
@@ -1496,6 +1544,15 @@ class AgentRunner:
                     content=error_msg,
                     data={"agent_id": self.config.name, "status": "error"},
                 )
+        except RunCancelled:
+            status = "interrupted"
+            logger.info("AgentRunner run cancelled")
+            if stream:
+                yield AgentStreamEvent(
+                    event_type="event",
+                    content="Run cancelled.",
+                    data={"cancelled": True, "status": "interrupted"},
+                )
         except Exception as e:
             status = "error"
             error_msg = str(e)
@@ -1521,6 +1578,7 @@ class AgentRunner:
                 )
                 if refreshed is not None:
                     session = refreshed
+                self._bind_loop_session(session)
                 final_turn_idx = max(session_turn_index - 1, 0)
                 if self.memory_curator.should_trigger(final_turn_idx, at_end=True):
                     await self.memory_curator.curate(session, final_turn_idx)
@@ -1632,6 +1690,7 @@ class AgentRunner:
         ):
             yield self._number_stream_event(event)
 
+        await self._persist_loop_stream_seq()
         assert state.result is not None
 
     async def resume(

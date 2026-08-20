@@ -13,7 +13,7 @@ remembered facts survive a restart.
 
 ## What [main.py](main.py) shows
 
-- One operator means a fixed `RunContext(user_id="me", should_persist=True)` instead
+- One operator means a fixed `RunContext(user_id="me", persistable=True)` instead
   of one derived per request. Contrast with [../saas-chat](../saas-chat).
 - `MemoryConfig(enabled=True)` carries facts across sessions, so preferences learned
   today apply tomorrow — see [memory.md](../../docs/reference/memory.md).

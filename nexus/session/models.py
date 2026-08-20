@@ -170,6 +170,10 @@ class AgentSession(BaseModel):
         description="Whether RCS was enabled for this session. Set once at run start "
         "so the persisted chat JSON records whether RCS was active."
     )
+    stream_seq: int = Field(
+        default=0,
+        description="Last emitted stream event sequence number. Default 0 so old session files load unchanged.",
+    )
 
     @computed_field
     @property

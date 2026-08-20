@@ -50,7 +50,7 @@ async def context_factory(request: Request) -> RunContext:
         tenant_id=tenant_id,
         company_id=request.headers.get("x-company-id"),
         user_id=user_id,
-        should_persist=True,
+        persistable=True,
     )
 
 

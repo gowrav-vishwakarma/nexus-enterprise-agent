@@ -1,6 +1,7 @@
 """Tests for AgentRunner loop execution with mocked LLM."""
 
 from unittest.mock import AsyncMock, patch
+import asyncio
 import pytest
 
 from nexus.config import AgentConfig, LLMProviderConfig
@@ -506,3 +507,140 @@ async def test_agent_runner_stream_mode_guard():
     with pytest.raises(ValueError, match="run\\(\\)"):
         async for _ in runner_blocking.run_stream("hello"):
             pass
+
+
+@pytest.mark.asyncio
+async def test_cancel_stops_between_turns():
+    """A tool that calls cancel() stops the loop before the next LLM turn."""
+    from nexus.llm.response import LLMResponse, ToolCallRequest, TokenUsage
+
+    captured: dict = {}
+
+    @tool(name="slow_ok")
+    async def slow_ok() -> str:
+        captured["runner"].cancel()
+        return "ok"
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key")
+    agent_config = AgentConfig(name="cancel-agent", llm=llm_config)
+    registry = ToolRegistry()
+    registry.register_tool(slow_ok)
+    runner = AgentRunner(config=agent_config, tool_registry=registry)
+    captured["runner"] = runner
+
+    forever_tool = LLMResponse(
+        content="calling",
+        tool_calls=[
+            ToolCallRequest(id="call-1", tool_name="global.slow_ok", tool_input={})
+        ],
+        usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        finish_reason="tool_calls",
+        raw_response={},
+    )
+    mock_chat = AsyncMock(return_value=forever_tool)
+
+    with patch.object(runner.llm_proxy, "chat", mock_chat):
+        result = await runner.run(user_message="go", session_id="cancel-turns")
+
+    assert result.status == "interrupted"
+    assert mock_chat.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_stops_mid_stream():
+    """Cancel during streamed tokens drops further content and marks interrupted."""
+    from nexus.llm.response import LLMStreamChunk, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key")
+    agent_config = AgentConfig(name="cancel-stream", llm=llm_config)
+    runner = AgentRunner(config=agent_config, tool_registry=ToolRegistry())
+
+    async def mock_chat_stream(*_args, **_kwargs):
+        async def _gen():
+            for i in range(8):
+                await asyncio.sleep(0.01)
+                yield LLMStreamChunk(content=f"c{i}")
+            yield LLMStreamChunk(
+                finish_reason="stop",
+                usage=TokenUsage(prompt_tokens=1, completion_tokens=8, total_tokens=9),
+            )
+
+        return _gen()
+
+    events: list[AgentStreamEvent] = []
+    with patch.object(runner.llm_proxy, "chat_stream", mock_chat_stream):
+        async for event in runner.run_stream(
+            user_message="hello", session_id="cancel-stream", stream=True
+        ):
+            events.append(event)
+            if event.event_type == "content" and sum(
+                1 for e in events if e.event_type == "content"
+            ) >= 2:
+                runner.cancel()
+
+    content = [e for e in events if e.event_type == "content"]
+    assert len(content) == 2
+    cancelled = [
+        e
+        for e in events
+        if e.event_type == "event" and (e.data or {}).get("cancelled")
+    ]
+    assert cancelled
+    assert cancelled[0].content == "Run cancelled."
+    final = next(e for e in events if e.event_type == "final_response")
+    assert final.data["status"] == "interrupted"
+    sess = await runner.session_manager.load_session("cancel-stream")
+    if sess is not None:
+        for turn in sess.turns:
+            dumped = str(turn.llm_messages)
+            assert "c0" not in dumped and "c1" not in dumped
+
+
+@pytest.mark.asyncio
+async def test_stream_seq_persists_on_session_and_continues():
+    """AgentSession.stream_seq survives a new runner so numbering continues."""
+    from nexus.llm.response import LLMStreamChunk, TokenUsage
+
+    llm_config = LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key")
+    agent_config = AgentConfig(name="seq-agent", llm=llm_config)
+    manager = SessionManager()
+
+    async def mock_chat_stream(*_args, **_kwargs):
+        from nexus.llm.response import LLMStreamChunk
+
+        async def _gen():
+            yield LLMStreamChunk(content="hello")
+            yield LLMStreamChunk(
+                finish_reason="stop",
+                usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+        return _gen()
+
+    runner1 = AgentRunner(
+        config=agent_config, tool_registry=ToolRegistry(), storage_config=manager
+    )
+    with patch.object(runner1.llm_proxy, "chat_stream", mock_chat_stream):
+        events1 = [
+            e
+            async for e in runner1.run_stream(
+                "hi", session_id="seq-sess", stream=True
+            )
+        ]
+    last_seq = max(e.data["seq"] for e in events1 if e.data and "seq" in e.data)
+    sess = await manager.load_session("seq-sess")
+    assert sess is not None
+    assert sess.stream_seq == last_seq
+
+    runner2 = AgentRunner(
+        config=agent_config, tool_registry=ToolRegistry(), storage_config=manager
+    )
+    with patch.object(runner2.llm_proxy, "chat_stream", mock_chat_stream):
+        events2 = [
+            e
+            async for e in runner2.run_stream(
+                "again", session_id="seq-sess", stream=True
+            )
+        ]
+    first_new = min(e.data["seq"] for e in events2 if e.data and "seq" in e.data)
+    assert first_new == last_seq + 1

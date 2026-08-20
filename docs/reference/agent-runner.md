@@ -79,6 +79,25 @@ The agent's tool allow-list comes from `AgentConfig.toolset` (resolved against t
 
 Returns `AsyncIterator[AgentStreamEvent]`. Event types include `content`, `tool_call`, `client_tool_call`, `elicitation`, `paused`, `final_response`, etc. See [streaming.md](streaming.md).
 
+## AgentRunner.cancel()
+
+Call `runner.cancel()` from another task (or from a tool / `on_turn_end` hook) to stop the in-flight run cooperatively.
+
+The loop checks the flag:
+
+- at the start of each turn
+- between sequential tool calls
+- between streamed LLM chunks (mid-token output is dropped; the incomplete assistant turn is not saved)
+
+The run then ends with `status="interrupted"`. Streaming clients also receive an `event` with content `"Run cancelled."` and `data={"cancelled": True, "status": "interrupted"}`. A new `run()` / `run_stream()` starts with the flag cleared.
+
+```python
+task = asyncio.create_task(runner.run("long job"))
+runner.cancel()
+result = await task
+assert result.status == "interrupted"
+```
+
 ## Turn-end hook (`on_turn_end`)
 
 Optional async callback on `AgentRunner(on_turn_end=...)`. After each completed turn (and state sync), Nexus calls your hook with a `TurnContext`. Return `None` or `TurnDecision(action="continue")` for default behaviour, `TurnDecision(action="stop")` to end the run with `status="interrupted"`, or `TurnDecision(action="inject", message="...")` to start the next loop iteration with that user message. Hook errors are logged and treated as continue. This is the deterministic alternative to LangGraph conditional edges — see [porting-from-langgraph.md](../guides/porting-from-langgraph.md).
@@ -157,7 +176,7 @@ Same `run()` / `run_stream()` signatures. Returns `AgentGroupResult`.
 | `run_context` | Yes | — | Who is calling and which chat thread |
 | `tool_registry` | No | `None` | Pre-built registry; YAML plugins still load |
 | `persistence_resolver` | No | `None` | Per-tenant storage override |
-| `event_emitter` | No | `None` | Observability (single-agent root only) |
+| `event_emitter` | No | `None` | Observability hook. Fanned out to member runners when the root is a multi-agent group |
 | `cross_session_enabled` | No | `True` | Build cross-chat memory store from manifest storage |
 
 Methods: `run(user_message)`, `run_stream(user_message, stream=None)`.

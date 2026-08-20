@@ -184,6 +184,7 @@ def _build_executor(
             storage_config=storage_config,
             run_context=run_context,
             cross_session_memory_store=cross_session_memory_store,
+            event_emitter=event_emitter,
         )
     return AgentRunner(
         config=root_config,

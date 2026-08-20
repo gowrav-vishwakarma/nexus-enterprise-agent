@@ -173,3 +173,43 @@ async def test_supervisor_auto_grants_delegate_tools_with_toolset():
 
     assert result.status == "completed"
     assert "lead" in result.member_results
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_fans_out_event_emitter():
+    from nexus.events.emitter import CustomCallbackSink, NexusEventEmitter
+    from nexus.events.models import NexusEventType
+    from nexus.llm.response import LLMResponse, TokenUsage
+
+    seen = []
+
+    async def on_event(event):
+        seen.append(event)
+
+    emitter = NexusEventEmitter()
+    emitter.register_sink(CustomCallbackSink(on_event))
+
+    group = AgentGroupConfig(
+        name="team",
+        pattern="pipeline",
+        members=[_llm_agent("a")],
+    )
+    orch = AgentOrchestrator(
+        config=group,
+        storage_config=SessionManager(),
+        run_context=RunContext(session_id="emit-1"),
+        event_emitter=emitter,
+    )
+    assert orch._members["a"].event_emitter is emitter
+
+    reply = LLMResponse(
+        content="ok",
+        tool_calls=[],
+        usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        finish_reason="stop",
+        raw_response={},
+    )
+    with patch.object(orch._members["a"].llm_proxy, "chat", AsyncMock(return_value=reply)):
+        await orch.run("hello")
+
+    assert any(e.event_type == NexusEventType.AGENT_STARTED for e in seen)

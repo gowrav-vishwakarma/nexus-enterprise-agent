@@ -74,8 +74,9 @@ async for event in runner.run_stream(user_msg, stream=True):
     render(event)
 ```
 
-Numbering is per runner instance, so persist `last_seen` alongside the session if you
-want it to survive a process restart — see [jobs.md](jobs.md#run-checkpoints).
+Numbering is stored on `AgentSession.stream_seq`, so a restarted server continues
+from the last emitted event and clients can reattach without a gap — see
+[jobs.md](jobs.md#run-checkpoints).
 
 De-duplicating on the client only helps if the client can get the missed events at
 all. On its own, a reconnect means resending the message and paying for a second

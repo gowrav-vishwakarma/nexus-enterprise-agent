@@ -69,11 +69,13 @@ def _validate_manifest(path: Path) -> None:
 
 
 async def _run_manifest(path: Path, message: str) -> None:
-    from nexus.orchestration import OrchestrationRuntime
+    from nexus.orchestration import OrchestrationManifest, OrchestrationRuntime
     from nexus.tools.context import RunContext
 
-    runtime = OrchestrationRuntime.from_manifest(path)
-    result = await runtime.run(message, run_context=RunContext())
+    manifest = OrchestrationManifest.load(path)
+    run_context = RunContext()
+    runtime = OrchestrationRuntime.from_manifest(manifest, run_context=run_context)
+    result = await runtime.run(message)
     print(result)
 
 

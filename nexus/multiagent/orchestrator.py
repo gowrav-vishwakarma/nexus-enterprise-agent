@@ -25,12 +25,15 @@ class AgentOrchestrator:
         storage_config: Optional[Any] = None,
         run_context: Optional[RunContext] = None,
         cross_session_memory_store: Optional[Any] = None,
+        *,
+        event_emitter: Optional[Any] = None,
     ):
         self.config = config
         self.tool_registry = tool_registry or ToolRegistry()
         self.storage_config = storage_config
         self.run_context = run_context or RunContext()
         self.cross_session_memory_store = cross_session_memory_store
+        self.event_emitter = event_emitter
         self._init_members()
 
     def _resolve_stream(self, stream: Optional[bool]) -> bool:
@@ -58,6 +61,7 @@ class AgentOrchestrator:
                     tool_registry=self.tool_registry,
                     storage_config=self.storage_config,
                     run_context=m_ctx,
+                    event_emitter=self.event_emitter,
                     cross_session_memory_store=self.cross_session_memory_store,
                 )
                 self._members[member.name] = runner
@@ -68,6 +72,7 @@ class AgentOrchestrator:
                     storage_config=self.storage_config,
                     run_context=m_ctx,
                     cross_session_memory_store=self.cross_session_memory_store,
+                    event_emitter=self.event_emitter,
                 )
                 self._members[member.name] = nested_orc
 

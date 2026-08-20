@@ -41,6 +41,8 @@ Example: `team_group-1_researcher`, `team_group-1_analyst`.
 
 Set `RunContext.session_id` **before** creating `AgentOrchestrator` or `OrchestrationRuntime`.
 
+Pass `event_emitter=` on `AgentOrchestrator` (or on `OrchestrationRuntime.from_manifest()`) to fan the same observability hook out to every member `AgentRunner` and nested group. You do not attach emitters to members yourself when you use the orchestrator.
+
 Member runners get `RunContext.is_subagent=True` by default (`persist_members=False`), so their chat history is not written to storage. Set `persist_members: true` on the group to keep separate member session files.
 
 Supervisor groups auto-register `supervisor.delegate_to_{member}` tools and **auto-grant** them to the lead agent even when the lead uses a narrow `toolset`. Optional YAML: `supervisor: lead_agent_name`.

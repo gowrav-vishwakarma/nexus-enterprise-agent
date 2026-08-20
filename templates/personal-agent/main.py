@@ -81,7 +81,7 @@ def build_agent() -> AgentRunner:
     )
 
     # One operator, so the scope is fixed rather than read off a request.
-    ctx = RunContext(user_id=os.getenv("AGENT_USER", "me"), should_persist=True)
+    ctx = RunContext(user_id=os.getenv("AGENT_USER", "me"), persistable=True)
     return AgentRunner(config=config, tool_registry=registry, run_context=ctx)
 
 

@@ -146,6 +146,7 @@ async def main() -> None:
         cross_session_memory_store=SQLiteCrossSessionMemoryStore(),  # optional; needed if memory.enabled
         on_turn_end=None,                                   # optional; TurnDecision hook after each turn
     )
+    # runner.cancel() cooperatively stops an in-flight run (status="interrupted")
 
     # run() — blocking execution; returns AgentRunResult.
     result = await runner.run(

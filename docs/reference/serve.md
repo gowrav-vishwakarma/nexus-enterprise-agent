@@ -31,13 +31,23 @@ Stream frames carry an `id:` line with the event's sequence number.
 does not cost a second agent run. Retention and multi-worker caveats are covered in
 [streaming.md](streaming.md#reattaching-to-a-dropped-stream).
 
+## AgentRouterConfig
+
+| Name | Required? | Default | What it does |
+|------|-----------|---------|--------------|
+| `prefix` | No | `"/v1"` | URL prefix for every route |
+| `require_auth` | No | `False` | When `True`, reject a request whose `context_factory` returned a `RunContext` with no `tenant_id`, `company_id`, or `user_id` (HTTP 401). Off by default so existing apps that use an empty context keep working. |
+
 ## CLI
 
 ```bash
+nexus run team.yaml "Hello"
 nexus serve --port 8000
 nexus manifest validate team.yaml
 nexus doctor
 nexus eval dataset.json
 ```
+
+`nexus run` loads the YAML with `OrchestrationManifest.load`, builds an `OrchestrationRuntime` with an empty `RunContext()`, and prints the result. Pass identity flags by writing a small Python runner instead — see [complete-run.annotated.py](../assets/complete-run.annotated.py).
 
 See [Dockerfile](../../Dockerfile) for container deployment.

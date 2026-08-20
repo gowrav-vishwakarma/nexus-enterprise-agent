@@ -57,7 +57,8 @@ async def main() -> None:
         # Override manifest storage per tenant/user (SaaS pattern).
         persistence_resolver=None,
         # event_emitter (optional, default: None)
-        # Hook for structured observability events (single-agent root only).
+        # Hook for structured observability events. Fanned out to member runners
+        # when the YAML root is a multi-agent group.
         event_emitter=None,
         # cross_session_enabled (optional, default: True)
         # When True, builds a cross-chat memory store from manifest storage settings.

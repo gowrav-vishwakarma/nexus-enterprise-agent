@@ -97,6 +97,7 @@ from nexus.runner.checkpoint import checkpoint_from_session
 cp = checkpoint_from_session(session, turn_index=3, stream_seq=42)
 ```
 
-`stream_seq` is the sequence number of the last emitted stream event. A client
-that reconnects can send it back so you skip events it already received — see
-[streaming.md](streaming.md).
+`stream_seq` is the sequence number of the last emitted stream event. Nexus also
+stores it on `AgentSession.stream_seq` when the session is saved, so numbering
+survives a process restart. A client that reconnects can send the last `seq` it
+saw so you skip events it already received — see [streaming.md](streaming.md).

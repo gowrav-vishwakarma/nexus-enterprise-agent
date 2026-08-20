@@ -167,3 +167,72 @@ def test_reattach_without_a_buffered_stream_returns_404(client_and_headers):
     response = client.get("/v1/sessions/never-ran/stream", headers={"x-tenant-id": "acme"})
 
     assert response.status_code == 404
+
+
+def test_require_auth_rejects_empty_identity():
+    """require_auth is a no-op unless the factory returns a nameless context."""
+    async def context_factory(_request):
+        return RunContext()
+
+    async def runner_factory(ctx: RunContext) -> AgentRunner:
+        config = AgentConfig(
+            name="serve-agent",
+            llm=LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key"),
+        )
+        runner = AgentRunner(
+            config=config,
+            tool_registry=ToolRegistry(),
+            storage_config=SessionManager(),
+            run_context=ctx,
+        )
+        runner.llm_proxy.chat = AsyncMock(return_value=_reply())
+        return runner
+
+    app = FastAPI()
+    app.include_router(
+        create_agent_router(
+            runner_factory,
+            context_factory,
+            config=AgentRouterConfig(prefix="/v1", require_auth=True),
+        )
+    )
+    client = TestClient(app)
+
+    response = client.post("/v1/chat", json={"message": "hello"})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required"
+
+
+def test_require_auth_allows_tenant_identity():
+    async def context_factory(_request):
+        return RunContext(tenant_id="acme")
+
+    async def runner_factory(ctx: RunContext) -> AgentRunner:
+        config = AgentConfig(
+            name="serve-agent",
+            llm=LLMProviderConfig(provider="openai", model="gpt-4o", api_key="sk-key"),
+        )
+        runner = AgentRunner(
+            config=config,
+            tool_registry=ToolRegistry(),
+            storage_config=SessionManager(),
+            run_context=ctx,
+        )
+        runner.llm_proxy.chat = AsyncMock(return_value=_reply())
+        return runner
+
+    app = FastAPI()
+    app.include_router(
+        create_agent_router(
+            runner_factory,
+            context_factory,
+            config=AgentRouterConfig(prefix="/v1", require_auth=True),
+        )
+    )
+    client = TestClient(app)
+
+    response = client.post("/v1/chat", json={"message": "hello"})
+
+    assert response.status_code == 200
+    assert response.json()["final_response"] == "hi"

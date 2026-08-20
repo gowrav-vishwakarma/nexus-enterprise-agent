@@ -31,7 +31,10 @@ runner = AgentRunner(config, registry, event_emitter=emitter)
 await runner.run("Hello")
 ```
 
-Pass the same `event_emitter=` to `OrchestrationRuntime.from_manifest()` for **single-agent root** runs. For multi-agent teams, attach emitters to member runners if you build them manually.
+Pass the same `event_emitter=` to `OrchestrationRuntime.from_manifest()` or to
+`AgentOrchestrator`. The orchestrator fans it out to member runners and nested
+groups. Attach emitters to members yourself only when you build those runners
+manually, without an orchestrator.
 
 ## Built-in sinks
 

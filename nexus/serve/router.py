@@ -52,6 +52,14 @@ def create_agent_router(
     router = APIRouter(prefix=cfg.prefix, tags=["nexus-agent"])
     buffer = replay_buffer if replay_buffer is not None else StreamReplayBuffer()
 
+    def _ensure_identity(ctx: RunContext) -> None:
+        """When require_auth is on, the context must name who is calling."""
+        if not cfg.require_auth:
+            return
+        if ctx.tenant_id or ctx.company_id or ctx.user_id:
+            return
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     def _sse(seq: int, payload: dict[str, Any]) -> str:
         # The id: line is what the browser sends back as Last-Event-ID.
         return f"id: {seq}\ndata: {json.dumps(payload)}\n\n"
@@ -73,6 +81,7 @@ def create_agent_router(
     @router.post("/chat")
     async def chat(body: ChatRequest, request: Request) -> dict[str, Any]:
         ctx = await context_factory(request)
+        _ensure_identity(ctx)
         if body.session_id:
             ctx.session_id = body.session_id
         runner = await runner_factory(ctx)
@@ -84,6 +93,7 @@ def create_agent_router(
     @router.post("/chat/stream")
     async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
         ctx = await context_factory(request)
+        _ensure_identity(ctx)
         if body.session_id:
             ctx.session_id = body.session_id
         runner = await runner_factory(ctx)
@@ -106,6 +116,7 @@ def create_agent_router(
         follows the run until it finishes.
         """
         ctx = await context_factory(request)
+        _ensure_identity(ctx)
         ctx.session_id = session_id
         key = _replay_key(ctx, session_id)
         if not buffer.has(key):
@@ -134,6 +145,7 @@ def create_agent_router(
         session_id: str, body: ResumeRequest, request: Request
     ) -> dict[str, Any]:
         ctx = await context_factory(request)
+        _ensure_identity(ctx)
         ctx.session_id = session_id
         runner = await runner_factory(ctx)
         result = await runner.resume(session_id, body.results)
@@ -142,6 +154,7 @@ def create_agent_router(
     @router.get("/sessions/{session_id}")
     async def get_session(session_id: str, request: Request) -> dict[str, Any]:
         ctx = await context_factory(request)
+        _ensure_identity(ctx)
         runner = await runner_factory(ctx)
         session = await runner.session_manager.load_session(
             session_id,
