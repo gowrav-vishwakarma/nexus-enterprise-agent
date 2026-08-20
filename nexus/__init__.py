@@ -77,7 +77,7 @@ from nexus.session.manager import SessionManager
 from nexus.runner.checkpoint import RunCheckpoint, checkpoint_from_session
 from nexus.runner.structured_output import validate_structured_result
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 __all__ = [
     # Version
