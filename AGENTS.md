@@ -58,3 +58,5 @@ Keep [README.md](README.md) short (~1000 lines). It is a quick start only. Move 
 ## Do not edit
 
 - `NEXUS_AGENT_PRD.md` — design spec; link to it, do not rewrite unless asked.
+
+This has a porting of js package for same framework at /home/gowrav/Development/nexus-enterprise-agent-js so if you change anything here, make sure to update js package as well. and that should be backward compatible.

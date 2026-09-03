@@ -16,6 +16,22 @@ def test_is_path_within_directory():
     assert is_path_within_directory(resource, skill_dir)
 
 
+def test_is_path_within_directory_rejects_outside():
+    skill_dir = FIXTURES / "code-review"
+    assert not is_path_within_directory(FIXTURES / "other" / "file.md", skill_dir)
+
+
+def test_is_path_within_directory_rejects_sibling_prefix():
+    skill_dir = FIXTURES / "code-review"
+    sibling = skill_dir.parent / "code-review-evil" / "steal.md"
+    assert not is_path_within_directory(sibling, skill_dir)
+
+
+def test_is_path_within_directory_accepts_directory_itself():
+    skill_dir = FIXTURES / "code-review"
+    assert is_path_within_directory(skill_dir, skill_dir)
+
+
 def test_path_traversal_blocked(tmp_path: Path):
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
