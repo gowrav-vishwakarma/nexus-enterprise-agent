@@ -70,6 +70,11 @@ so numbers like `3.5` are never split. The LLM stream keeps being read while ear
 sentences are synthesized, and each sentence's audio is sent as soon as it is ready,
 even while a tool call is running.
 
+Each sentence goes through the TTS adapter's `stream_synthesize`, so a sentence can
+arrive as several `audio_out` events: one per audio chunk. With `provider: nexus_server`
+the server streams chunks as the engine makes them, and a barge-in stops the engine
+mid-sentence. Adapters without streaming send one chunk per sentence, as before.
+
 ### gRPC media servers (canonical)
 
 STT, TTS, and VAD can run as separate **gRPC media servers** managed by

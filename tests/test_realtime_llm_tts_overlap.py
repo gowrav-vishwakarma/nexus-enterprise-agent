@@ -109,6 +109,32 @@ async def test_closing_stream_cancels_inflight_tts():
 
 
 @pytest.mark.asyncio
+async def test_streamed_tts_chunks_are_sent_as_they_arrive():
+    p = _pipeline(None)
+    t0 = time.monotonic()
+
+    async def chunked_stream(text_stream, **kw):
+        sentence = "".join([t async for t in text_stream])
+        for i in range(3):
+            await asyncio.sleep(0.2)
+            yield f"{sentence}#{i}".encode()
+
+    p.tts.stream_synthesize = chunked_stream
+
+    async def fake_llm(text, session_id=None, stream=True):
+        yield _content("Hello there.")
+        yield _final("Hello there.")
+
+    p.runner.run_stream = fake_llm
+    audio = []
+    async for ev in p._agent_stream("hi", None, True):
+        if ev.event_type == "audio_out":
+            audio.append((ev.audio, time.monotonic() - t0))
+    assert [a for a, _ in audio] == [b"Hello there.#0", b"Hello there.#1", b"Hello there.#2"]
+    assert audio[0][1] < 0.4  # first chunk sent before the whole sentence is synthesized
+
+
+@pytest.mark.asyncio
 async def test_tts_error_still_raised():
     async def broken_tts(text, **kw):
         raise RuntimeError("tts down")
