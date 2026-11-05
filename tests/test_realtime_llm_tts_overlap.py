@@ -129,9 +129,10 @@ async def test_streamed_tts_chunks_are_sent_as_they_arrive():
     audio = []
     async for ev in p._agent_stream("hi", None, True):
         if ev.event_type == "audio_out":
-            audio.append((ev.audio, time.monotonic() - t0))
-    assert [a for a, _ in audio] == [b"Hello there.#0", b"Hello there.#1", b"Hello there.#2"]
+            audio.append((ev.audio, time.monotonic() - t0, (ev.data or {}).get("text")))
+    assert [a for a, _, _ in audio] == [b"Hello there.#0", b"Hello there.#1", b"Hello there.#2"]
     assert audio[0][1] < 0.4  # first chunk sent before the whole sentence is synthesized
+    assert [text for _, _, text in audio] == ["Hello there.", None, None]
 
 
 @pytest.mark.asyncio

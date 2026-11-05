@@ -74,6 +74,27 @@ async def test_proactive_direct_tts_no_llm():
     audio = [e for e in events if e.event_type == "audio_out"]
     assert len(audio) == 1
     assert b"Namaste!" in audio[0].audio
+    assert audio[0].data["text"] == "Namaste!"
+
+
+@pytest.mark.asyncio
+async def test_speak_text_streams_chunks_and_labels_only_the_first():
+    pipeline = CascadedVoicePipeline(_rt_config(), storage_config=SessionManager(), tts=MockTTS())
+
+    async def chunked(text_stream, **kw):
+        line = "".join([part async for part in text_stream])
+        for i in range(3):
+            yield f"{line}#{i}".encode()
+
+    pipeline.tts.stream_synthesize = chunked
+    events = [ev async for ev in pipeline.speak_text("Namaste!")]
+    audio = [e for e in events if e.event_type == "audio_out"]
+    assert [e.audio for e in audio] == [b"Namaste!#0", b"Namaste!#1", b"Namaste!#2"]
+    assert audio[0].data["text"] == "Namaste!"
+    assert "text" not in audio[1].data
+    assert "text" not in audio[2].data
+    assert events[0].event_type == "content"
+    assert events[-1].event_type == "final_response"
 
 
 @pytest.mark.asyncio
