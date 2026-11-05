@@ -197,7 +197,10 @@ class CascadedVoicePipeline:
         *,
         reply_lang: str | None = None,
     ) -> AsyncIterator[RealtimeStreamEvent]:
-        """Synthesize fixed text to audio without calling the LLM."""
+        """Synthesize fixed text to audio without calling the LLM.
+
+        Audio is streamed in chunks. The line's text is on the first chunk.
+        """
         stripped = text.strip()
         if not stripped:
             return
@@ -208,11 +211,22 @@ class CascadedVoicePipeline:
             kwargs["language"] = tts_lang
         if tts_voice:
             kwargs["voice"] = tts_voice
-        audio = await self.tts.synthesize(stripped, **kwargs)
+
+        async def _line():
+            yield stripped
+
         yield RealtimeStreamEvent.text_delta(stripped)
-        yield RealtimeStreamEvent.audio_chunk(
-            audio, text=stripped, language=tts_lang, voice=tts_voice
-        )
+        first = True
+        async for audio in self.tts.stream_synthesize(_line(), **kwargs):
+            if first:
+                yield RealtimeStreamEvent.audio_chunk(
+                    audio, text=stripped, language=tts_lang, voice=tts_voice
+                )
+                first = False
+            else:
+                yield RealtimeStreamEvent.audio_chunk(
+                    audio, language=tts_lang, voice=tts_voice
+                )
         yield RealtimeStreamEvent(
             event_type="final_response",
             content=stripped,
@@ -312,13 +326,18 @@ class CascadedVoicePipeline:
             tts_voice = tts_voice_for(tts_lang, self.config.effective_tts().voice)
         final_text: Optional[str] = None
 
-        async def _synthesize(sentence: str) -> bytes:
+        def _synthesize(sentence: str) -> AsyncIterator[bytes]:
+            """Audio for one sentence, in chunks as the TTS adapter produces them."""
             kwargs: dict[str, Any] = {}
             if tts_lang:
                 kwargs["language"] = tts_lang
             if tts_voice:
                 kwargs["voice"] = tts_voice
-            return await self.tts.synthesize(sentence, **kwargs)
+
+            async def _text():
+                yield sentence
+
+            return self.tts.stream_synthesize(_text(), **kwargs)
 
         # Two tasks feed `out` in send order: _read_llm puts text/tool events and queues
         # sentences; _tts_worker synthesizes queued sentences one at a time and puts
@@ -390,12 +409,21 @@ class CascadedVoicePipeline:
 
         async def _tts_worker() -> None:
             while (sentence := await sentences.get()) is not None:
-                audio = await _synthesize(sentence)
-                out.put_nowait(
-                    RealtimeStreamEvent.audio_chunk(
-                        audio, text=sentence, language=tts_lang, voice=tts_voice
-                    )
-                )
+                first = True
+                async for audio in _synthesize(sentence):
+                    if first:
+                        out.put_nowait(
+                            RealtimeStreamEvent.audio_chunk(
+                                audio, text=sentence, language=tts_lang, voice=tts_voice
+                            )
+                        )
+                        first = False
+                    else:
+                        out.put_nowait(
+                            RealtimeStreamEvent.audio_chunk(
+                                audio, language=tts_lang, voice=tts_voice
+                            )
+                        )
 
         async def _run(producer) -> None:
             try:
