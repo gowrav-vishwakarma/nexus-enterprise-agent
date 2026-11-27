@@ -315,10 +315,13 @@ See [examples/orchestration/ivr_support.yaml](../../examples/orchestration/ivr_s
 
 ## Full-duplex (barge-in)
 
-With `duplex: full`, `process_audio_stream` listens while it speaks. A new
-`SPEECH_START` while the agent is talking emits a `barge_in` event and cancels the
-in-flight response. Streaming STT (e.g. Deepgram) enables earlier ("preemptive")
-generation.
+With `duplex: full`, `process_audio_stream` listens while it speaks. When the user
+talks over the agent for `vad.barge_in_min_speech_ms`, the pipeline emits a `barge_in`
+event and cancels the in-flight response. Only speech counts toward that time: a
+cough or click followed by silence does not interrupt. This needs a VAD that reports
+`speech_ms` (the energy VAD does); with a VAD that doesn't (for example `GrpcVAD`),
+every frame after the speech start counts. Streaming STT (e.g. Deepgram) enables
+earlier ("preemptive") generation.
 
 ## Voice teams (multi-agent voice)
 

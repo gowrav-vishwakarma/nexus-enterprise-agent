@@ -234,7 +234,7 @@ updates with it only when `voice` is unset.
 | `threshold` | No | `0.02` | How loud counts as speech (0–1 RMS for energy VAD). **Higher** = ignore more noise / harder to barge-in |
 | `silence_ms` | No | `700` | Quiet time after speech before the **assistant** takes its turn |
 | `min_speech_ms` | No | `200` | Ignore speech blips shorter than this (ms) |
-| `barge_in_min_speech_ms` | No | `250` | While TTS is playing, user must keep talking this long (ms) before interrupt (`0` = first frame) |
+| `barge_in_min_speech_ms` | No | `250` | While TTS is playing, user must keep talking this long (ms) before interrupt (`0` = first frame). Counts speech only, not pauses, with VADs that report `speech_ms` (see [realtime-agents.md](realtime-agents.md#full-duplex-barge-in)) |
 
 ```yaml
 # Built-in energy VAD (no gRPC server) — typical Voice Lab defaults:

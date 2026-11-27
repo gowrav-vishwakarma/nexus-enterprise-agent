@@ -678,8 +678,13 @@ class CascadedVoicePipeline:
                     utterance = self.vad.take_utterance()
                     state["response_task"] = asyncio.create_task(run_response(utterance))
                 elif state["barge_pending"] and responding:
-                    # Still in speech (VAD returns None between start and end).
-                    state["barge_ms"] += frame_ms
+                    # Still in the segment (VAD returns None between start and end).
+                    # Count only speech when the VAD reports it, not trailing silence.
+                    speech_ms = self.vad.speech_ms
+                    if speech_ms is None:
+                        state["barge_ms"] += frame_ms
+                    else:
+                        state["barge_ms"] = speech_ms
                     await _maybe_fire_barge_in()
                 elif not responding:
                     state["barge_pending"] = False

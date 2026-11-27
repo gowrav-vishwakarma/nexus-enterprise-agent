@@ -38,7 +38,7 @@ class EnergyVAD(VADAdapter):
         self._in_speech = False
         self._buffer = bytearray()
         self._silence_ms = 0.0
-        self._speech_ms = 0.0
+        self.speech_ms = 0.0
         self._sample_rate = self.config.sample_rate
 
     def _frame_ms(self, frame: bytes) -> float:
@@ -55,11 +55,11 @@ class EnergyVAD(VADAdapter):
             self._silence_ms = 0.0
             if not self._in_speech:
                 self._in_speech = True
-                self._speech_ms = 0.0
+                self.speech_ms = 0.0
                 self._buffer = bytearray()
                 self._buffer.extend(frame)
                 return VADEvent.SPEECH_START
-            self._speech_ms += frame_ms
+            self.speech_ms += frame_ms
             self._buffer.extend(frame)
             return None
 
@@ -68,12 +68,13 @@ class EnergyVAD(VADAdapter):
             self._buffer.extend(frame)
             self._silence_ms += frame_ms
             if self._silence_ms >= self.config.silence_ms:
-                if self._speech_ms >= self.config.min_speech_ms:
+                if self.speech_ms >= self.config.min_speech_ms:
                     self._in_speech = False
                     return VADEvent.SPEECH_END
                 # Too short to count as a turn; discard.
                 self._in_speech = False
                 self._buffer = bytearray()
+                self.speech_ms = 0.0
         return None
 
     def take_utterance(self) -> bytes:
@@ -87,4 +88,4 @@ class EnergyVAD(VADAdapter):
         self._in_speech = False
         self._buffer = bytearray()
         self._silence_ms = 0.0
-        self._speech_ms = 0.0
+        self.speech_ms = 0.0

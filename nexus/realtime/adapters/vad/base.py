@@ -24,6 +24,11 @@ class VADAdapter(abc.ABC):
     On ``SPEECH_END`` the accumulated utterance is available via ``take_utterance``.
     """
 
+    #: Milliseconds of speech (not silence) in the current segment, reset when a
+    #: segment starts or is dropped as too short. ``None`` means this VAD can't tell;
+    #: the full-duplex pipeline then counts every frame toward barge-in.
+    speech_ms: float | None = None
+
     def __init__(self, config: VADConfig) -> None:
         self.config = config
 

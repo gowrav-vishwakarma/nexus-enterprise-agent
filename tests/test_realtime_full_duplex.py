@@ -109,3 +109,58 @@ async def test_half_duplex_no_barge_in():
     types = [e.event_type for e in events]
     assert "barge_in" not in types
     assert "final_response" in types
+
+
+def _barge_pipeline():
+    agent = AgentConfig(
+        name="va",
+        llm=LLMProviderConfig(provider="openai", model="gpt-4o-mini", api_key="sk-test"),
+    )
+    vad_cfg = VADConfig(
+        silence_ms=500, min_speech_ms=40, barge_in_min_speech_ms=250, sample_rate=16000
+    )
+    cfg = RealtimeAgentConfig(name="va", duplex="full", agent=agent, vad=vad_cfg)
+    pipeline = CascadedVoicePipeline(
+        cfg, storage_config=SessionManager(), tts=MockTTS(), vad=EnergyVAD(vad_cfg)
+    )
+
+    async def long_reply(utterance, session_id=None, mime_type="audio/wav"):
+        yield RealtimeStreamEvent.text_delta("talking")
+        await asyncio.sleep(1.0)
+
+    pipeline.process_utterance = long_reply  # type: ignore[assignment]
+    return pipeline
+
+
+async def _barged(interrupt_frames: int) -> bool:
+    """Utterance, then `interrupt_frames` x 20 ms of loud audio + silence during the reply."""
+    loud = (12000).to_bytes(2, "little", signed=True) * 320
+    silence = (0).to_bytes(2, "little", signed=True) * 320
+
+    async def mic():
+        for frame in [loud] * 10 + [silence] * 30:
+            yield frame
+        await asyncio.sleep(0.05)  # the reply is now running
+        for frame in [loud] * interrupt_frames + [silence] * 30:
+            yield frame
+            await asyncio.sleep(0)
+
+    stream = _barge_pipeline().process_audio_stream(mic(), session_id="barge")
+    try:
+        async for ev in stream:
+            if ev.event_type == "barge_in":
+                return True
+        return False
+    finally:
+        await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_short_noise_does_not_barge_in():
+    # 60 ms burst then silence: the silence must not count toward 250 ms of speech.
+    assert not await _barged(3)
+
+
+@pytest.mark.asyncio
+async def test_real_speech_barges_in():
+    assert await _barged(20)  # 400 ms of speech
