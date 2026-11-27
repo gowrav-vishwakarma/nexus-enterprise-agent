@@ -30,10 +30,16 @@ class FasterWhisperLIDEngine(LIDEngine):
         model_size: str = "small",
         device: str = "cpu",
         compute_type: str | None = None,
+        num_workers: int | str = 1,
     ) -> None:
         self._model_size = model_size
         self._device = device
         self._compute_type = compute_type or ("float16" if device == "cuda" else "int8")
+        # CTranslate2 runs calls from different threads in parallel when it has more
+        # than one worker, so the server can drop its per-engine lock (base._call_lock).
+        # With one worker, calls stay serialized as before. A str comes from ${ENV:...}.
+        self._num_workers = max(1, int(num_workers))
+        self.thread_safe = self._num_workers > 1
         self._model = None
 
     @property
@@ -45,10 +51,16 @@ class FasterWhisperLIDEngine(LIDEngine):
             return
         from faster_whisper import WhisperModel
 
-        logger.info("Loading Whisper LID %s on %s", self._model_size, self._device)
+        logger.info(
+            "Loading Whisper LID %s on %s (%d workers)",
+            self._model_size, self._device, self._num_workers,
+        )
         start = time.monotonic()
         self._model = WhisperModel(
-            self._model_size, device=self._device, compute_type=self._compute_type
+            self._model_size,
+            device=self._device,
+            compute_type=self._compute_type,
+            num_workers=self._num_workers,
         )
         logger.info("LID ready in %.1fs", time.monotonic() - start)
 

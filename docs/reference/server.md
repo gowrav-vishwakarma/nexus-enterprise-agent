@@ -160,7 +160,7 @@ servers:
 | `conformer` | `stt` | `model_id`, `decoding` | Hugging Face model id; `rnnt` or `ctc` decoding |
 | `parler` | `tts` | `model_id`, `dtype` | Model id; compute dtype (`bfloat16`, …) |
 | `silero` | `vad` | `threshold`, `min_silence_ms` | Speech probability threshold; trailing silence (ms) |
-| `faster_whisper` | `lid` | `model_size` | Whisper size for language ID (`tiny`, `small`, `medium`, …) |
+| `faster_whisper` | `lid` | `model_size`, `num_workers` | Whisper size for language ID (`tiny`, `small`, `medium`, …); calls run in parallel when `num_workers` > 1 (default 1: one at a time; more workers use more memory) |
 | `mock` | any | — | No GPU; returns deterministic test output |
 
 ---
