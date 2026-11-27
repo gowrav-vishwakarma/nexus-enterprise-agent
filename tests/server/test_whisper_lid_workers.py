@@ -46,3 +46,13 @@ async def test_workers_detect_for_callers_in_parallel():
     engine = FasterWhisperLIDEngine(num_workers="4")  # as it arrives from ${ENV:...}
     assert await _two_callers_at_once(engine) < 0.5
     assert engine._model.kwargs["num_workers"] == 4
+
+
+@pytest.mark.parametrize(
+    ("num_workers", "workers", "thread_safe"),
+    [(1, 1, False), (0, 1, False), ("-3", 1, False), (2, 2, True), ("8", 8, True)],
+)
+def test_num_workers_is_clamped_and_sets_thread_safe(num_workers, workers, thread_safe):
+    engine = FasterWhisperLIDEngine(num_workers=num_workers)
+    assert engine._num_workers == workers
+    assert engine.thread_safe is thread_safe

@@ -8,6 +8,7 @@ from nexus.config.agent import AgentConfig
 from nexus.config.llm import LLMProviderConfig
 from nexus.realtime.adapters.stt.mock import MockSTT
 from nexus.realtime.adapters.tts.mock import MockTTS
+from nexus.realtime.adapters.vad.base import VADAdapter, VADEvent
 from nexus.realtime.adapters.vad.energy import EnergyVAD
 from nexus.realtime.config import RealtimeAgentConfig, VADConfig
 from nexus.realtime.events import RealtimeStreamEvent
@@ -111,7 +112,7 @@ async def test_half_duplex_no_barge_in():
     assert "final_response" in types
 
 
-def _barge_pipeline():
+def _barge_pipeline(vad_cls=EnergyVAD):
     agent = AgentConfig(
         name="va",
         llm=LLMProviderConfig(provider="openai", model="gpt-4o-mini", api_key="sk-test"),
@@ -121,7 +122,7 @@ def _barge_pipeline():
     )
     cfg = RealtimeAgentConfig(name="va", duplex="full", agent=agent, vad=vad_cfg)
     pipeline = CascadedVoicePipeline(
-        cfg, storage_config=SessionManager(), tts=MockTTS(), vad=EnergyVAD(vad_cfg)
+        cfg, storage_config=SessionManager(), tts=MockTTS(), vad=vad_cls(vad_cfg)
     )
 
     async def long_reply(utterance, session_id=None, mime_type="audio/wav"):
@@ -132,7 +133,7 @@ def _barge_pipeline():
     return pipeline
 
 
-async def _barged(interrupt_frames: int) -> bool:
+async def _barged(interrupt_frames: int, vad_cls=EnergyVAD) -> bool:
     """Utterance, then `interrupt_frames` x 20 ms of loud audio + silence during the reply."""
     loud = (12000).to_bytes(2, "little", signed=True) * 320
     silence = (0).to_bytes(2, "little", signed=True) * 320
@@ -145,7 +146,7 @@ async def _barged(interrupt_frames: int) -> bool:
             yield frame
             await asyncio.sleep(0)
 
-    stream = _barge_pipeline().process_audio_stream(mic(), session_id="barge")
+    stream = _barge_pipeline(vad_cls).process_audio_stream(mic(), session_id="barge")
     try:
         async for ev in stream:
             if ev.event_type == "barge_in":
@@ -164,3 +165,47 @@ async def test_short_noise_does_not_barge_in():
 @pytest.mark.asyncio
 async def test_real_speech_barges_in():
     assert await _barged(20)  # 400 ms of speech
+
+
+class _NoSpeechMsVAD(VADAdapter):
+    """A VAD that doesn't report ``speech_ms`` (like ``GrpcVAD`` or a third-party VAD)."""
+
+    def __init__(self, config: VADConfig) -> None:
+        super().__init__(config)
+        self._inner = EnergyVAD(config)
+
+    def process_frame(self, frame: bytes):
+        return self._inner.process_frame(frame)
+
+    def take_utterance(self) -> bytes:
+        return self._inner.take_utterance()
+
+    def reset(self) -> None:
+        self._inner.reset()
+
+
+@pytest.mark.asyncio
+async def test_vad_without_speech_ms_keeps_counting_every_frame():
+    # Backward compatibility: without speech_ms the pipeline counts frames as before,
+    # so the same 60 ms burst + silence still barges in once 250 ms have passed.
+    assert _NoSpeechMsVAD(VADConfig()).speech_ms is None
+    assert await _barged(3, _NoSpeechMsVAD)
+
+
+def test_energy_vad_speech_ms_counts_speech_and_resets_on_drop():
+    vad = EnergyVAD(VADConfig(silence_ms=100, min_speech_ms=200, sample_rate=16000))
+    loud = (12000).to_bytes(2, "little", signed=True) * 320  # 20 ms
+    silence = (0).to_bytes(2, "little", signed=True) * 320
+
+    assert vad.process_frame(loud) == VADEvent.SPEECH_START
+    assert vad.speech_ms == 0.0  # the start frame itself is not counted
+    for _ in range(3):
+        vad.process_frame(loud)
+    assert vad.speech_ms == pytest.approx(60.0)
+    for _ in range(3):
+        vad.process_frame(silence)
+    assert vad.speech_ms == pytest.approx(60.0)  # silence does not count
+    # 60 ms < min_speech_ms: the burst is dropped and speech_ms resets.
+    for _ in range(3):
+        assert vad.process_frame(silence) is None
+    assert vad.speech_ms == 0.0
